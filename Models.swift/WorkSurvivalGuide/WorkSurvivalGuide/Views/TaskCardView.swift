@@ -21,6 +21,11 @@ struct TaskCardView: View {
         guard let url = task.coverImageUrl, !url.isEmpty else { return false }
         return true
     }
+
+    /// archived 但封面图还没来：图片正在后台生成中
+    private var isGeneratingImages: Bool {
+        task.status == .archived && task.coverImageUrl == nil
+    }
     
     /// 7-12 步：有 summary 且在分析中、无封面图时，显示滚动 summary
     private var hasScrollingSummary: Bool {
@@ -152,7 +157,7 @@ struct TaskCardView: View {
         case .analyzing:
             return Color(hex: "#4A3F00").opacity(0.9)
         case .archived:
-            return Color(white: 0.15)
+            return isGeneratingImages ? Color(hex: "#4A3F00").opacity(0.9) : Color(white: 0.15)
         case .burned, .failed:
             return Color(hex: "#4A1C1C").opacity(0.9)
         }
@@ -170,7 +175,13 @@ struct TaskCardView: View {
                     .font(.system(size: 36))
                     .foregroundColor(Color(hex: "#FBBF24"))
             case .archived:
-                QuotationMarkView(size: 32, color: Color.white.opacity(0.6), opacity: 0.7, isGrayStyle: true)
+                if isGeneratingImages {
+                    ProgressView()
+                        .tint(Color(hex: "#FBBF24"))
+                        .scaleEffect(1.5)
+                } else {
+                    QuotationMarkView(size: 32, color: Color.white.opacity(0.6), opacity: 0.7, isGrayStyle: true)
+                }
             case .burned, .failed:
                 Image(systemName: "exclamationmark.triangle.fill")
                     .font(.system(size: 36))
@@ -186,7 +197,7 @@ struct TaskCardView: View {
         case .analyzing:
             return task.progressDescription ?? "Analyzing"
         case .archived:
-            return ""
+            return isGeneratingImages ? "Generating image" : ""
         case .burned:
             return "Burned"
         case .failed:
@@ -201,7 +212,7 @@ struct TaskCardView: View {
         case .analyzing:
             return Color(hex: "#FBBF24")
         case .archived:
-            return Color.white.opacity(0.6)
+            return isGeneratingImages ? Color(hex: "#FBBF24") : Color.white.opacity(0.6)
         case .burned, .failed:
             return Color(hex: "#F87171")
         }

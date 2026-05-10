@@ -103,6 +103,7 @@ class TaskListViewModel: ObservableObject {
                     Task {
                         try? await Task.sleep(nanoseconds: 500_000_000) // 延迟0.5秒
                         self.loadMissingSummaries()
+                        self.resumePendingImagePolling()
                     }
                 }
             } catch {
@@ -329,6 +330,57 @@ class TaskListViewModel: ObservableObject {
         }
     }
     
+    // 为 archived 状态、近期（15分钟内）且无封面图的任务重新轮询图片状态
+    // 场景：用户在图片生成中途杀掉 app 或退后台，重新唤起后补全封面图并解锁卡片点击
+    private func resumePendingImagePolling() {
+        let now = Date()
+        let pending = tasks.filter {
+            $0.status == .archived
+            && $0.coverImageUrl == nil
+            && now.timeIntervalSince($0.startTime) < 15 * 60
+        }
+        guard !pending.isEmpty else { return }
+        print("🖼️ [TaskListViewModel] 发现 \(pending.count) 个任务图片未完成，恢复轮询...")
+
+        Task {
+            guard let authToken = KeychainManager.shared.getToken(), !authToken.isEmpty else { return }
+            for task in pending {
+                Task {
+                    let maxAttempts = 60  // 最多等 3 分钟（60 × 3s）
+                    for _ in 0..<maxAttempts {
+                        try? await Task.sleep(nanoseconds: 3_000_000_000)
+                        guard let imgStatus = try? await self.networkManager.getImageStatus(
+                            sessionId: task.id, authToken: authToken
+                        ) else { continue }
+                        guard imgStatus.status == "completed", imgStatus.totalScenes > 0 else { continue }
+
+                        // 图片就绪，从 scene_images 取第一个有效 URL 作为封面
+                        let baseURL = self.networkManager.getBaseURL()
+                        let coverUrl = imgStatus.images.compactMap {
+                            $0.getAccessibleImageURL(baseURL: baseURL)
+                        }.first
+
+                        await MainActor.run {
+                            guard let idx = self.tasks.firstIndex(where: { $0.id == task.id }) else { return }
+                            let cur = self.tasks[idx]
+                            self.tasks[idx] = TaskItem(
+                                id: cur.id, title: cur.title, startTime: cur.startTime,
+                                endTime: cur.endTime, duration: cur.duration, tags: cur.tags,
+                                status: cur.status, emotionScore: cur.emotionScore,
+                                speakerCount: cur.speakerCount, summary: cur.summary,
+                                cardTitle: cur.cardTitle, coverImageUrl: coverUrl
+                            )
+                            self.saveToCache()
+                            print("✅ [TaskListViewModel] 任务 \(task.id) 封面已补全，卡片解锁")
+                        }
+                        return
+                    }
+                    print("⏰ [TaskListViewModel] 任务 \(task.id) 图片等待超时，放弃轮询")
+                }
+            }
+        }
+    }
+
     // 为archived状态且没有summary的任务异步加载summary
     private func loadMissingSummaries() {
         // 找出所有archived状态且没有summary的任务

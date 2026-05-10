@@ -58,28 +58,6 @@ struct StrategyAnalysisView_Updated: View {
                 
                 Spacer()
                 
-                // 用新风格重新生成（始终可见，便于更换图片风格）
-                if strategyAnalysis != nil {
-                    Button(action: { loadStrategyAnalysis(forceRegenerate: true) }) {
-                        HStack(spacing: 4) {
-                            Image(systemName: "photo.artframe")
-                            Text("Regenerate with new style")
-                                .font(.system(size: 11, weight: .medium))
-                        }
-                        .foregroundColor(AppColors.headerText.opacity(0.8))
-                    }
-                    .buttonStyle(.plain)
-                }
-                
-                // 命中的技能（右对齐）
-                if let analysis = strategyAnalysis, let skills = analysis.appliedSkills, !skills.isEmpty {
-                    Text(formatAppliedSkills(skills))
-                        .font(.system(size: 12, weight: .medium, design: .rounded))
-                        .foregroundColor(AppColors.headerText.opacity(0.7))
-                        .multilineTextAlignment(.trailing)
-                        .lineLimit(2)
-                        .frame(maxWidth: 120, alignment: .trailing)
-                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.leading, 19.99) // 根据Figma: padding left 19.99px
@@ -140,7 +118,7 @@ struct StrategyAnalysisView_Updated: View {
                                 cognitiveTriad: nil, insight: nil, strategy: nil, crisisAlert: nil
                             )
                             return skills.map { s in
-                                let name = (["workplace_jungle": "职场丛林", "family_relationship": "家庭关系", "emotion_recognition": "情绪识别", "depression_prevention": "防抑郁监控"])[s.skillId] ?? s.skillId
+                                let name = (["workplace_jungle": "Workplace Jungle", "family_relationship": "Family Relationship", "emotion_recognition": "Emotion Recognition", "depression_prevention": "Mood Monitor"])[s.skillId] ?? s.skillId
                                 let ct = s.skillId == "emotion_recognition" ? "emotion" : "strategy"
                                 return SkillCard(skillId: s.skillId, skillName: name, contentType: ct, content: content)
                             }
@@ -383,8 +361,8 @@ struct StrategyAnalysisView_Updated: View {
             "family_relationship": "家庭关系",
             "education_communication": "教育沟通",
             "brainstorm": "头脑风暴",
-            "emotion_recognition": "情绪识别",
-            "depression_prevention": "防抑郁监控"
+            "emotion_recognition": "Emotion Recognition",
+            "depression_prevention": "Mood Monitor"
         ]
         return skills.map { names[$0.skillId] ?? $0.skillId }.joined(separator: "、")
     }

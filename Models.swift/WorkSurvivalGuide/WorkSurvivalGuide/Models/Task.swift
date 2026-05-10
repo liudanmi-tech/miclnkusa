@@ -159,6 +159,15 @@ struct TaskItem: Codable, Identifiable {
         return result.isEmpty ? title : result
     }
     
+    /// 卡片是否可点击进入详情：
+    /// - status 必须为 archived
+    /// - 有封面图，或者录音超过 15 分钟（图片生成永久失败兜底，允许进入）
+    var isReadyToView: Bool {
+        guard status == .archived else { return false }
+        if coverImageUrl != nil { return true }
+        return Date().timeIntervalSince(startTime) > 15 * 60
+    }
+
     /// 卡片蒙层显示的总结，控制在 3 行以内（约 75 字）
     var overlaySummary: String {
         guard let summary = summary, !summary.isEmpty else {

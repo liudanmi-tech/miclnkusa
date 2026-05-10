@@ -50,11 +50,11 @@ class AppConfig {
         #endif
     }
     
-    /// 北京只读节点（录音列表、详情、策略、技能、档案、图片等读接口）
-    var readBaseURL: String { "http://123.57.29.111:8000/api/v1" }
-    
-    /// 新加坡主节点（上传、登录、写操作、策略生成）
-    var writeBaseURL: String { "http://47.79.254.213/api/v1" }
+    /// GCP 美区节点（读写统一）
+    var readBaseURL: String { "http://34.74.150.225/api/v1" }
+
+    /// GCP 美区节点（读写统一）
+    var writeBaseURL: String { "http://34.74.150.225/api/v1" }
     
     private init() {}
     

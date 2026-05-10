@@ -240,13 +240,13 @@ struct TaskCardRow: View {
 
     var body: some View {
         // 始终使用 NavigationLink 保持视图结构稳定，避免 status 变化时 SwiftUI 重建视图树
-        // archived 时启用跳转；recording/analyzing 时禁用（不可点击）
+        // isReadyToView = archived + (有封面图 或 超过15分钟)
         NavigationLink(destination: TaskDetailView(task: task)) {
             TaskCardView(task: task)
-                .opacity(task.status == .archived ? 1.0 : 0.9)
+                .opacity(task.isReadyToView ? 1.0 : 0.9)
         }
         .buttonStyle(PlainButtonStyle())
-        .disabled(task.status != .archived)
+        .disabled(!task.isReadyToView)
     }
 }
 
