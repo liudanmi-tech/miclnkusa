@@ -154,26 +154,10 @@ struct TaskDetailView: View {
             .onDisappear {
                 audioPlayer.stop()
             }
-
-            // ── 举报菜单 overlay（从底部滑入，非弹窗）──────────────────────
-            if showReportMenu {
-                Color.black.opacity(0.45)
-                    .ignoresSafeArea()
-                    .onTapGesture { withAnimation(.easeInOut(duration: 0.25)) { showReportMenu = false } }
-                    .transition(.opacity)
-
-                ReportMenuPanel(
-                    sessionId: task.id,
-                    submitted: $reportSubmitted,
-                    onDismiss: { withAnimation(.easeInOut(duration: 0.25)) { showReportMenu = false } }
-                )
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-                .transition(.move(edge: .bottom))
-            }
             .onAppear {
                 // 优先使用缓存
                 let cacheManager = DetailCacheManager.shared
-                
+
                 // 先检查缓存
                 if let cachedDetail = cacheManager.getCachedDetail(sessionId: task.id) {
                     print("✅ [TaskDetailView] 使用缓存的详情数据: \(task.id)")
@@ -184,7 +168,7 @@ struct TaskDetailView: View {
                     generateMoodStats()
                     return
                 }
-                
+
                 // 如果任务已完成，立即显示基本信息，然后后台加载完整详情
                 if task.status == .archived {
                     // 先使用任务基本信息创建临时详情，让用户立即看到内容
@@ -200,6 +184,22 @@ struct TaskDetailView: View {
                     // 如果已有详情，生成情绪统计数据
                     generateMoodStats()
                 }
+            }
+
+            // ── 举报菜单 overlay（从底部滑入，非弹窗）──────────────────────
+            if showReportMenu {
+                Color.black.opacity(0.45)
+                    .ignoresSafeArea()
+                    .onTapGesture { withAnimation(.easeInOut(duration: 0.25)) { showReportMenu = false } }
+                    .transition(.opacity)
+
+                ReportMenuPanel(
+                    sessionId: task.id,
+                    submitted: $reportSubmitted,
+                    onDismiss: { withAnimation(.easeInOut(duration: 0.25)) { showReportMenu = false } }
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                .transition(.move(edge: .bottom))
             }
         }
     }
