@@ -1,0 +1,335 @@
+ 1，写专属模版，2.纯文字展示  3.场景图位置和当前版本的UI保持一致。                                                                                                                                                   
+                                                                    
+⏺ 全部确认，下面是完整技术方案文档。                                                                                                                                                                                  
+                                                                                                                                                                                                                    
+  ---                                                                                                                                                                                                                 
+  技能匹配改造技术方案（最终版）
+                                                                                                                                                                                                                      
+  一、统一 Skill ID 规范                                                                                                                                                                                            
+
+  系统子技能（43个）: 原样保留 iOS ID
+    salary_negotiation | difficult_boss | partner_communication | ...
+
+  用户自创技能: 加前缀
+    custom_{uuid}
+    例: custom_2af85b59-0646-4037-a0ac-156910c3f87b
+
+  始终运行: 特殊保留
+    emotion_recognition（不在用户选择范围，永远执行）
+
+  内部执行模板 ID（不暴露给用户）:
+    _exec_work_life | _exec_campus_life | _exec_relationships |
+    _exec_family | _exec_personal_growth | _exec_life_skills |
+    _exec_custom
+
+  ---
+  二、服务器端改动详细
+
+  2.1 新建 skills/ios_skill_registry.py（约 300 行）
+
+  职责：iOS 子技能 ID → 服务器执行配置的唯一映射表
+
+  # 结构示意（非可执行代码）
+
+  SYSTEM_SKILLS = {
+      # work_life 分类
+      "salary_negotiation": {
+          "category": "work_life",
+          "name": "Salary Negotiation",
+          "exec_template": "_exec_work_life",
+          "exec_context": {
+              "focus": "compensation negotiation",
+              "sub_skill_cn": "薪资谈判",
+          }
+      },
+      "difficult_boss": {
+          "category": "work_life",
+          "exec_template": "_exec_work_life",
+          "exec_context": {"focus": "managing up / difficult superior"}
+      },
+      # ... 所有 43 个
+
+      # campus_life 分类（新模板）
+      "professor_email": {
+          "category": "campus_life",
+          "exec_template": "_exec_campus_life",
+          "exec_context": {"focus": "academic communication"}
+      },
+
+      # life_skills 分类（新模板）
+      "landlord_comm": {
+          "category": "life_skills",
+          "exec_template": "_exec_life_skills",
+          "exec_context": {"focus": "tenant-landlord negotiation"}
+      },
+  }
+
+  # 自创技能执行：动态构建，不在此表
+  CUSTOM_EXEC_TEMPLATE = "_exec_custom"
+
+  # iOS 分类 → 服务器场景标签（用于分类提示词注入）
+  CATEGORY_SCENE_MAP = {
+      "work_life":       "workplace / professional setting",
+      "campus_life":     "academic / student life",
+      "relationships":   "romantic or platonic relationship",
+      "family":          "family dynamics",
+      "personal_growth": "personal development / mental wellbeing",
+      "life_skills":     "practical daily life situation",
+  }
+
+  ---
+  2.2 修改 skills/router.py（约 300 行改动）
+
+  改动点 1：classify_scene_ios()（替换现有 classify_scene()）
+
+  输入: transcript
+
+  LLM 调用，单次返回:
+  {
+    "primary_category": "work_life",           // iOS 6大分类之一
+    "scene_description": "用户在向领导汇报季度目标，遇到质疑",
+    "secondary_categories": ["personal_growth"],  // 可选
+    "skill_scores": {                           // 用户选中技能的相关度打分
+      "salary_negotiation": 91,
+      "difficult_boss": 88,
+      "work_boundaries": 72,
+      "partner_communication": 12,
+      ...   // 只对 user selected skills 打分
+    }
+  }
+
+  改动点 2：match_skills() 手动/自动双分支
+
+  手动模式（user_skill_preferences 有 __manual_mode__=True）:
+    ├─ 取全部 selected=True 的技能 ID
+    ├─ 跳过场景分类 & LLM 打分
+    ├─ 全部构造为 pending SkillCard（分组按 category）
+    └─ 每组第一个立即执行
+
+  自动模式:
+    ├─ classify_scene_ios(transcript) → primary_category + skill_scores
+    ├─ 取用户 selected=True 的技能 ID
+    ├─ 按 category 分组
+    ├─ 每组按 skill_scores 降序排列，取 TOP 5
+    ├─ 每组第一个标记 execute_now=True，其余 pending
+    └─ 不在 skill_scores 里的 custom 技能：单独 LLM 调用打分
+
+  改动点 3：build_skill_card() 输出新格式
+
+  # 新 SkillCard 结构
+  {
+      "skill_id":    "salary_negotiation",   # 统一 iOS ID 或 custom_uuid
+      "skill_name":  "Salary Negotiation",
+      "content_type": "pending" | "strategy" | "emotion",
+      "category":    "work_life",             # iOS 分类 ID
+      "score":       91,                      # LLM 打分，手动模式 = None
+      "is_custom":   False,
+      "exec_template": "_exec_work_life",    # 执行时查表
+      "exec_context":  {...},                # 注入 prompt 的上下文
+      "content":     None                    # pending 时为 None
+  }
+
+  ---
+  2.3 修改 main.py（约 200 行改动）
+
+  改动点 1：_generate_strategies_core() 执行策略
+
+  旧逻辑: 全局第1个技能立即执行，其余全部 pending
+
+  新逻辑:
+    ├─ emotion_recognition → 立即执行（置顶）
+    ├─ 按 category 分组遍历
+    │    每组 score 最高的（第1个）→ 立即执行
+    │    每组第2-5个 → pending
+    └─ custom 技能 → 同组内参与排序
+
+  改动点 2：自创技能执行分支
+
+  if skill_id.startswith("custom_"):
+      uuid = skill_id.replace("custom_", "")
+      custom = await db.get(CustomSkill, uuid)
+      prompt = build_custom_prompt(
+          transcript=transcript,
+          scene_input=custom.scene_input,
+          purpose_input=custom.purpose_input,
+          markdown_content=custom.markdown_content,
+      )
+      result = await call_gemini_text(prompt)
+      return {"content_type": "strategy", "text": result}
+
+  ---
+  2.4 新增流式执行端点（约 150 行）
+
+  POST /api/v1/sessions/{session_id}/skills/{skill_id}/execute/stream
+
+  Response: text/event-stream (SSE)
+
+  data: {"chunk": "你在这段对话中..."}
+  data: {"chunk": "当对方提出质疑时，"}
+  data: {"chunk": "你采用了回避策略..."}
+  data: {"done": true}
+
+  内部逻辑：
+  - 查 skill_cards 找对应 pending 卡片
+  - 根据 exec_template 查 ios_skill_registry 获取 prompt 配置
+  - 调用 Gemini 流式 API（stream=True）
+  - 逐 chunk 写入 SSE
+  - 完成后更新 DB 中该卡片状态为 completed（存纯文字内容）
+
+  ---
+  2.5 新增两套 Prompt 模板
+
+  _exec_campus_life：校园/学术场景分析
+
+  关注维度：权力不对等沟通（学生-教授/导师）、
+  同学关系处理、学业压力下的对话策略、
+  边界设定（求延期/要求改分）等
+
+  _exec_life_skills：生活实用场景分析
+
+  关注维度：服务投诉、租房谈判、医疗沟通、
+  邻里冲突、消费者权益等非职场非家庭日常场景
+
+  ---
+  2.6 修改 database/models.py（约 20 行）
+
+  class UserSkillPreference(Base):
+      # 新增字段
+      skill_type = Column(String(20), default="system")
+      # "system" | "custom"，方便快速区分
+
+  ---
+  三、iOS 端改动详细
+
+  3.1 Models/VisualData.swift（约 50 行）
+
+  struct SkillCard: Codable, Identifiable {
+      // 现有字段保留
+      let skillId: String
+      let skillName: String
+      let contentType: String
+      // 新增字段
+      let category: String?      // "work_life" | "campus_life" | ...
+      let score: Int?            // 0-100，手动模式为 nil
+      let isCustom: Bool?        // custom_ 前缀时为 true
+      let streamText: String?    // 流式完成后存储的纯文字内容
+  }
+
+  ---
+  3.2 Services/NetworkManager.swift（约 120 行）
+
+  新增 executeSkillStream()：
+
+  func executeSkillStream(
+      sessionId: String,
+      skillId: String,
+      onChunk: @escaping (String) -> Void,
+      onComplete: @escaping (Error?) -> Void
+  ) {
+      // URLSession dataTask with SSE
+      // 解析 "data: {...}" 逐行追加 chunk
+      // done=true 时调用 onComplete
+  }
+
+  修改 updateSkillPreferences()：
+  - custom 技能 ID 传入时确保携带 custom_ 前缀
+
+  ---
+  3.3 Views/StrategyAnalysisView_Updated.swift（约 500 行改动）
+
+  新增/重构的子组件：
+
+  ① EmotionSummaryBanner（新增，约 80 行）
+  位置：场景图片下方、技能列表上方（与当前 UI 顺序一致）
+  内容：emotion_recognition 的固定展示
+    [😰 焦虑]  叹气 x3  哈哈 x1  字数 450
+  始终可见，不折叠
+
+  ② SceneSkillGroupView（新增，约 120 行）
+  每个 iOS category 一个 section
+  section header：图标 + 分类名 + (已执行数/总数)
+  内部：SkillAccordionRow 列表
+
+  ③ SkillAccordionRow（重构 pending card，约 150 行）
+  折叠态：
+    [▶] Salary Negotiation    92  [点击分析]
+
+  展开中（流式）：
+    [▼] Salary Negotiation    92
+        你在这段对话中...（逐字追加）
+        ▌（光标闪烁）
+
+  展开完成：
+    [▼] Salary Negotiation    92
+        你在这段对话中，面对领导的质疑...
+        建议：下次可先用数据锚定...
+
+  ④ 场景图片位置：保持不动（顶部），仅在 emotion banner 下方插入技能 section 列表
+
+  ---
+  3.4 Views/SkillsView.swift（约 20 行）
+
+  - 自创技能同步到 user_skill_preferences 时，skill_id 存为 custom_{uuid}
+  - updateSkillPreferences() 调用时包含 custom skills
+
+  ---
+  四、完整改动汇总
+
+  服务器
+
+  ┌──────────────────────────────┬──────┬──────────┐
+  │             文件             │ 类型 │   行数   │
+  ├──────────────────────────────┼──────┼──────────┤
+  │ skills/ios_skill_registry.py │ 新建 │ ~300     │
+  ├──────────────────────────────┼──────┼──────────┤
+  │ skills/router.py             │ 大改 │ ~300     │
+  ├──────────────────────────────┼──────┼──────────┤
+  │ main.py                      │ 中改 │ ~200     │
+  ├──────────────────────────────┼──────┼──────────┤
+  │ 流式端点（main.py 或新文件） │ 新增 │ ~150     │
+  ├──────────────────────────────┼──────┼──────────┤
+  │ 新 prompt 模板×2             │ 新增 │ ~100     │
+  ├──────────────────────────────┼──────┼──────────┤
+  │ database/models.py           │ 小改 │ ~20      │
+  ├──────────────────────────────┼──────┼──────────┤
+  │ 服务器合计                   │      │ ~1070 行 │
+  └──────────────────────────────┴──────┴──────────┘
+
+  iOS
+
+  ┌────────────────────────────────────┬──────┬─────────┐
+  │                文件                │ 类型 │  行数   │
+  ├────────────────────────────────────┼──────┼─────────┤
+  │ VisualData.swift                   │ 小改 │ ~50     │
+  ├────────────────────────────────────┼──────┼─────────┤
+  │ NetworkManager.swift               │ 中改 │ ~120    │
+  ├────────────────────────────────────┼──────┼─────────┤
+  │ StrategyAnalysisView_Updated.swift │ 大改 │ ~500    │
+  ├────────────────────────────────────┼──────┼─────────┤
+  │ SkillsView.swift                   │ 小改 │ ~20     │
+  ├────────────────────────────────────┼──────┼─────────┤
+  │ iOS 合计                           │      │ ~690 行 │
+  └────────────────────────────────────┴──────┴─────────┘
+
+  总计约 1760 行，预估 7-8 天
+
+  ---
+  五、实施顺序
+
+  Day 1   ios_skill_registry.py（43个映射 + 6个模板配置）
+  Day 2   router.py 重构（场景分类 + 手动/自动双分支 + 打分逻辑）
+  Day 3   main.py 执行策略改造 + 自创技能执行分支
+  Day 4   流式 SSE 端点 + 两个新 prompt 模板
+  Day 5-6 iOS 视图重构（EmotionBanner + SceneSkillGroupView + AccordionRow）
+  Day 7   iOS NetworkManager SSE + VisualData model 更新
+  Day 8   联调 + 边界测试（无偏好/全手动/custom技能/campus+life_skills场景）
+
+  ---
+  确认无误的话，从 Day 1（ios_skill_registry.py） 开始写代码？
+
+✻ Cogitated for 1m 38s
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯  
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ accept edits on (shift+tab to cycle)                                                                                             ✗ Auto-update failed · Try claude doctor or npm i -g @anthropic-ai/claude-code
