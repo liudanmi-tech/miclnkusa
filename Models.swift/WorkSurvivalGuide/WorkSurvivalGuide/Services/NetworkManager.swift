@@ -1768,6 +1768,28 @@ class NetworkManager {
         }
     }
 
+    // MARK: - Content Moderation
+
+    /// 提交举报（fire-and-forget，失败静默处理）
+    func submitReport(sessionId: String, reason: String) async {
+        guard hasValidToken() else { return }
+        let token = getAuthToken()
+        let body: [String: Any] = [
+            "session_id": sessionId,
+            "reason": reason,
+            "platform": "ios"
+        ]
+        guard let data = try? JSONSerialization.data(withJSONObject: body),
+              let url = URL(string: "\(baseURLForWrite)/report") else { return }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.httpBody = data
+        request.timeoutInterval = 10
+        _ = try? await URLSession.shared.data(for: request)
+    }
+
     // MARK: - Subscription
 
     func getSubscriptionStatus() async throws -> SubscriptionStatusResponse {

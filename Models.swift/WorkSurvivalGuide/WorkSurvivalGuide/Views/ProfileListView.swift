@@ -14,6 +14,7 @@ struct ProfileListView: View {
     @State private var selectedProfile: Profile?
     @State private var showSettingsSheet = false
     @State private var showSubscription = false
+    @AppStorage("contentFilterEnabled") private var contentFilterEnabled = true
     
     var body: some View {
         ZStack {
@@ -123,6 +124,29 @@ struct ProfileListView: View {
                 }
                 .padding(.horizontal, 24)
                 .disabled(subscriptionManager.isPro)
+
+                // Content Filter 开关
+                HStack(spacing: 10) {
+                    Image(systemName: "shield.lefthalf.filled")
+                        .foregroundColor(Color(hex: "#34D399"))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Content Filter")
+                            .font(AppFonts.cardTitle)
+                            .foregroundColor(AppColors.primaryText)
+                        Text("Block sensitive AI-generated content")
+                            .font(.system(size: 11, design: .rounded))
+                            .foregroundColor(AppColors.secondaryText)
+                    }
+                    Spacer()
+                    Toggle("", isOn: $contentFilterEnabled)
+                        .labelsHidden()
+                        .tint(Color(hex: "#34D399"))
+                }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 12)
+                .background(Color.white.opacity(0.05))
+                .cornerRadius(10)
+                .padding(.horizontal, 24)
 
                 // Privacy Policy
                 Link(destination: URL(string: "https://docs.qq.com/doc/DZHBUZm9CT1haTndI")!) {

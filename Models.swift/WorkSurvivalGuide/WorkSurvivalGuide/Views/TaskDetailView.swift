@@ -14,6 +14,8 @@ struct TaskDetailView: View {
     @State private var errorMessage: String?
     @State private var moodStats: [MoodStat] = []
     @StateObject private var audioPlayer = SessionAudioPlayerService()
+    @State private var showReportMenu = false
+    @State private var reportSubmitted = false
 
     var body: some View {
         GeometryReader { geometry in
@@ -29,7 +31,7 @@ struct TaskDetailView: View {
                 ScrollView(.vertical, showsIndicators: false) {
                     VStack(spacing: 23.99) { // 卡片间距改为 23.99px
                     // Header（返回按钮 + 标题）
-                    DetailHeaderView()
+                    DetailHeaderView(onReportTap: { withAnimation(.easeInOut(duration: 0.25)) { showReportMenu = true } })
                         .padding(.top, 10) // 进一步减少顶部间距，让内容更靠近顶部
 
                     // 顶部日期/时间信息栏
@@ -151,6 +153,22 @@ struct TaskDetailView: View {
             .navigationBarHidden(true)
             .onDisappear {
                 audioPlayer.stop()
+            }
+
+            // ── 举报菜单 overlay（从底部滑入，非弹窗）──────────────────────
+            if showReportMenu {
+                Color.black.opacity(0.45)
+                    .ignoresSafeArea()
+                    .onTapGesture { withAnimation(.easeInOut(duration: 0.25)) { showReportMenu = false } }
+                    .transition(.opacity)
+
+                ReportMenuPanel(
+                    sessionId: task.id,
+                    submitted: $reportSubmitted,
+                    onDismiss: { withAnimation(.easeInOut(duration: 0.25)) { showReportMenu = false } }
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                .transition(.move(edge: .bottom))
             }
             .onAppear {
                 // 优先使用缓存
@@ -406,7 +424,8 @@ struct TaskDetailView: View {
 // Detail Header视图
 struct DetailHeaderView: View {
     @Environment(\.presentationMode) var presentationMode
-    
+    var onReportTap: (() -> Void)? = nil
+
     var body: some View {
         HStack {
             Button(action: {
@@ -417,25 +436,35 @@ struct DetailHeaderView: View {
                         .fill(Color.white.opacity(0.5))
                         .frame(width: 39.98, height: 39.98)
                         .shadow(color: Color.black.opacity(0.1), radius: 1, x: 0, y: 1)
-                    
+
                     Image(systemName: "chevron.left")
                         .font(.system(size: 16, weight: .bold))
                         .foregroundColor(AppColors.headerText)
                 }
             }
-            
+
             Spacer()
-            
+
             Text("Details")
                 .font(.system(size: 20, weight: .black, design: .rounded))
                 .foregroundColor(AppColors.headerText)
-                .tracking(0.5) // letterSpacing 2.5% of 20px = 0.5pt
-            
+                .tracking(0.5)
+
             Spacer()
-            
-            // 占位，保持居中
-            Color.clear
-                .frame(width: 39.98, height: 39.98)
+
+            // 三点菜单按钮
+            Button(action: { onReportTap?() }) {
+                ZStack {
+                    Circle()
+                        .fill(Color.white.opacity(0.5))
+                        .frame(width: 39.98, height: 39.98)
+                        .shadow(color: Color.black.opacity(0.1), radius: 1, x: 0, y: 1)
+
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundColor(AppColors.headerText)
+                }
+            }
         }
         .padding(.horizontal, 15.99)
         .padding(.vertical, 0)
@@ -534,5 +563,117 @@ struct DateTimeInfoBar: View {
         formatter.locale = Locale(identifier: "en_US")
         formatter.dateFormat = "yyyy/MM/dd EEEE"
         return formatter.string(from: task.startTime)
+    }
+}
+
+// MARK: - Report Menu Panel（从底部滑入，非弹窗）
+struct ReportMenuPanel: View {
+    let sessionId: String
+    @Binding var submitted: Bool
+    let onDismiss: () -> Void
+
+    private let reasons = [
+        ("flag.fill",           "Inappropriate Content"),
+        ("c.circle",            "Copyright Issue"),
+        ("exclamationmark.shield.fill", "Violence or Hate Speech"),
+        ("envelope.badge.fill", "Spam or Misleading"),
+        ("questionmark.circle", "Other"),
+    ]
+    @State private var isSubmitting = false
+    @State private var showConfirmation = false
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // 拖拽指示条
+            Capsule()
+                .fill(Color.white.opacity(0.25))
+                .frame(width: 36, height: 4)
+                .padding(.top, 12)
+                .padding(.bottom, 16)
+
+            if showConfirmation {
+                VStack(spacing: 12) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 40))
+                        .foregroundColor(Color(hex: "#34D399"))
+                    Text("Report Submitted")
+                        .font(.system(size: 17, weight: .semibold, design: .rounded))
+                        .foregroundColor(AppColors.primaryText)
+                    Text("Thank you. We'll review this content.")
+                        .font(.system(size: 14, design: .rounded))
+                        .foregroundColor(AppColors.secondaryText)
+                        .multilineTextAlignment(.center)
+                }
+                .padding(.horizontal, 24)
+                .padding(.bottom, 32)
+                .padding(.top, 8)
+            } else {
+                Text("Report Content")
+                    .font(.system(size: 17, weight: .bold, design: .rounded))
+                    .foregroundColor(AppColors.primaryText)
+                    .padding(.bottom, 8)
+
+                Text("Select a reason for your report")
+                    .font(.system(size: 13, design: .rounded))
+                    .foregroundColor(AppColors.secondaryText)
+                    .padding(.bottom, 16)
+
+                VStack(spacing: 1) {
+                    ForEach(reasons, id: \.1) { icon, label in
+                        Button {
+                            submitReport(reason: label)
+                        } label: {
+                            HStack(spacing: 14) {
+                                Image(systemName: icon)
+                                    .font(.system(size: 15))
+                                    .foregroundColor(AppColors.secondaryText)
+                                    .frame(width: 20)
+                                Text(label)
+                                    .font(.system(size: 15, design: .rounded))
+                                    .foregroundColor(AppColors.primaryText)
+                                Spacer()
+                                if isSubmitting {
+                                    ProgressView()
+                                        .scaleEffect(0.7)
+                                }
+                            }
+                            .padding(.horizontal, 20)
+                            .padding(.vertical, 14)
+                            .background(Color.white.opacity(0.05))
+                        }
+                        .disabled(isSubmitting)
+                    }
+                }
+                .cornerRadius(12)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 12)
+
+                Button("Cancel") { onDismiss() }
+                    .font(.system(size: 15, weight: .semibold, design: .rounded))
+                    .foregroundColor(AppColors.secondaryText)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .background(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .fill(AppColors.background)
+                .ignoresSafeArea(edges: .bottom)
+        )
+        .padding(.bottom, 0)
+    }
+
+    private func submitReport(reason: String) {
+        isSubmitting = true
+        Task {
+            await NetworkManager.shared.submitReport(sessionId: sessionId, reason: reason)
+            await MainActor.run {
+                isSubmitting = false
+                submitted = true
+                withAnimation { showConfirmation = true }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2) { onDismiss() }
+            }
+        }
     }
 }
