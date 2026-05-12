@@ -57,7 +57,7 @@ struct TextInputView: View {
                     // 字数统计
                     HStack {
                         Spacer()
-                        Text("\(viewModel.inputText.count) 字")
+                        Text("\(viewModel.inputText.count) chars")
                             .font(AppFonts.time)
                             .foregroundColor(AppColors.secondaryText)
                             .padding(.trailing, 24)

@@ -764,9 +764,9 @@ struct EmotionCardView: View {
                 .font(.system(size: 18, weight: .bold, design: .rounded))
                 .foregroundColor(AppColors.headerText)
             HStack(spacing: 24) {
-                StatItem(label: "叹气", value: "\(content.sighCount)")
-                StatItem(label: "哈哈", value: "\(content.hahaCount)")
-                StatItem(label: "字数", value: "\(content.charCount)")
+                StatItem(label: "Sighs", value: "\(content.sighCount)")
+                StatItem(label: "Laughs", value: "\(content.hahaCount)")
+                StatItem(label: "Words", value: "\(content.charCount)")
             }
         }
         .frame(maxWidth: .infinity)

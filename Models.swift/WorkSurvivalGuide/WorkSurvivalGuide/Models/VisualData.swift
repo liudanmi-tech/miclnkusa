@@ -224,7 +224,7 @@ struct SkillCardContent: Codable {
         return SkillCardEmotionContent(
             sighCount: sighCount ?? 0,
             hahaCount: hahaCount ?? 0,
-            moodState: moodState ?? "平常心",
+            moodState: moodState ?? "Calm",
             moodEmoji: moodEmoji ?? "😐",
             charCount: charCount ?? 0
         )
