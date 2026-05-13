@@ -391,15 +391,18 @@ def _patch_gemini_file_upload():
 _patch_gemini_file_upload()
 
 # 配置阿里云 OSS
-OSS_ACCESS_KEY_ID = os.getenv("OSS_ACCESS_KEY_ID")
-OSS_ACCESS_KEY_SECRET = os.getenv("OSS_ACCESS_KEY_SECRET")
-OSS_ENDPOINT = os.getenv("OSS_ENDPOINT")
-OSS_BUCKET_NAME = os.getenv("OSS_BUCKET_NAME")
-OSS_CDN_DOMAIN = os.getenv("OSS_CDN_DOMAIN")  # 可选，如果使用 CDN
+# 优先读 R2 配置，兼容旧 OSS_* 变量
+OSS_ACCESS_KEY_ID = os.getenv("R2_ACCESS_KEY_ID") or os.getenv("OSS_ACCESS_KEY_ID")
+OSS_ACCESS_KEY_SECRET = os.getenv("R2_SECRET_ACCESS_KEY") or os.getenv("OSS_ACCESS_KEY_SECRET")
+OSS_ENDPOINT = os.getenv("R2_ENDPOINT_URL") or os.getenv("OSS_ENDPOINT")
+OSS_BUCKET_NAME = os.getenv("R2_BUCKET_NAME") or os.getenv("OSS_BUCKET_NAME")
+# CDN：R2_PUBLIC_URL 格式为 https://xxx.r2.dev，去掉协议头供拼接使用
+_r2_public = os.getenv("R2_PUBLIC_URL", "")
+OSS_CDN_DOMAIN = _r2_public.removeprefix("https://").removeprefix("http://") if _r2_public else os.getenv("OSS_CDN_DOMAIN")
 USE_OSS = os.getenv("USE_OSS", "true").lower() == "true"  # 是否启用 OSS
 
-# 初始化 OSS 客户端
-oss_bucket = None
+# 初始化 OSS 客户端（Cloudflare R2，兼容 S3 API）
+s3_client = None
 if USE_OSS:
     if not all([OSS_ACCESS_KEY_ID, OSS_ACCESS_KEY_SECRET, OSS_ENDPOINT, OSS_BUCKET_NAME]):
         logger.warning("⚠️ OSS 配置不完整，将禁用 OSS 功能")
@@ -407,16 +410,23 @@ if USE_OSS:
         USE_OSS = False
     else:
         try:
-            import oss2
-            auth = oss2.Auth(OSS_ACCESS_KEY_ID, OSS_ACCESS_KEY_SECRET)
-            oss_bucket = oss2.Bucket(auth, OSS_ENDPOINT, OSS_BUCKET_NAME)
+            import boto3
+            from botocore.config import Config
+            _endpoint_url = OSS_ENDPOINT if OSS_ENDPOINT.startswith(('http://', 'https://')) else f'https://{OSS_ENDPOINT}'
+            s3_client = boto3.client(
+                's3',
+                endpoint_url=_endpoint_url,
+                aws_access_key_id=OSS_ACCESS_KEY_ID,
+                aws_secret_access_key=OSS_ACCESS_KEY_SECRET,
+                config=Config(signature_version='s3v4'),
+            )
             logger.info(f"✅ OSS 配置成功")
             logger.info(f"OSS Endpoint: {OSS_ENDPOINT}")
             logger.info(f"OSS Bucket: {OSS_BUCKET_NAME}")
             if OSS_CDN_DOMAIN:
                 logger.info(f"OSS CDN Domain: {OSS_CDN_DOMAIN}")
         except ImportError:
-            logger.error("❌ 未安装 oss2 库，请运行: pip install oss2")
+            logger.error("❌ 未安装 boto3 库，请运行: pip install boto3")
             USE_OSS = False
         except Exception as e:
             logger.error(f"❌ OSS 初始化失败: {e}")
@@ -509,7 +519,7 @@ def upload_image_to_oss(image_bytes: bytes, user_id: str, session_id: str, image
     Returns:
         OSS URL，如果失败返回 None
     """
-    if not USE_OSS or oss_bucket is None:
+    if not USE_OSS or s3_client is None:
         logger.warning("OSS 未启用或未初始化，无法上传图片")
         return None
     
@@ -521,26 +531,19 @@ def upload_image_to_oss(image_bytes: bytes, user_id: str, session_id: str, image
         logger.info(f"图片大小: {len(image_bytes)} 字节")
         
         start_time = time.time()
-        headers = {'Content-Type': content_type}
-        oss_bucket.put_object(oss_key, image_bytes, headers=headers)
+        s3_client.put_object(Bucket=OSS_BUCKET_NAME, Key=oss_key, Body=image_bytes, ContentType=content_type)
         upload_time = time.time() - start_time
-        
+
         logger.info(f"✅ 图片上传成功，耗时: {upload_time:.2f} 秒")
-        
+
         # 构建图片 URL
         if OSS_CDN_DOMAIN:
             # 使用 CDN 域名
             image_url = f"https://{OSS_CDN_DOMAIN}/{oss_key}"
         else:
-            # 使用 OSS 直接访问 URL
-            # 格式: https://{bucket}.{endpoint}/{key}
-            if OSS_ENDPOINT.startswith('http://'):
-                endpoint = OSS_ENDPOINT.replace('http://', 'https://')
-            elif OSS_ENDPOINT.startswith('https://'):
-                endpoint = OSS_ENDPOINT
-            else:
-                endpoint = f"https://{OSS_BUCKET_NAME}.{OSS_ENDPOINT}"
-            image_url = f"{endpoint}/{oss_key}"
+            # 使用 OSS 直接访问 URL（virtual-hosted 格式：{bucket}.{endpoint}）
+            _ep = OSS_ENDPOINT.removeprefix('https://').removeprefix('http://')
+            image_url = f"https://{OSS_BUCKET_NAME}.{_ep}/{oss_key}"
         
         logger.info(f"✅ 图片 URL: {image_url}")
         return image_url
@@ -575,23 +578,18 @@ def persist_original_audio(
     if not file_ext.startswith("."):
         file_ext = "." + file_ext
 
-    if USE_OSS_FOR_ORIGINAL_AUDIO and USE_OSS and oss_bucket is not None:
+    if USE_OSS_FOR_ORIGINAL_AUDIO and USE_OSS and s3_client is not None:
         try:
             oss_key = f"sessions/{user_id}/{session_id}/original{file_ext}"
             with open(temp_file_path, "rb") as f:
                 content = f.read()
-            headers = {"Content-Type": "audio/mp4" if file_ext == ".m4a" else "application/octet-stream"}
-            oss_bucket.put_object(oss_key, content, headers=headers)
+            content_type = "audio/mp4" if file_ext == ".m4a" else "application/octet-stream"
+            s3_client.put_object(Bucket=OSS_BUCKET_NAME, Key=oss_key, Body=content, ContentType=content_type)
             if OSS_CDN_DOMAIN:
                 audio_url = f"https://{OSS_CDN_DOMAIN}/{oss_key}"
             else:
-                if OSS_ENDPOINT.startswith("http://"):
-                    endpoint = OSS_ENDPOINT.replace("http://", "https://")
-                elif OSS_ENDPOINT.startswith("https://"):
-                    endpoint = OSS_ENDPOINT
-                else:
-                    endpoint = f"https://{OSS_BUCKET_NAME}.{OSS_ENDPOINT}"
-                audio_url = f"{endpoint}/{oss_key}"
+                _ep = OSS_ENDPOINT.removeprefix('https://').removeprefix('http://')
+                audio_url = f"https://{OSS_BUCKET_NAME}.{_ep}/{oss_key}"
             logger.info(f"[分析-{session_id}] 原音频已上传 OSS: {audio_url[:80]}...")
         except Exception as e:
             logger.warning(f"原音频上传 OSS 失败，将使用本地路径: {e}")
@@ -718,7 +716,7 @@ def _fetch_profile_image_from_oss(user_id: str, profile_id: str, photo_url: Opti
     photo_url 不为空时，从 URL 中提取真实的 OSS session_id（上传时用随机 UUID 命名），
     否则回退到 profile_{profile_id} 路径。
     """
-    if not USE_OSS or oss_bucket is None:
+    if not USE_OSS or s3_client is None:
         return None
     try:
         # 从 photo_url 提取真实 OSS session_id（上传路径含随机 UUID，如 profile_f264cb3d...）
@@ -730,8 +728,8 @@ def _fetch_profile_image_from_oss(user_id: str, profile_id: str, photo_url: Opti
         if not oss_session_id:
             oss_session_id = f"profile_{profile_id}"
         oss_key = f"images/{user_id}/{oss_session_id}/0.png"
-        obj = oss_bucket.get_object(oss_key)
-        data = obj.read()
+        obj = s3_client.get_object(Bucket=OSS_BUCKET_NAME, Key=oss_key)
+        data = obj['Body'].read()
         if len(data) > 7 * 1024 * 1024:
             logger.warning(f"[档案照片] OSS 图片过大 ({len(data)} bytes)，跳过")
             return None
@@ -844,7 +842,7 @@ async def _get_profile_reference_images(session_id: str, user_id: str, db: Async
             photo_url = getattr(p, "photo_url", None)
             fetched = None
             # 优先从 OSS 直接读取（不依赖 JWT）
-            if USE_OSS and oss_bucket:
+            if USE_OSS and s3_client:
                 fetched = _fetch_profile_image_from_oss(user_id, pid)
             if not fetched and photo_url and photo_url.startswith(("http://", "https://")):
                 # 若为直连 OSS CDN 等公开 URL，可尝试 HTTP 拉取（/api/v1/images 需 JWT 会失败）
@@ -854,7 +852,7 @@ async def _get_profile_reference_images(session_id: str, user_id: str, db: Async
                 result.append(fetched)
                 logger.info(f"[档案照片] 已加载参考图: profile_id={pid} name={getattr(p,'name','')} rel={getattr(p,'relationship_type','')}")
             else:
-                logger.warning(f"[档案照片] 无法加载 profile_id={pid} photo_url={bool(photo_url)} OSS={USE_OSS and oss_bucket is not None}")
+                logger.warning(f"[档案照片] 无法加载 profile_id={pid} photo_url={bool(photo_url)} OSS={USE_OSS and s3_client is not None}")
     except Exception as e:
         logger.warning(f"[档案照片] 获取参考图失败: {e}", exc_info=True)
     return result
@@ -973,19 +971,44 @@ def generate_image_from_prompt(
                 break
         prompt_body = re.sub(r"^宫崎骏[^。]*。?", "", prompt_body).strip()
 
-    # 构建人物参考图说明
-    # 固定位置规则：左侧始终为用户，右侧始终为对方，图片生成必须遵守动作主体
-    position_rule = "【重要】画面中左侧人物固定为用户，右侧人物固定为对方。必须严格按照场景描述中的动作主体来绘制：谁做动作就画谁在做，不能颠倒角色。\n\n"
-    if reference_images and len(reference_images) >= 1:
-        ref_desc = "【人物一致性要求】以下参考照片是真实人物，绘制时必须严格还原其外貌特征：\n"
-        ref_desc += "- 第一张参考图：左侧人物（用户）的真实照片，必须保留其脸型、五官比例、发型、肤色、气质。\n"
-        if len(reference_images) >= 2:
-            ref_desc += "- 第二张参考图：右侧人物（对方）的真实照片，同样必须保留其脸型、五官、发型、气质。\n"
-        ref_desc += "重要：即使是插画/动画风格，人物脸部特征也必须与参考照片高度一致，让认识他们的人能一眼认出。不得随意更改人物外貌。\n\n"
+    # 构建人物参考图说明（动态适配1-5人）
+    n_refs = len(reference_images) if reference_images else 0
+    _ref_labels = ["用户本人", "同伴一", "同伴二", "同伴三", "同伴四"]
+
+    if n_refs >= 3:
+        # 多人场景（3人及以上）：不固定左右，强调人数齐全
+        position_rule = (
+            f"【重要】画面中必须出现 {n_refs} 个不同角色，每个角色都有独立的外形和动作，"
+            f"不得将任何两个角色合并或省略任何一个。按照场景描述忠实还原每个角色各自的动作和神情。\n\n"
+        )
+        ref_desc = (
+            f"【角色一致性要求】以下 {n_refs} 张参考照片分别对应场景中的 {n_refs} 个角色，"
+            f"绘制时必须严格还原每张照片中的真实外貌——照片里是什么形象就画什么形象（人物画人、动物画动物，不得擅自更改）：\n"
+        )
+        for idx in range(n_refs):
+            label = _ref_labels[idx] if idx < len(_ref_labels) else f"同伴{idx}"
+            ref_desc += f"- 第{idx+1}张参考图：{label}，必须完整还原照片中的外貌特征、体型、整体形象。\n"
+        ref_desc += (
+            "重要：即使是插画/动画风格，每个角色的外貌也必须与对应参考照片高度一致，"
+            "让认识他们的人能一眼认出。不得随意更改、拟人化或混淆任何角色的形象。\n\n"
+        )
         full_prompt = style_prefix + position_rule + ref_desc + prompt_body
-        # 末尾再次强调一致性（模型更易遵循靠后的指令）
+        full_prompt += (
+            f"\n\n【再次强调】画面中必须同时出现 {n_refs} 个独立角色（一个都不能少），"
+            f"每个角色的外貌必须与对应参考照片保持高度一致（包括是人还是动物），这是最高优先级要求。"
+        )
+    elif n_refs >= 1:
+        # 两人场景（原有逻辑不变）
+        position_rule = "【重要】画面中左侧人物固定为用户，右侧人物固定为对方。必须严格按照场景描述中的动作主体来绘制：谁做动作就画谁在做，不能颠倒角色。\n\n"
+        ref_desc = "【人物一致性要求】以下参考照片是真实形象，绘制时必须严格还原照片中的外貌特征（照片里是什么形象就画什么形象）：\n"
+        ref_desc += "- 第一张参考图：左侧人物（用户）的真实照片，必须完整还原其外貌特征、体型、整体形象。\n"
+        if n_refs >= 2:
+            ref_desc += "- 第二张参考图：右侧人物（对方）的真实照片，同样必须完整还原其外貌特征、体型、整体形象。\n"
+        ref_desc += "重要：即使是插画/动画风格，每个角色的外貌也必须与参考照片高度一致，让认识他们的人能一眼认出。不得随意更改或拟人化角色外貌。\n\n"
+        full_prompt = style_prefix + position_rule + ref_desc + prompt_body
         full_prompt += "\n\n【再次强调】所有人物外貌必须与提供的参考照片保持高度一致，这是最高优先级要求。"
     else:
+        position_rule = "【重要】画面中左侧人物固定为用户，右侧人物固定为对方。必须严格按照场景描述中的动作主体来绘制：谁做动作就画谁在做，不能颠倒角色。\n\n"
         full_prompt = style_prefix + position_rule + prompt_body
 
     # 构建 contents_list：风格参考图 + 档案参考图 + 文本 prompt
@@ -1066,7 +1089,7 @@ def generate_image_from_prompt(
                 logger.warning(f"⚠️ 图片裁剪失败，使用原图: {_crop_e}")
 
             # 尝试上传到 OSS
-            if USE_OSS and oss_bucket is not None:
+            if USE_OSS and s3_client is not None:
                 logger.info(f"尝试上传图片到 OSS...")
                 image_url = upload_image_to_oss(image_bytes, user_id, session_id, image_index)
                 if image_url:
@@ -2105,15 +2128,15 @@ async def analyze_audio_async(session_id: str, temp_file_path: str, file_filenam
                         "profile_ids": list(speaker_mapping.values()),
                     }
                     logger.info(f"[记忆] B 钩子调用 add_memory: session_id={session_id} payload_len={len(payload)}")
-                    # 同步 add_memory 在线程中执行，避免阻塞事件循环
-                    ok = await asyncio.to_thread(
+                    # fire-and-forget：不等待 add_memory 完成，立即继续后续流程
+                    asyncio.create_task(asyncio.to_thread(
                         add_memory,
                         payload,
                         user_id,
                         metadata=metadata,
                         enable_graph=True,
-                    )
-                    logger.info(f"[记忆] B 钩子 add_memory 结果: session_id={session_id} success={ok}")
+                    ))
+                    logger.info(f"[记忆] B 钩子 add_memory 已异步触发（fire-and-forget）: session_id={session_id}")
                 except Exception as mem_err:
                     logger.warning(f"[记忆] B 钩子写入失败: session_id={session_id} error={mem_err}", exc_info=True)
             else:
@@ -2241,12 +2264,20 @@ async def get_task_list(
                         for si in scene_imgs:
                             si_dict = si if isinstance(si, dict) else {}
                             si_url = si_dict.get("image_url")
-                            if si_url and isinstance(si_url, str) and ("oss" in si_url or "geminipicture" in si_url.lower()):
-                                # 从 OSS URL 解析真实 image_index：images/{uid}/{sid}/{idx}.png
-                                _m = re.search(r'/([0-9]+)\.png', si_url)
+                            si_idx = si_dict.get("index")
+                            if si_url and isinstance(si_url, str):
+                                # 兼容所有 URL 格式：从末尾提取数字索引
+                                # 代理 URL: /api/v1/images/{sid}/1000
+                                # R2 CDN:  r2.dev/images/{uid}/{sid}/1000.png
+                                # 旧 OSS:  geminipicture2.oss.../images/{uid}/{sid}/1000.png
+                                _m = re.search(r'/([0-9]+)(?:\.png)?(?:\?.*)?$', si_url)
                                 if _m:
                                     cover_map[sid] = f"{api_base}/api/v1/images/{sid}/{_m.group(1)}"
                                     break
+                            elif si_idx is not None:
+                                # 没有 URL 但有 index，直接用 index 构建代理 URL
+                                cover_map[sid] = f"{api_base}/api/v1/images/{sid}/{si_idx}"
+                                break
         
         task_items = [
             TaskItem(
@@ -2810,8 +2841,10 @@ async def _generate_strategies_core(
     """策略生成核心逻辑（v0.4 技能化架构）"""
     from datetime import datetime
     import asyncio
-    
+    import time as _time
+
     try:
+        _t0 = _time.time()
         logger.info(f"========== 开始生成策略分析（v0.4 技能化架构） ==========")
         logger.info(f"session_id: {session_id}")
         # 进度：识别场景
@@ -2823,12 +2856,13 @@ async def _generate_strategies_core(
             await db.commit()
 
         # 2.1 场景识别（Router Agent）
-        logger.info("[策略流程] 步骤2.1: 场景识别(Gemini classify_scene)...")
+        _t21 = _time.time()
+        logger.info(f"[策略流程] 步骤2.1: 场景识别(Gemini classify_scene)开始 elapsed={_t21-_t0:.2f}s")
         model = genai.GenerativeModel(GEMINI_FLASH_MODEL)
         scene_result = classify_scene(transcript, model)
         primary_scene = scene_result.get("primary_scene", "other")
         scenes = scene_result.get("scenes", [])
-        logger.info(f"[策略流程] 步骤2.1: 完成 primary_scene={primary_scene}")
+        logger.info(f"[策略流程] 步骤2.1: 完成 耗时={_time.time()-_t21:.2f}s primary_scene={primary_scene} elapsed={_time.time()-_t0:.2f}s")
         for scene in scenes:
             logger.info(f"  - {scene.get('category')}: {scene.get('confidence', 0):.2f}")
         # 进度：匹配技能
@@ -2840,6 +2874,8 @@ async def _generate_strategies_core(
             await db.commit()
 
         # 2.2 前置：通过 speaker_mapping 查询参与者档案，用于场景强制
+        _t22pre = _time.time()
+        logger.info(f"[策略流程] 步骤2.2前置: 档案查询开始 elapsed={_t22pre-_t0:.2f}s")
         _participant_profiles: list = []
         try:
             _ar_q = await db.execute(
@@ -2863,9 +2899,11 @@ async def _generate_strategies_core(
                     logger.info(f"[策略流程] 档案关系: {[(p['name'], p['relationship_type']) for p in _participant_profiles]}")
         except Exception as _pe:
             logger.warning(f"[策略流程] 档案查询失败，跳过场景强制: {_pe}")
+        logger.info(f"[策略流程] 步骤2.2前置: 档案查询完成 耗时={_time.time()-_t22pre:.2f}s elapsed={_time.time()-_t0:.2f}s")
 
         # 2.2 技能匹配（若此处报 PG type 114，可能是 skills 表 meta_data 列为 json）
-        logger.info("[策略流程] 步骤2.2: 技能匹配(match_skills/查 skills 表)...")
+        _t22 = _time.time()
+        logger.info(f"[策略流程] 步骤2.2: 技能匹配(match_skills)开始 elapsed={_t22-_t0:.2f}s")
         matched_skills = await match_skills(scene_result, db, transcript=transcript, profiles=_participant_profiles or None)
 
         # ── 兼容 router v2 stub 格式：补齐旧字段 (priority/confidence/name) ──────
@@ -2881,7 +2919,7 @@ async def _generate_strategies_core(
             return s
         matched_skills = [_norm_stub(s) for s in matched_skills]
 
-        logger.info(f"[策略流程] 步骤2.2: 完成 匹配到 {len(matched_skills)} 个技能")
+        logger.info(f"[策略流程] 步骤2.2: 技能匹配完成 耗时={_time.time()-_t22:.2f}s 匹配到={len(matched_skills)}个 elapsed={_time.time()-_t0:.2f}s")
 
         # 2.2c 手动模式过滤：若用户开启手动编排，仅保留用户勾选的技能
         try:
@@ -2939,6 +2977,8 @@ async def _generate_strategies_core(
             await db.commit()
 
         # 2.2b v0.6 记忆检索：为技能注入相关记忆
+        _t22b = _time.time()
+        logger.info(f"[策略流程] 步骤2.2b: 记忆检索开始 elapsed={_t22b-_t0:.2f}s")
         memory_context = ""
         try:
             logger.info(f"[记忆] 开始检索: session_id={session_id} user_id={user_id}")
@@ -2967,6 +3007,7 @@ async def _generate_strategies_core(
                 logger.info(f"[记忆] 检索跳过: 无 AnalysisResult session_id={session_id}")
         except Exception as mem_err:
             logger.warning(f"[记忆] 检索失败: session_id={session_id} error={mem_err}", exc_info=True)
+        logger.info(f"[策略流程] 步骤2.2b: 记忆检索完成 耗时={_time.time()-_t22b:.2f}s elapsed={_time.time()-_t0:.2f}s")
         context = {
             "session_id": session_id,
             "user_id": user_id,
@@ -2982,7 +3023,8 @@ async def _generate_strategies_core(
             await db.commit()
 
         # 2.3 技能执行：transcript + 技能 prompt -> Gemini -> 策略与视觉描述
-        logger.info("[策略流程] 步骤2.3: 技能执行(transcript+技能prompt->Gemini)...")
+        _t23 = _time.time()
+        logger.info(f"[策略流程] 步骤2.3: 技能执行开始 elapsed={_t23-_t0:.2f}s")
         skill_results = []
         
         # 并行执行所有技能
@@ -3045,11 +3087,15 @@ async def _generate_strategies_core(
                 })
         
         # ── 并行执行所有技能（asyncio.gather）──────────────────────────────
-        logger.info(f"[策略流程] 并行执行 {len(execution_tasks)} 个技能（串行改并行）...")
+        _t_gather = _time.time()
+        logger.info(f"[策略流程] 步骤2.3: 并行执行 {len(execution_tasks)} 个技能 elapsed={_t_gather-_t0:.2f}s")
 
         async def _run_one_skill(skill_id, matched_skill_info, coro):
+            _t_skill = _time.time()
+            logger.info(f"[策略流程] 技能 {skill_id} 执行开始")
             try:
                 result = await coro
+                logger.info(f"[策略流程] 技能 {skill_id} 执行完成 耗时={_time.time()-_t_skill:.2f}s success={result.get('success')}")
                 result["name"] = matched_skill_info.get("name", skill_id)
                 result["dimension"] = matched_skill_info.get("dimension", "")
                 result["matched_sub_skill"] = matched_skill_info.get("matched_sub_skill", "")
@@ -3078,6 +3124,7 @@ async def _generate_strategies_core(
                 logger.error(f"[策略流程] 技能 gather 顶层异常: {_r}")
             elif _r is not None:
                 skill_results.append(_r)
+        logger.info(f"[策略流程] 步骤2.3: 全部技能执行完成 耗时={_time.time()-_t_gather:.2f}s elapsed={_time.time()-_t0:.2f}s 成功={sum(1 for r in skill_results if r.get('success'))}个")
         # ────────────────────────────────────────────────────────────────────
         
         # 记录技能执行到数据库
@@ -3865,7 +3912,7 @@ async def get_image(
                 raise HTTPException(status_code=404, detail="任务不存在")
         
         # 如果 OSS 未启用，返回错误
-        if not USE_OSS or oss_bucket is None:
+        if not USE_OSS or s3_client is None:
             logger.warning("OSS 未启用，无法提供图片访问")
             raise HTTPException(status_code=503, detail="Image service unavailable")
         
@@ -3877,8 +3924,8 @@ async def get_image(
         try:
             # 从 OSS 获取图片
             start_time = time.time()
-            image_object = oss_bucket.get_object(oss_key)
-            image_data = image_object.read()
+            image_object = s3_client.get_object(Bucket=OSS_BUCKET_NAME, Key=oss_key)
+            image_data = image_object['Body'].read()
             fetch_time = time.time() - start_time
             
             logger.info(f"✅ 图片获取成功，大小: {len(image_data)} 字节，耗时: {fetch_time:.2f} 秒")
@@ -3923,12 +3970,12 @@ async def get_style_thumbnail(style_key: str):
     import re as _re
     if not _re.match(r'^[a-z0-9_]+$', style_key):
         raise HTTPException(status_code=400, detail="Invalid style_key")
-    if not USE_OSS or oss_bucket is None:
+    if not USE_OSS or s3_client is None:
         raise HTTPException(status_code=503, detail="Image service unavailable")
     try:
         oss_key = f"style_thumbnails/{style_key}.png"
-        image_object = oss_bucket.get_object(oss_key)
-        image_data = image_object.read()
+        image_object = s3_client.get_object(Bucket=OSS_BUCKET_NAME, Key=oss_key)
+        image_data = image_object['Body'].read()
         return Response(
             content=image_data,
             media_type="image/png",
@@ -3948,7 +3995,7 @@ def cleanup_old_images(days: int = 7):
     Args:
         days: 保留天数，默认 7 天
     """
-    if not USE_OSS or oss_bucket is None:
+    if not USE_OSS or s3_client is None:
         logger.warning("OSS 未启用，无法清理图片")
         return
     
@@ -3963,16 +4010,17 @@ def cleanup_old_images(days: int = 7):
         deleted_count = 0
         error_count = 0
         
-        for obj in oss2.ObjectIterator(oss_bucket, prefix=prefix):
-            # 检查文件修改时间
-            if obj.last_modified < cutoff_date:
-                try:
-                    oss_bucket.delete_object(obj.key)
-                    deleted_count += 1
-                    logger.debug(f"删除文件: {obj.key}")
-                except Exception as e:
-                    error_count += 1
-                    logger.error(f"删除文件失败 {obj.key}: {e}")
+        paginator = s3_client.get_paginator('list_objects_v2')
+        for page in paginator.paginate(Bucket=OSS_BUCKET_NAME, Prefix=prefix):
+            for obj in page.get('Contents', []):
+                if obj['LastModified'].timestamp() < cutoff_date.timestamp():
+                    try:
+                        s3_client.delete_object(Bucket=OSS_BUCKET_NAME, Key=obj['Key'])
+                        deleted_count += 1
+                        logger.debug(f"删除文件: {obj['Key']}")
+                    except Exception as e:
+                        error_count += 1
+                        logger.error(f"删除文件失败 {obj['Key']}: {e}")
         
         logger.info(f"✅ 清理完成: 删除 {deleted_count} 个文件，失败 {error_count} 个")
         

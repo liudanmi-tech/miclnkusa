@@ -3,6 +3,7 @@ import asyncio
 import json
 import logging
 import re
+import time
 import uuid as _uuid
 
 import google.generativeai as genai
@@ -222,6 +223,9 @@ async def generate_scene_images(
     """
     async with AsyncSessionLocal() as db:
         try:
+            t_start = time.time()
+            logger.info(f"[场景生图] ===== 开始 session={session_id} =====")
+
             # ── 1. 更新 image_status = generating ──────────────────────────
             sess = await db.get(Session, _uuid.UUID(session_id))
             if sess:
@@ -254,6 +258,7 @@ async def generate_scene_images(
 
             if not is_narration_mode:
                 logger.info(f"[场景生图] 场景1（多人/非自己）: speaker_count={speaker_count}")
+            logger.info(f"[场景生图] 步骤2 场景类型检测完成 elapsed={time.time()-t_start:.2f}s")
 
             # ── 3. 构建对话文本用于场景提取 ─────────────────────────────────
             lines = []
@@ -268,17 +273,14 @@ async def generate_scene_images(
                     lines.append(f"{label} {text}")             # 场景1：带角色标签
             transcript_str = "\n".join(lines[:80])
 
-            # ── 3.5 [场景2] 提前匹配人物档案，构建名称对照表用于场景 prompt ──
-            _mentioned_people = []
+            # ── 3.5 [场景2] 预加载档案列表（纯 DB，无 Gemini）──────────────────
             _narration_text = ""
-            _name_mapping = {}      # {录音中的名字: 档案名}，注入 scene prompt
+            _name_mapping = {}      # {录音中的名字: 档案名}，由步骤4合并调用填充
             _matched_profiles = {}  # {录音中的名字: Profile}，用于后续取照片
-            _sql_matched = {}       # 供后续 source 日志判断
+            _profile_name_map = {}  # {档案名: Profile}
 
             if is_narration_mode:
                 _narration_text = "\n".join([t.get("text", "") for t in transcript if t.get("text")])
-                _mentioned_people = await _extract_mentioned_people(transcript, gemini_flash_model)
-
                 _all_prof_q = await db.execute(
                     select(Profile).where(Profile.user_id == _uuid.UUID(user_id))
                 )
@@ -287,60 +289,52 @@ async def generate_scene_images(
                     p.name: p for p in _all_profiles
                     if getattr(p, "relationship_type", "") not in ("自己", "Self", "self")
                 }
-
-                # 第一轮：SQL LIKE 子串匹配
-                _unmatched = []
-                for person_name in _mentioned_people:
-                    q = await db.execute(
-                        select(Profile).where(
-                            Profile.user_id == _uuid.UUID(user_id),
-                            Profile.name.ilike(f"%{person_name}%")
-                        ).limit(1)
-                    )
-                    profile = q.scalar_one_or_none()
-                    if profile:
-                        _sql_matched[person_name] = profile
-                    else:
-                        _unmatched.append(person_name)
-
-                # 第二轮：Gemini 谐音/昵称模糊匹配
-                _fuzzy_matched = {}
-                if _unmatched and _profile_name_map:
-                    _fuzzy_results = await _fuzzy_match_profiles(
-                        _unmatched, _profile_name_map, gemini_flash_model
-                    )
-                    for name, matched_name in _fuzzy_results.items():
-                        if matched_name:
-                            _fuzzy_matched[name] = _profile_name_map[matched_name]
-
-                # 合并，建立名称对照表
-                for person_name in _mentioned_people:
-                    profile = _sql_matched.get(person_name) or _fuzzy_matched.get(person_name)
-                    if profile:
-                        _name_mapping[person_name] = profile.name
-                        _matched_profiles[person_name] = profile
-
-                logger.info(f"[场景2 提前匹配] 名称对照: {_name_mapping}")
+                logger.info(f"[场景2] 预加载档案 {len(_profile_name_map)} 个: {list(_profile_name_map.keys())}")
 
             # ── 4. Gemini 提取场景列表 ──────────────────────────────────────
+            t_scene_extract = time.time()
+            logger.info(f"[场景生图] 步骤4 Gemini场景提取开始 elapsed={t_scene_extract-t_start:.2f}s")
             if is_narration_mode:
-                _name_ref_section = ""
-                if _name_mapping:
-                    _ref_lines = "\n".join([f"  - 录音中「{t}」对应档案名「{p}」" for t, p in _name_mapping.items()])
-                    _name_ref_section = f"\n人物名称对照（场景描述中请使用档案名称，不要自行翻译或改写人名）：\n{_ref_lines}\n"
-                scene_prompt = f"""分析以下用户的事后口述，识别1-3个最有画面感的场景。
+                # 场景2：人物匹配 + 场景生成 合并为一次 Gemini 调用
+                _profile_names_str = json.dumps(list(_profile_name_map.keys()), ensure_ascii=False)
+                combined_prompt = f"""分析以下用户的事后口述，完成两项任务并返回JSON。
 
 口述内容：
 {transcript_str}
-{_name_ref_section}
+
+用户档案列表：{_profile_names_str}
+
+任务1：识别1-3个最有画面感的场景（英文描述）。
+任务2：找出口述中提到的人物，与档案列表匹配（考虑谐音/昵称，如"妞蛋"→"liudan"），高置信度才匹配，不确定填null。
+
 规则：
-- 场景数量1-3个，不要重复，选最有代表性的
-- 明确描述「用户」和涉及的具体人物（保留原称呼，如张经理）在做什么
+- 场景描述必须用英文（English only），场景数量1-3个，选最有代表性的
+- 场景中的人物名称使用匹配后的档案名（如liudan），无匹配时保留口述中的原称呼
 - 若场景仅涉及用户自身，可只描述用户
-- 场景描述必须用英文输出（English only）
-- 描述示例："User reports budget situation to Manager Zhang, looking tense"、"User discusses solutions with Director Li"
-- 只返回JSON：{{"scene_count": 2, "scenes": ["scene 1 in English", "scene 2 in English"]}}"""
+
+只返回JSON（不要解释）：{{"name_mapping": {{"口述中的名字": "档案名或null"}}, "scenes": ["scene 1 in English", "scene 2 in English"]}}"""
+
+                model = genai.GenerativeModel(gemini_flash_model)
+                response = await asyncio.to_thread(model.generate_content, combined_prompt)
+                raw = response.text.strip()
+                try:
+                    json_match = re.search(r'\{.*\}', raw, re.DOTALL)
+                    combined_data = json.loads(json_match.group()) if json_match else {}
+                except Exception as _pe:
+                    logger.warning(f"[场景2 合并调用] JSON 解析失败: {_pe}, raw={raw[:200]}")
+                    combined_data = {}
+
+                scenes = combined_data.get("scenes", [])[:3]
+
+                # 从合并结果构建 _name_mapping 和 _matched_profiles
+                for transcript_name, profile_name in combined_data.get("name_mapping", {}).items():
+                    if profile_name and profile_name in _profile_name_map:
+                        _name_mapping[transcript_name] = profile_name
+                        _matched_profiles[transcript_name] = _profile_name_map[profile_name]
+
+                logger.info(f"[场景2 合并调用] 名称对照: {_name_mapping}, 场景数: {len(scenes)}")
             else:
+                # 场景1：仅生成场景描述
                 scene_prompt = f"""分析以下录音对话，识别1-3个最有画面感的场景。
 
 对话角色说明：
@@ -358,17 +352,18 @@ async def generate_scene_images(
 - 描述示例："The user is reporting work progress to the other person, looking focused"、"The other person questions the user, who is explaining"
 - 只返回JSON：{{"scene_count": 2, "scenes": ["scene 1 in English", "scene 2 in English"]}}"""
 
-            model = genai.GenerativeModel(gemini_flash_model)
-            response = await asyncio.to_thread(model.generate_content, scene_prompt)
-            text = response.text.strip()
-            json_match = re.search(r'\{.*\}', text, re.DOTALL)
-            scenes_data = json.loads(json_match.group()) if json_match else {}
-            scenes = scenes_data.get("scenes", [])[:3]
+                model = genai.GenerativeModel(gemini_flash_model)
+                response = await asyncio.to_thread(model.generate_content, scene_prompt)
+                text = response.text.strip()
+                json_match = re.search(r'\{.*\}', text, re.DOTALL)
+                scenes_data = json.loads(json_match.group()) if json_match else {}
+                scenes = scenes_data.get("scenes", [])[:3]
 
             if not scenes:
                 logger.warning(f"[场景生图] 未提取到场景, session={session_id}")
                 scenes = ["The user and the other person are having a face-to-face conversation"]
 
+            logger.info(f"[场景生图] 步骤4 Gemini场景提取完成 耗时={time.time()-t_scene_extract:.2f}s 场景数={len(scenes)} elapsed={time.time()-t_start:.2f}s")
             logger.info(f"[场景生图] 提取到 {len(scenes)} 个场景: {scenes}")
 
             # ── 5. 准备参考图数据（按场景类型分路）─────────────────────────
@@ -380,58 +375,64 @@ async def generate_scene_images(
             people_refs = {}
             user_photo = None   # 用户自己的档案照片（场景2用）
 
-            if is_narration_mode:
-                # ── 场景2：档案匹配已在步骤 3.5 完成，直接获取照片 ──────────
-                mentioned_people = _mentioned_people
-                narration_text = _narration_text
+            t_photo = time.time()
+            logger.info(f"[场景生图] 步骤5 档案照片加载开始 elapsed={t_photo-t_start:.2f}s")
 
-                for person_name in mentioned_people:
-                    profile = _matched_profiles.get(person_name)
+            if is_narration_mode:
+                # ── 场景2：从合并调用结果中取照片 ────────────────────────────
+                for person_name, profile in _matched_profiles.items():
                     photo = None
-                    if profile and fetch_profile_image_fn:
+                    if fetch_profile_image_fn:
+                        t_ph = time.time()
+                        logger.info(f"[场景2] 开始获取档案照片: {person_name} profile_id={profile.id}")
                         photo = await asyncio.to_thread(
                             fetch_profile_image_fn, user_id, str(profile.id),
                             getattr(profile, "photo_url", None)
                         )
+                        logger.info(f"[场景2] 档案照片获取完成: {person_name} 耗时={time.time()-t_ph:.2f}s 有图={photo is not None}")
 
                     if photo:
-                        source = "SQL" if person_name in _sql_matched else "谐音匹配"
-                        profile_key = profile.name  # 用档案名作为 key，与场景描述对齐
+                        profile_key = profile.name
                         people_refs[profile_key] = {"photo": photo, "appearance": None}
-                        logger.info(f"[场景2] 档案匹配成功({source}): {person_name} → {profile_key} ({profile.id})")
+                        logger.info(f"[场景2] 档案照片加载成功: {person_name} → {profile_key} ({profile.id})")
                     else:
-                        # 智能降级：推断外貌，后续注入场景 prompt
+                        # 降级：推断外貌
+                        t_inf = time.time()
+                        logger.info(f"[场景2] 无档案照片，开始外貌推断: {person_name}")
                         appearance = await _infer_person_appearance(
-                            person_name, narration_text, gemini_flash_model
+                            person_name, _narration_text, gemini_flash_model
                         )
                         people_refs[person_name] = {"photo": None, "appearance": appearance}
-                        logger.info(f"[场景2] 无档案照片，降级: {person_name} → {appearance}")
+                        logger.info(f"[场景2] 外貌推断完成: {person_name} 耗时={time.time()-t_inf:.2f}s → {appearance}")
 
                 # 加载用户自己的档案照片（作为"左侧人物"参考）
                 if speakers and speaker_mapping and fetch_profile_image_fn:
                     self_pid = speaker_mapping.get(speakers[0])
                     if self_pid:
-                        # 先查询档案以获取 photo_url，用于正确解析 OSS 路径
                         _pq = await db.execute(select(Profile).where(Profile.id == _uuid.UUID(str(self_pid))))
                         _self_prof = _pq.scalar_one_or_none()
                         _self_photo_url = getattr(_self_prof, "photo_url", None) if _self_prof else None
+                        t_self = time.time()
+                        logger.info(f"[场景2] 开始获取用户自己档案照片 profile_id={self_pid}")
                         user_photo = await asyncio.to_thread(
                             fetch_profile_image_fn, user_id, str(self_pid), _self_photo_url
                         )
-                        if user_photo:
-                            logger.info(f"[场景2] 已加载用户自己的档案照片")
+                        logger.info(f"[场景2] 用户自己档案照片 耗时={time.time()-t_self:.2f}s 有图={user_photo is not None}")
 
             else:
                 # ── 场景1：声纹映射档案照片 + 降级人物分析 ─────────────────
                 if get_profile_refs_fn:
                     try:
+                        t_refs = time.time()
+                        logger.info(f"[场景生图] 步骤5a 开始加载声纹档案参考图")
                         profile_refs = await get_profile_refs_fn(session_id, user_id, db)
-                        logger.info(f"[场景生图] 已加载 {len(profile_refs)} 张档案参考图")
+                        logger.info(f"[场景生图] 步骤5a 声纹档案参考图加载完成 耗时={time.time()-t_refs:.2f}s 图数={len(profile_refs)}")
                     except Exception as _pe:
                         logger.warning(f"[场景生图] 档案参考图加载失败: {_pe}")
 
                 if not profile_refs:
-                    logger.info(f"[场景生图] 无档案参考图，启动人物档案分析...")
+                    logger.info(f"[场景生图] 步骤5b 无档案参考图，启动人物档案分析（Gemini）...")
+                    t_char = time.time()
                     try:
                         char_profiles = await asyncio.wait_for(
                             _analyze_character_profiles(transcript, gemini_flash_model),
@@ -440,11 +441,17 @@ async def generate_scene_images(
                     except asyncio.TimeoutError:
                         logger.warning(f"[场景生图] 人物档案分析超时(30s)，跳过，直接生成")
                         char_profiles = {"consistency_header": ""}
+                    logger.info(f"[场景生图] 步骤5b 人物档案分析完成 耗时={time.time()-t_char:.2f}s")
                     consistency_header = char_profiles.get("consistency_header", "")
                     if consistency_header:
                         logger.info(f"[场景生图] 人物一致性头部已就绪，将注入所有场景 prompt")
 
+            logger.info(f"[场景生图] 步骤5 档案照片加载完成 耗时={time.time()-t_photo:.2f}s elapsed={time.time()-t_start:.2f}s")
+
             # ── 6. 并行生成所有图片 ─────────────────────────────────────────
+            t_gen_start = time.time()
+            logger.info(f"[场景生图] 步骤6 并行生成{len(scenes)}张图片开始 elapsed={t_gen_start-t_start:.2f}s")
+
             async def gen_one(i, scene):
                 if is_narration_mode:
                     # 场景2：逐场景动态拼装参考图和一致性描述
@@ -483,8 +490,10 @@ async def generate_scene_images(
 
                 # generate_image_fn 是同步函数，通过 asyncio.to_thread 调用
                 # 每张图最多等 120 秒，超时返回 None（视为失败）
+                t_img = time.time()
+                logger.info(f"[场景生图] 图{i} 生成开始 ref_images={len(ref) if ref else 0} scene={scene[:60]}")
                 try:
-                    return await asyncio.wait_for(
+                    result = await asyncio.wait_for(
                         asyncio.to_thread(
                             generate_image_fn,
                             scene_with_profile,
@@ -493,14 +502,17 @@ async def generate_scene_images(
                         ),
                         timeout=180.0,  # 并行模式：单张超时 180s，总体最坏 180s（原串行 ~400s）
                     )
+                    logger.info(f"[场景生图] 图{i} 生成完成 耗时={time.time()-t_img:.2f}s 有结果={result is not None}")
+                    return result
                 except asyncio.TimeoutError:
-                    logger.error(f"[场景生图] 图{i} 生成超时(180s)，跳过")
+                    logger.error(f"[场景生图] 图{i} 生成超时(180s) 耗时={time.time()-t_img:.2f}s，跳过")
                     return None
 
             results = await asyncio.gather(
                 *[gen_one(i, scene) for i, scene in enumerate(scenes)],
                 return_exceptions=True
             )
+            logger.info(f"[场景生图] 步骤6 全部图片生成完成 耗时={time.time()-t_gen_start:.2f}s elapsed={time.time()-t_start:.2f}s")
 
             # ── 7. 组装 scene_images ────────────────────────────────────────
             scene_images = []
@@ -531,7 +543,7 @@ async def generate_scene_images(
             if sa:
                 sa.scene_images = scene_images
                 await db.commit()
-                logger.info(f"[场景生图] 已更新 scene_images, session={session_id}")
+                logger.info(f"[场景生图] 已更新 scene_images session={session_id} 总耗时={time.time()-t_start:.2f}s")
             else:
                 # StrategyAnalysis 尚未创建（技能还在跑），暂存到 analysis_stage_detail
                 sess2 = await db.get(Session, _uuid.UUID(session_id))
