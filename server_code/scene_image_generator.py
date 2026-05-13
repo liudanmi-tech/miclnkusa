@@ -146,6 +146,62 @@ async def _infer_person_appearance(
         return "职场人物"
 
 
+async def _fuzzy_match_profiles(
+    unmatched_names: list,
+    profile_name_map: dict,
+    gemini_flash_model: str,
+) -> dict:
+    """
+    [场景2 谐音兜底] SQL LIKE 匹配失败后，用 Gemini 做谐音/昵称模糊匹配。
+    一次批量处理所有未匹配的人名，只在高置信度时返回结果。
+
+    Args:
+        unmatched_names: SQL 匹配失败的人名列表，如 ["妞蛋"]
+        profile_name_map: {档案名: Profile对象}，仅含非 Self 档案
+        gemini_flash_model: Flash 模型名
+
+    Returns:
+        {extracted_name: matched_profile_name_or_None}
+        如 {"妞蛋": "刘丹"} 或 {"妞蛋": None}
+    """
+    if not unmatched_names or not profile_name_map:
+        return {n: None for n in unmatched_names}
+
+    names_str = json.dumps(unmatched_names, ensure_ascii=False)
+    profiles_str = json.dumps(list(profile_name_map.keys()), ensure_ascii=False)
+
+    prompt = (
+        f"录音经语音识别后，出现了以下人名（可能因谐音产生误识别）：{names_str}\n\n"
+        f"用户档案列表：{profiles_str}\n\n"
+        "请判断每个识别出的人名最可能对应哪个档案，考虑谐音、昵称、简称等情况。\n"
+        "规则：\n"
+        "- 只在高置信度时匹配（如明显谐音：妞蛋→刘丹，或常见昵称），不确定时返回 null\n"
+        "- value 必须是档案列表中的原始名称，不能自造新名字\n"
+        "- 只返回 JSON 对象，不要解释，格式：{\"人名1\": \"档案名\", \"人名2\": null}"
+    )
+
+    try:
+        model = genai.GenerativeModel(gemini_flash_model)
+        response = await asyncio.to_thread(model.generate_content, prompt)
+        raw = response.text.strip()
+        m = re.search(r'\{.*\}', raw, re.DOTALL)
+        if m:
+            result = json.loads(m.group())
+            validated = {}
+            for name in unmatched_names:
+                matched = result.get(name)
+                if matched and matched in profile_name_map:
+                    validated[name] = matched
+                else:
+                    validated[name] = None
+            logger.info(f"[场景2 谐音匹配] 结果: {validated}")
+            return validated
+    except Exception as e:
+        logger.warning(f"[场景2 谐音匹配] 失败: {e}")
+
+    return {n: None for n in unmatched_names}
+
+
 async def generate_scene_images(
     transcript: list,           # 已解析的对话列表
     style_key: str,
@@ -212,13 +268,71 @@ async def generate_scene_images(
                     lines.append(f"{label} {text}")             # 场景1：带角色标签
             transcript_str = "\n".join(lines[:80])
 
+            # ── 3.5 [场景2] 提前匹配人物档案，构建名称对照表用于场景 prompt ──
+            _mentioned_people = []
+            _narration_text = ""
+            _name_mapping = {}      # {录音中的名字: 档案名}，注入 scene prompt
+            _matched_profiles = {}  # {录音中的名字: Profile}，用于后续取照片
+            _sql_matched = {}       # 供后续 source 日志判断
+
+            if is_narration_mode:
+                _narration_text = "\n".join([t.get("text", "") for t in transcript if t.get("text")])
+                _mentioned_people = await _extract_mentioned_people(transcript, gemini_flash_model)
+
+                _all_prof_q = await db.execute(
+                    select(Profile).where(Profile.user_id == _uuid.UUID(user_id))
+                )
+                _all_profiles = _all_prof_q.scalars().all()
+                _profile_name_map = {
+                    p.name: p for p in _all_profiles
+                    if getattr(p, "relationship_type", "") not in ("自己", "Self", "self")
+                }
+
+                # 第一轮：SQL LIKE 子串匹配
+                _unmatched = []
+                for person_name in _mentioned_people:
+                    q = await db.execute(
+                        select(Profile).where(
+                            Profile.user_id == _uuid.UUID(user_id),
+                            Profile.name.ilike(f"%{person_name}%")
+                        ).limit(1)
+                    )
+                    profile = q.scalar_one_or_none()
+                    if profile:
+                        _sql_matched[person_name] = profile
+                    else:
+                        _unmatched.append(person_name)
+
+                # 第二轮：Gemini 谐音/昵称模糊匹配
+                _fuzzy_matched = {}
+                if _unmatched and _profile_name_map:
+                    _fuzzy_results = await _fuzzy_match_profiles(
+                        _unmatched, _profile_name_map, gemini_flash_model
+                    )
+                    for name, matched_name in _fuzzy_results.items():
+                        if matched_name:
+                            _fuzzy_matched[name] = _profile_name_map[matched_name]
+
+                # 合并，建立名称对照表
+                for person_name in _mentioned_people:
+                    profile = _sql_matched.get(person_name) or _fuzzy_matched.get(person_name)
+                    if profile:
+                        _name_mapping[person_name] = profile.name
+                        _matched_profiles[person_name] = profile
+
+                logger.info(f"[场景2 提前匹配] 名称对照: {_name_mapping}")
+
             # ── 4. Gemini 提取场景列表 ──────────────────────────────────────
             if is_narration_mode:
+                _name_ref_section = ""
+                if _name_mapping:
+                    _ref_lines = "\n".join([f"  - 录音中「{t}」对应档案名「{p}」" for t, p in _name_mapping.items()])
+                    _name_ref_section = f"\n人物名称对照（场景描述中请使用档案名称，不要自行翻译或改写人名）：\n{_ref_lines}\n"
                 scene_prompt = f"""分析以下用户的事后口述，识别1-3个最有画面感的场景。
 
 口述内容：
 {transcript_str}
-
+{_name_ref_section}
 规则：
 - 场景数量1-3个，不要重复，选最有代表性的
 - 明确描述「用户」和涉及的具体人物（保留原称呼，如张经理）在做什么
@@ -267,19 +381,12 @@ async def generate_scene_images(
             user_photo = None   # 用户自己的档案照片（场景2用）
 
             if is_narration_mode:
-                # ── 场景2：提取提到的人物 → 档案照片 / 降级外貌推断 ──────
-                narration_text = "\n".join([t.get("text", "") for t in transcript if t.get("text")])
-                mentioned_people = await _extract_mentioned_people(transcript, gemini_flash_model)
+                # ── 场景2：档案匹配已在步骤 3.5 完成，直接获取照片 ──────────
+                mentioned_people = _mentioned_people
+                narration_text = _narration_text
 
                 for person_name in mentioned_people:
-                    # 模糊匹配档案 name 字段
-                    q = await db.execute(
-                        select(Profile).where(
-                            Profile.user_id == _uuid.UUID(user_id),
-                            Profile.name.ilike(f"%{person_name}%")
-                        ).limit(1)
-                    )
-                    profile = q.scalar_one_or_none()
+                    profile = _matched_profiles.get(person_name)
                     photo = None
                     if profile and fetch_profile_image_fn:
                         photo = await asyncio.to_thread(
@@ -288,8 +395,10 @@ async def generate_scene_images(
                         )
 
                     if photo:
-                        people_refs[person_name] = {"photo": photo, "appearance": None}
-                        logger.info(f"[场景2] 档案匹配成功: {person_name} → {profile.id}")
+                        source = "SQL" if person_name in _sql_matched else "谐音匹配"
+                        profile_key = profile.name  # 用档案名作为 key，与场景描述对齐
+                        people_refs[profile_key] = {"photo": photo, "appearance": None}
+                        logger.info(f"[场景2] 档案匹配成功({source}): {person_name} → {profile_key} ({profile.id})")
                     else:
                         # 智能降级：推断外貌，后续注入场景 prompt
                         appearance = await _infer_person_appearance(
@@ -346,9 +455,10 @@ async def generate_scene_images(
                     if user_photo:
                         ref_images.append(user_photo)
 
-                    # 右侧：场景中提到的人物
+                    # 右侧：场景中提到的人物（大小写/空格不敏感匹配）
                     for person_name, ref_data in people_refs.items():
-                        if person_name in scene:
+                        _pkey = person_name.lower().replace(" ", "")
+                        if _pkey in scene.lower().replace(" ", ""):
                             if ref_data["photo"]:
                                 ref_images.append(ref_data["photo"])
                             elif ref_data["appearance"]:

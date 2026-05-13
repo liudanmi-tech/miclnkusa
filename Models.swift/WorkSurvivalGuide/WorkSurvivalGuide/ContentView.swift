@@ -69,6 +69,13 @@ struct ContentView: View {
                             Spacer()
                             BottomNavView(selectedTab: $selectedTab)
                         }
+
+                        // Debug 悬浮面板（仅 DEBUG 构建，置于最顶层）
+                        #if DEBUG
+                        DebugPanelView()
+                            .zIndex(9999)
+                            .allowsHitTesting(true)
+                        #endif
                     }
                     .ignoresSafeArea(edges: .bottom)
                     .navigationBarHidden(true)

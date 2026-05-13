@@ -216,6 +216,9 @@ class RecordingViewModel: ObservableObject {
                                 self?.uploadProgress = pct
                                 let text = pct >= 1.0 ? "Upload complete" : "Uploading \(Int(pct * 100))%"
                                 self?.uploadPhaseDescription = text
+                                #if DEBUG
+                                DebugLogger.shared.setUploadStatus(text)
+                                #endif
                                 if let taskId = self?.currentRecordingTaskId {
                                     NotificationCenter.default.post(
                                         name: NSNotification.Name("TaskProgressUpdated"),
@@ -226,10 +229,14 @@ class RecordingViewModel: ObservableObject {
                             }
                         }
                     )
-                    
+
                     print("✅ [RecordingViewModel] 上传成功！")
                     print("📋 [RecordingViewModel] 响应数据:")
                     print("   - sessionId: \(response.sessionId)")
+                    #if DEBUG
+                    DebugLogger.shared.setSession(response.sessionId)
+                    DebugLogger.shared.setUploadStatus("Done ✓")
+                    #endif
                     print("   - audioId: \(response.audioId)")
                     print("   - title: \(response.title)")
                     print("   - status: \(response.status)")
@@ -307,6 +314,10 @@ class RecordingViewModel: ObservableObject {
                         print("❌ [RecordingViewModel] 错误信息: \(error.localizedDescription)")
                         let friendly = Self.friendlyErrorMessage(error)
                         self.uploadError = friendly
+                        #if DEBUG
+                        DebugLogger.shared.log(.error, .upload, friendly)
+                        DebugLogger.shared.setUploadStatus("Error ✗")
+                        #endif
                         if let taskId = self.currentRecordingTaskId {
                             NotificationCenter.default.post(
                                 name: NSNotification.Name("TaskDeleted"),
@@ -318,7 +329,7 @@ class RecordingViewModel: ObservableObject {
             }
         }
     }
-    
+
     // 本地上传音频文件（用于测试，如《岁月》《沧浪之水》等）
     func uploadLocalFile(fileURL: URL) {
         print("📤 [RecordingViewModel] ========== 本地上传音频 ==========")
@@ -423,6 +434,9 @@ class RecordingViewModel: ObservableObject {
                                 self?.uploadProgress = pct
                                 let text = pct >= 1.0 ? "Upload complete" : "Uploading \(Int(pct * 100))%"
                                 self?.uploadPhaseDescription = text
+                                #if DEBUG
+                                DebugLogger.shared.setUploadStatus(text)
+                                #endif
                                 NotificationCenter.default.post(
                                     name: NSNotification.Name("TaskProgressUpdated"),
                                     object: nil,
@@ -432,7 +446,11 @@ class RecordingViewModel: ObservableObject {
                         }
                     )
                     print("✅ [RecordingViewModel] 本地上传成功，收到响应 sessionId=\(response.sessionId)")
-                    
+                    #if DEBUG
+                    DebugLogger.shared.setSession(response.sessionId)
+                    DebugLogger.shared.setUploadStatus("Done ✓")
+                    #endif
+
                     await MainActor.run {
                         NotificationCenter.default.post(name: NSNotification.Name("TaskDeleted"), object: taskId)
                     }
@@ -468,6 +486,10 @@ class RecordingViewModel: ObservableObject {
                     let friendly = Self.friendlyErrorMessage(error)
                     await MainActor.run {
                         self.uploadError = friendly
+                        #if DEBUG
+                        DebugLogger.shared.log(.error, .upload, friendly)
+                        DebugLogger.shared.setUploadStatus("Error ✗")
+                        #endif
                         NotificationCenter.default.post(
                             name: NSNotification.Name("TaskDeleted"),
                             object: taskId
@@ -528,6 +550,9 @@ class RecordingViewModel: ObservableObject {
                     print("   - analysisStage: \(status.analysisStage ?? "nil")")
                     if let stage = status.stageDisplayText {
                         print("   - stage: \(stage)")
+                        #if DEBUG
+                        DebugLogger.shared.setAnalysisStatus(stage)
+                        #endif
                         await MainActor.run {
                             self.uploadPhaseDescription = stage
                             NotificationCenter.default.post(
@@ -574,6 +599,10 @@ class RecordingViewModel: ObservableObject {
                         || (status.status == "archived" && archivedPollCount >= maxArchivedPolls)
                     if shouldStop {
                         print("✅ [RecordingViewModel] 分析完成！等待图片生成完毕...")
+                        #if DEBUG
+                        DebugLogger.shared.setAnalysisStatus("Done ✓ · waiting images")
+                        DebugLogger.shared.setImageStatus("Waiting…")
+                        #endif
                         // 获取基础详情（title、summary 等），用于进度展示及超时兜底
                         let detail = try await networkManager.getTaskDetail(sessionId: sessionId, authToken: token)
 
@@ -663,6 +692,9 @@ class RecordingViewModel: ObservableObject {
                 try await Task.sleep(nanoseconds: 3_000_000_000)
                 let imgStatus = try await networkManager.getImageStatus(sessionId: sessionId, authToken: authToken)
                 print("🖼️ [RecordingViewModel] 图片状态: \(imgStatus.status)，已生成: \(imgStatus.totalScenes) 张 (\(i+1)/\(maxWaits))")
+                #if DEBUG
+                DebugLogger.shared.setImageStatus("\(imgStatus.status) · \(imgStatus.totalScenes) scenes (\(i+1)/\(maxWaits))")
+                #endif
                 guard imgStatus.status == "completed", imgStatus.totalScenes > 0 else { continue }
 
                 // 全部图片就绪 — 拉取最新详情
@@ -674,6 +706,9 @@ class RecordingViewModel: ObservableObject {
                     DetailCacheManager.shared.cacheStrategy(strategy, for: sessionId)
                     let imageCount = strategy.sceneImages?.count ?? 0
                     print("✅ [RecordingViewModel] 策略分析已预缓存（含 \(imageCount) 张场景图片）")
+                    #if DEBUG
+                    DebugLogger.shared.setSkillStatus("Cached ✓ · \(imageCount) scene imgs")
+                    #endif
                     if let firstImg = strategy.sceneImages?.first {
                         let baseURL = networkManager.getBaseURL()
                         if let proxyURL = firstImg.getAccessibleImageURL(baseURL: baseURL) {
@@ -701,6 +736,9 @@ class RecordingViewModel: ObservableObject {
                 // 图片+策略均就绪，现在发 TaskAnalysisCompleted（卡片变为可点击）
                 await MainActor.run {
                     print("📢 [RecordingViewModel] 图片就绪，发送 TaskAnalysisCompleted 通知，封面: \(coverImageUrl ?? "nil")")
+                    #if DEBUG
+                    DebugLogger.shared.setImageStatus("Done ✓ · cover=\(coverImageUrl != nil ? "yes" : "no")")
+                    #endif
                     NotificationCenter.default.post(
                         name: NSNotification.Name("TaskAnalysisCompleted"),
                         object: completedTask
