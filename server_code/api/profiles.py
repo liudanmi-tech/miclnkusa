@@ -21,6 +21,144 @@ from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
+# ──────────────────────────────────────────────────────────────────────────────
+# 情绪头像生成（千人千面）
+# 触发时机：upload_profile_photo 成功后 fire-and-forget
+# 存储路径：emotion_avatars/{user_id}/{emotion}.png  (happy/excited/sad/calm)
+# 服务端口：GET /api/v1/profiles/emotion-avatar/{emotion}
+# ──────────────────────────────────────────────────────────────────────────────
+
+EMOTION_SLOTS = ["happy", "excited", "sad", "calm"]
+
+def _mood_state_to_emotion(mood_state: str) -> str:
+    """将 LLM 返回的 mood_state 映射到 4 个情绪槽之一。"""
+    m = (mood_state or "").lower()
+    if any(k in m for k in ["excit", "energ", "elat", "亢奋", "兴奋", "激动"]):
+        return "excited"
+    if any(k in m for k in ["sad", "depress", "griev", "悲", "难过", "痛苦", "沮丧",
+                              "anxious", "worry", "nervou", "焦虑", "担心", "紧张"]):
+        return "sad"
+    if any(k in m for k in ["happy", "joy", "glad", "高兴", "开心", "快乐", "愉快"]):
+        return "happy"
+    return "calm"
+
+
+async def _generate_emotion_avatars_task(user_id: str, photo_bytes: bytes, photo_mime: str):
+    """
+    后台任务：用 Gemini 生成 2×2 情绪宫格图，PIL 裁成 4 张独立 PNG，存 R2。
+    fire-and-forget，不阻塞档案保存响应。
+    """
+    import io
+    try:
+        import google.generativeai as genai
+        from PIL import Image as _PIL
+        from main import USE_OSS, s3_client, OSS_BUCKET_NAME, IMAGE_GEN_MODEL
+    except ImportError as e:
+        logger.error(f"[情绪头像] 依赖导入失败: {e}")
+        return
+
+    logger.info(f"[情绪头像] 开始生成 user_id={user_id} photo_size={len(photo_bytes)}")
+
+    grid_prompt = (
+        "Generate a perfectly SQUARE image laid out as a 2x2 grid, "
+        "showing the same person in 4 emotional states.\n\n"
+        "STRICT RULES:\n"
+        "- Image MUST be square (1:1 ratio, equal width and height)\n"
+        "- Divided into EXACTLY 4 equal quadrants by thin white separator lines "
+        "  at the precise horizontal and vertical center\n"
+        "- Top-left:     HAPPY   – warm smile, bright joyful eyes\n"
+        "- Top-right:    EXCITED – energetic, enthusiastic, wide open eyes\n"
+        "- Bottom-left:  SAD     – downcast, melancholy, droopy expression\n"
+        "- Bottom-right: CALM    – relaxed, peaceful, gentle neutral expression\n"
+        "- Each quadrant is exactly 25 % of total image area\n"
+        "- Same character appearance in all 4 panels (consistent hair, clothing)\n"
+        "- Portrait headshot, upper body only, simple clean background per panel\n"
+        "- Studio Ghibli illustration style"
+    )
+
+    image_bytes = None
+    try:
+        model = genai.GenerativeModel(IMAGE_GEN_MODEL)
+        contents = [{"mime_type": photo_mime, "data": photo_bytes}, grid_prompt]
+
+        for attempt in range(2):
+            try:
+                response = await asyncio.to_thread(model.generate_content, contents)
+                for part in response.parts:
+                    if part.inline_data is not None:
+                        image_bytes = part.inline_data.data
+                        break
+                if image_bytes:
+                    logger.info(f"[情绪头像] Gemini 生成成功 attempt={attempt+1} "
+                                f"size={len(image_bytes)}")
+                    break
+            except Exception as e:
+                logger.warning(f"[情绪头像] attempt={attempt+1} 生成失败: {e}")
+                if attempt == 0:
+                    await asyncio.sleep(3)
+    except Exception as e:
+        logger.error(f"[情绪头像] Gemini 调用异常: {e}", exc_info=True)
+        return
+
+    if not image_bytes:
+        logger.error("[情绪头像] ❌ 生成失败，无图片数据")
+        return
+
+    # ── PIL 加载 + 强制正方形 ──
+    try:
+        img = _PIL.open(io.BytesIO(image_bytes))
+        w, h = img.size
+        logger.info(f"[情绪头像] 生成尺寸 {w}×{h}")
+
+        if abs(w - h) > max(w, h) * 0.05:   # 偏差 >5% 才居中裁剪
+            side = min(w, h)
+            left, top = (w - side) // 2, (h - side) // 2
+            img = img.crop((left, top, left + side, top + side))
+            w, h = img.size
+            logger.info(f"[情绪头像] 强制正方 → {w}×{h}")
+
+        # ── 裁剪 4 象限 ──
+        panels = {
+            "happy":   img.crop((0,    0,    w // 2, h // 2)),
+            "excited": img.crop((w//2, 0,    w,      h // 2)),
+            "sad":     img.crop((0,    h//2, w // 2, h     )),
+            "calm":    img.crop((w//2, h//2, w,      h     )),
+        }
+
+        for emotion, panel in panels.items():
+            pw, ph = panel.size
+            if pw < 30 or ph < 30:
+                logger.error(f"[情绪头像] ❌ 裁剪异常 {emotion} {pw}×{ph}，放弃")
+                return
+
+        # ── 上传到 R2 ──
+        if not USE_OSS or s3_client is None:
+            logger.warning("[情绪头像] R2 未启用，跳过上传")
+            return
+
+        for emotion, panel in panels.items():
+            buf = io.BytesIO()
+            panel.convert("RGBA").save(buf, format="PNG")
+            png_bytes = buf.getvalue()
+            oss_key = f"emotion_avatars/{user_id}/{emotion}.png"
+            try:
+                await asyncio.to_thread(
+                    s3_client.put_object,
+                    Bucket=OSS_BUCKET_NAME,
+                    Key=oss_key,
+                    Body=png_bytes,
+                    ContentType="image/png",
+                )
+                logger.info(f"[情绪头像] ✅ {emotion} → {oss_key}")
+            except Exception as e:
+                logger.error(f"[情绪头像] ❌ 上传 {emotion} 失败: {e}")
+
+        logger.info(f"[情绪头像] ✅ 全部完成 user_id={user_id}")
+
+    except Exception as e:
+        logger.error(f"[情绪头像] PIL/上传异常: {e}", exc_info=True)
+
+
 # 档案列表短期缓存，TTL 60 秒；创建/更新/删除时按 user_id 失效
 _PROFILES_CACHE_TTL = 60
 _profiles_cache: Dict[str, Tuple[List[dict], float]] = {}
@@ -349,6 +487,16 @@ async def upload_profile_photo(
         
         response_data = {"photo_url": photo_url}
         logger.info(f"[档案照片] 返回 photo_url={photo_url}")
+
+        # ── 异步触发情绪头像生成（fire-and-forget，不影响响应时间）──
+        try:
+            asyncio.create_task(
+                _generate_emotion_avatars_task(user_id, file_content, file.content_type or "image/jpeg")
+            )
+            logger.info(f"[档案照片] 已触发情绪头像异步生成 user_id={user_id}")
+        except Exception as _e:
+            logger.warning(f"[档案照片] 触发情绪头像生成失败（非致命）: {_e}")
+
         return response_data
     except HTTPException:
         # 重新抛出HTTP异常
@@ -358,3 +506,57 @@ async def upload_profile_photo(
         logger.error(f"错误类型: {type(e).__name__}")
         logger.error(f"错误详情: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"上传图片失败: {str(e)}")
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 情绪头像服务端点
+# ──────────────────────────────────────────────────────────────────────────────
+
+@router.get("/emotion-avatar/{emotion}", summary="获取当前用户情绪头像")
+async def get_emotion_avatar(
+    emotion: str,
+    user_id: str = Depends(get_current_user_id),
+):
+    """
+    返回当前用户对应情绪的头像 PNG（由档案照片生成，存于 R2）。
+    emotion: happy | excited | sad | calm
+    若尚未生成则返回 404。
+    """
+    from fastapi.responses import Response
+    try:
+        from main import USE_OSS, s3_client, OSS_BUCKET_NAME
+    except ImportError as e:
+        raise HTTPException(status_code=503, detail=f"Storage unavailable: {e}")
+
+    if emotion not in EMOTION_SLOTS:
+        raise HTTPException(status_code=400, detail=f"Invalid emotion '{emotion}'. Must be one of: {EMOTION_SLOTS}")
+
+    if not USE_OSS or s3_client is None:
+        raise HTTPException(status_code=503, detail="Storage service unavailable")
+
+    oss_key = f"emotion_avatars/{user_id}/{emotion}.png"
+    try:
+        obj = await asyncio.to_thread(
+            s3_client.get_object, Bucket=OSS_BUCKET_NAME, Key=oss_key
+        )
+        image_data = obj["Body"].read()
+        return Response(content=image_data, media_type="image/png",
+                        headers={"Cache-Control": "public, max-age=86400"})
+    except Exception:
+        raise HTTPException(status_code=404, detail="Emotion avatar not generated yet")
+
+
+@router.get("/emotion-avatars/urls", summary="获取当前用户全部情绪头像 URL")
+async def get_emotion_avatar_urls(
+    user_id: str = Depends(get_current_user_id),
+):
+    """
+    返回 4 个情绪头像的 API URL（由客户端携带 JWT 请求）。
+    格式: { "happy": "...", "excited": "...", "sad": "...", "calm": "..." }
+    """
+    api_base = os.getenv("API_PUBLIC_URL", "http://47.79.254.213")
+    base = api_base.rstrip("/")
+    return {
+        emotion: f"{base}/api/v1/profiles/emotion-avatar/{emotion}"
+        for emotion in EMOTION_SLOTS
+    }

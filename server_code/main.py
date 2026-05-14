@@ -3214,6 +3214,15 @@ async def _generate_strategies_core(
             # 情绪技能
             if skill_result.get("emotion_insight") is not None:
                 emotion_insight = skill_result["emotion_insight"]
+                _mood_state_val = emotion_insight.get("mood_state", "平常心")
+                # 千人千面情绪头像 URL（客户端携带 JWT 请求，404 时降级 unicode emoji）
+                try:
+                    from api.profiles import _mood_state_to_emotion
+                    _emotion_slot = _mood_state_to_emotion(_mood_state_val)
+                    _api_base = os.getenv("API_PUBLIC_URL", "http://47.79.254.213")
+                    _mood_emoji_url = f"{_api_base.rstrip('/')}/api/v1/profiles/emotion-avatar/{_emotion_slot}"
+                except Exception:
+                    _mood_emoji_url = None
                 skill_cards.append({
                     "skill_id": skill_id,
                     "skill_name": skill_name,
@@ -3224,8 +3233,9 @@ async def _generate_strategies_core(
                     "content": {
                         "sigh_count": emotion_insight.get("sigh_count", 0),
                         "haha_count": emotion_insight.get("haha_count", 0),
-                        "mood_state": emotion_insight.get("mood_state", "平常心"),
+                        "mood_state": _mood_state_val,
                         "mood_emoji": emotion_insight.get("mood_emoji", "😐"),
+                        "mood_emoji_url": _mood_emoji_url,
                         "char_count": emotion_insight.get("char_count", 0),
                     }
                 })

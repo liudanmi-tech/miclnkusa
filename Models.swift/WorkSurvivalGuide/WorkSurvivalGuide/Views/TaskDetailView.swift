@@ -53,6 +53,7 @@ struct TaskDetailView: View {
                             onSummaryTap: { showSummarySheet = true },
                             audioPlayer: audioPlayer,
                             moodEmoji: moodEmoji,
+                            moodEmojiUrl: moodEmojiUrl,
                             moodState: moodState,
                             startTime: task.startTime,
                             strategyIsLoading: strategyIsLoading
@@ -178,6 +179,12 @@ struct TaskDetailView: View {
             .content?.moodState
     }
 
+    private var moodEmojiUrl: String? {
+        strategyAnalysis?.skillCards?
+            .first(where: { $0.contentType == "emotion" })?
+            .content?.moodEmojiUrl
+    }
+
     /// Strategy + scene skill cards (exclude emotion/mental_health always-run cards)
     private var strategySkillCards: [SkillCard]? {
         guard let cards = strategyAnalysis?.skillCards else { return nil }
@@ -276,6 +283,7 @@ private struct MomentInfoCard: View {
     let onSummaryTap: () -> Void
     @ObservedObject var audioPlayer: SessionAudioPlayerService
     let moodEmoji: String?
+    let moodEmojiUrl: String?
     let moodState: String?
     let startTime: Date
     let strategyIsLoading: Bool
@@ -334,9 +342,23 @@ private struct MomentInfoCard: View {
                 Spacer()
 
                 // Mood
-                if let emoji = moodEmoji, let state = moodState {
+                if let state = moodState {
                     HStack(spacing: 6) {
-                        Text(emoji).font(.system(size: 20))
+                        // 优先加载专属头像，降级 unicode emoji
+                        if let urlStr = moodEmojiUrl, let url = URL(string: urlStr) {
+                            AsyncImage(url: url) { phase in
+                                switch phase {
+                                case .success(let img):
+                                    img.resizable().scaledToFill()
+                                        .frame(width: 28, height: 28)
+                                        .clipShape(Circle())
+                                default:
+                                    Text(moodEmoji ?? "😐").font(.system(size: 20))
+                                }
+                            }
+                        } else {
+                            Text(moodEmoji ?? "😐").font(.system(size: 20))
+                        }
                         Text(state)
                             .font(.system(size: 13, weight: .semibold))
                             .foregroundColor(.white.opacity(0.9))
