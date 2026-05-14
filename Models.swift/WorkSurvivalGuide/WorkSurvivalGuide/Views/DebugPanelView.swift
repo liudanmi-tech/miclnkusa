@@ -8,7 +8,7 @@
 //  - 显示 sessionId、各阶段状态、用户点击、错误信息、日志流
 //
 
-#if DEBUG
+#if DEBUG || INTERNALTEST
 import SwiftUI
 
 // MARK: - Main View

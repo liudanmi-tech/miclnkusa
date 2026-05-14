@@ -70,8 +70,8 @@ struct ContentView: View {
                             BottomNavView(selectedTab: $selectedTab)
                         }
 
-                        // Debug 悬浮面板（仅 DEBUG 构建，置于最顶层）
-                        #if DEBUG
+                        // Debug 悬浮面板（DEBUG 或 INTERNALTEST 构建可见）
+                        #if DEBUG || INTERNALTEST
                         DebugPanelView()
                             .zIndex(9999)
                             .allowsHitTesting(true)

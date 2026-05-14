@@ -5,7 +5,7 @@
 //  仅 DEBUG 构建可见的日志收集单例，供 DebugPanelView 展示。
 //
 
-#if DEBUG
+#if DEBUG || INTERNALTEST
 import Foundation
 import UIKit
 

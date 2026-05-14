@@ -4,8 +4,8 @@
 <dict>
 	<key>CFBundleGetInfoString</key>
 	<string></string>
-	<key>MicLnk uses the microphone to understand your mood and support your personal growth. This is your private space to express yourself — not a recording of your conversations with others.</key>
-	<string>需要访问麦克风以录制会议音频</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>MicLnk uses the microphone to capture your mood and moments. Your recordings are private and never shared.</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSExceptionDomains</key>
