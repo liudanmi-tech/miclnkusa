@@ -126,6 +126,7 @@ struct ProfileEditView: View {
     @Environment(\.dismiss) var dismiss
     
     @StateObject private var viewModel = ProfileEditViewModel()
+    @ObservedObject private var taskListVM = TaskListViewModel.shared
     @State private var selectedPhoto: PhotosPickerItem?
     @State private var selectedImage: UIImage?
     @State private var showingAudioSelection = false
@@ -310,7 +311,8 @@ struct ProfileEditView: View {
                     }
                     .padding(.horizontal, 24)
                     
-                    // 音频选择
+                    // 音频选择（仅在有录音时显示）
+                    if !taskListVM.tasks.isEmpty {
                     VStack(alignment: .leading, spacing: 8) {
                         HStack {
                             Text("Audio")
@@ -354,7 +356,8 @@ struct ProfileEditView: View {
                         }
                     }
                     .padding(.horizontal, 24)
-                    
+                    } // end if !taskListVM.tasks.isEmpty
+
                     // 保存按钮
                     Button(action: {
                         print("💾 [ProfileEditView] 点击保存按钮")
