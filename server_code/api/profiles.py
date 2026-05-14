@@ -52,10 +52,12 @@ async def _generate_emotion_avatars_task(user_id: str, photo_bytes: bytes, photo
     try:
         import google.generativeai as genai
         from PIL import Image as _PIL
-        from main import USE_OSS, s3_client, OSS_BUCKET_NAME, IMAGE_GEN_MODEL
+        from main import USE_OSS, s3_client, OSS_BUCKET_NAME
     except ImportError as e:
         logger.error(f"[情绪头像] 依赖导入失败: {e}")
         return
+
+    IMAGE_GEN_MODEL = "gemini-3.1-flash-image-preview"
 
     logger.info(f"[情绪头像] 开始生成 user_id={user_id} photo_size={len(photo_bytes)}")
 
