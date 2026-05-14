@@ -155,7 +155,10 @@ struct ProfileEditView: View {
                             Text("Profile Photo")
                                 .font(.system(size: 16, weight: .bold, design: .rounded))
                                 .foregroundColor(AppColors.headerText)
-                            
+                            Text("*")
+                                .font(.system(size: 16, weight: .bold))
+                                .foregroundColor(.red)
+
                             if isUploadingPhoto {
                                 ProgressView()
                                     .scaleEffect(0.8)
@@ -218,9 +221,14 @@ struct ProfileEditView: View {
                     
                     // 名称输入
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Name")
-                            .font(.system(size: 16, weight: .bold, design: .rounded))
-                            .foregroundColor(AppColors.headerText)
+                        HStack(spacing: 2) {
+                            Text("Name")
+                                .font(.system(size: 16, weight: .bold, design: .rounded))
+                                .foregroundColor(AppColors.headerText)
+                            Text("*")
+                                .font(.system(size: 16, weight: .bold))
+                                .foregroundColor(.red)
+                        }
 
                         TextField("Enter name", text: $nameText)
                             .textFieldStyle(.roundedBorder)
@@ -234,9 +242,14 @@ struct ProfileEditView: View {
                     
                     // 关系选择
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Relationship")
-                            .font(.system(size: 16, weight: .bold, design: .rounded))
-                            .foregroundColor(AppColors.headerText)
+                        HStack(spacing: 2) {
+                            Text("Relationship")
+                                .font(.system(size: 16, weight: .bold, design: .rounded))
+                                .foregroundColor(AppColors.headerText)
+                            Text("*")
+                                .font(.system(size: 16, weight: .bold))
+                                .foregroundColor(.red)
+                        }
 
                         Picker("Relationship", selection: $viewModel.relationship) {
                             ForEach(RelationshipType.allCases, id: \.self) { type in
@@ -250,9 +263,18 @@ struct ProfileEditView: View {
                     
                     // 备注输入
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Notes")
-                            .font(.system(size: 16, weight: .bold, design: .rounded))
-                            .foregroundColor(AppColors.headerText)
+                        HStack {
+                            Text("Notes")
+                                .font(.system(size: 16, weight: .bold, design: .rounded))
+                                .foregroundColor(AppColors.headerText)
+                            Text("Optional")
+                                .font(.system(size: 12, design: .rounded))
+                                .foregroundColor(AppColors.secondaryText)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Color.gray.opacity(0.12))
+                                .cornerRadius(4)
+                        }
 
                         ZStack(alignment: .topLeading) {
                             // 背景
@@ -290,9 +312,18 @@ struct ProfileEditView: View {
                     
                     // 音频选择
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Audio")
-                            .font(.system(size: 16, weight: .bold, design: .rounded))
-                            .foregroundColor(AppColors.headerText)
+                        HStack {
+                            Text("Audio")
+                                .font(.system(size: 16, weight: .bold, design: .rounded))
+                                .foregroundColor(AppColors.headerText)
+                            Text("Optional")
+                                .font(.system(size: 12, design: .rounded))
+                                .foregroundColor(AppColors.secondaryText)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Color.gray.opacity(0.12))
+                                .cornerRadius(4)
+                        }
                         
                         Button(action: {
                             showingAudioSelection = true
@@ -376,12 +407,10 @@ struct ProfileEditView: View {
                         .foregroundColor(.white)
                         .frame(maxWidth: .infinity)
                         .padding()
-                        .background(
-                            isSaving || isUploadingPhoto ? Color.gray : Color.blue
-                        )
+                        .background(canSave ? Color.blue : Color.gray.opacity(0.4))
                         .cornerRadius(12)
                     }
-                    .disabled(isSaving || isUploadingPhoto)
+                    .disabled(!canSave)
                     .padding(.horizontal, 24)
                     .padding(.bottom, 40)
                 }
@@ -520,6 +549,12 @@ struct ProfileEditView: View {
     }
     
     // 执行保存操作
+    private var canSave: Bool {
+        let hasPhoto = selectedImage != nil || viewModel.photoUrl != nil
+        let hasName = !nameText.trimmingCharacters(in: .whitespaces).isEmpty
+        return hasPhoto && hasName && !isUploadingPhoto && !isSaving
+    }
+
     private func performSave() {
         print("💾 [ProfileEditView] performSave 开始执行")
         print("   isUploadingPhoto: \(isUploadingPhoto)")
