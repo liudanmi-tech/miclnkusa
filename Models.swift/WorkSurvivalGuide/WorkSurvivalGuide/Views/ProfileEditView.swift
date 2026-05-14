@@ -625,6 +625,7 @@ enum RelationshipType: String, CaseIterable {
     case leader = "Manager"
     case colleague = "Colleague"
     case family = "Family"
+    case pet = "Pet"
     case other = "Other"
 }
 
