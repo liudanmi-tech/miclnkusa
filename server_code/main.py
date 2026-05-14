@@ -3215,12 +3215,17 @@ async def _generate_strategies_core(
             if skill_result.get("emotion_insight") is not None:
                 emotion_insight = skill_result["emotion_insight"]
                 _mood_state_val = emotion_insight.get("mood_state", "平常心")
-                # 千人千面情绪头像 URL（客户端携带 JWT 请求，404 时降级 unicode emoji）
+                # 千人千面情绪头像：R2 预签名 URL（7天有效，无需客户端携带 JWT）
                 try:
                     from api.profiles import _mood_state_to_emotion
                     _emotion_slot = _mood_state_to_emotion(_mood_state_val)
-                    _api_base = os.getenv("API_PUBLIC_URL", "http://47.79.254.213")
-                    _mood_emoji_url = f"{_api_base.rstrip('/')}/api/v1/profiles/emotion-avatar/{_emotion_slot}"
+                    _oss_key = f"emotion_avatars/{user_id}/{_emotion_slot}.png"
+                    _mood_emoji_url = await asyncio.to_thread(
+                        s3_client.generate_presigned_url,
+                        "get_object",
+                        Params={"Bucket": OSS_BUCKET_NAME, "Key": _oss_key},
+                        ExpiresIn=604800,  # 7天
+                    ) if (USE_OSS and s3_client is not None) else None
                 except Exception:
                     _mood_emoji_url = None
                 skill_cards.append({
