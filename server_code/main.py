@@ -504,6 +504,53 @@ def wait_for_file_active(file: Any, max_wait_time=300) -> Any:
     return file
 
 
+def _add_watermark(image_bytes: bytes) -> bytes:
+    """在图片右下角添加半透明 MicLnk 水印，失败时返回原图。"""
+    try:
+        from PIL import Image, ImageDraw, ImageFont
+        import io
+
+        img = Image.open(io.BytesIO(image_bytes)).convert("RGBA")
+        w, h = img.size
+
+        # 水印层（全透明底）
+        watermark = Image.new("RGBA", img.size, (0, 0, 0, 0))
+        draw = ImageDraw.Draw(watermark)
+
+        # 字体大小约为图片宽度的 3%，最小 18px
+        font_size = max(18, int(w * 0.03))
+        try:
+            font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", font_size)
+        except Exception:
+            font = ImageFont.load_default()
+
+        text = "MicLnk"
+        bbox = draw.textbbox((0, 0), text, font=font)
+        text_w = bbox[2] - bbox[0]
+        text_h = bbox[3] - bbox[1]
+
+        # 右下角，留 1% 边距
+        margin = max(8, int(w * 0.01))
+        x = w - text_w - margin
+        y = h - text_h - margin
+
+        # 描边（深色），增强对浅色背景的可读性
+        shadow_color = (0, 0, 0, 100)
+        for dx, dy in [(-1, -1), (1, -1), (-1, 1), (1, 1)]:
+            draw.text((x + dx, y + dy), text, font=font, fill=shadow_color)
+
+        # 主文字：白色半透明
+        draw.text((x, y), text, font=font, fill=(255, 255, 255, 160))
+
+        out = Image.alpha_composite(img, watermark).convert("RGB")
+        buf = io.BytesIO()
+        out.save(buf, format="PNG", optimize=False)
+        return buf.getvalue()
+    except Exception as e:
+        logger.warning(f"[水印] 添加失败，使用原图: {e}")
+        return image_bytes
+
+
 def upload_image_to_oss(image_bytes: bytes, user_id: str, session_id: str, image_index: int,
                         content_type: str = "image/png") -> Optional[str]:
     """
@@ -530,6 +577,9 @@ def upload_image_to_oss(image_bytes: bytes, user_id: str, session_id: str, image
         logger.info(f"上传图片到 OSS: {oss_key} type={content_type}")
         logger.info(f"图片大小: {len(image_bytes)} 字节")
         
+        # 添加水印
+        image_bytes = _add_watermark(image_bytes)
+
         start_time = time.time()
         s3_client.put_object(Bucket=OSS_BUCKET_NAME, Key=oss_key, Body=image_bytes, ContentType=content_type)
         upload_time = time.time() - start_time
