@@ -1325,10 +1325,13 @@ struct FrostedGlassDiffractionBackground: View {
 struct SceneRestoreImageCarouselView: View {
     let sceneImages: [SceneImage]
     var baseURL: String = ""
+    /// 每张图片的圆角半径；在 detail 页全宽无边时传 0
+    var imageCornerRadius: CGFloat = 24
     @State private var currentIndex: Int = 0
     @State private var showFullScreen = false
     @State private var fullScreenInitialIndex: Int = 0
-    private let imageAspectRatio: CGFloat = 4.0 / 3.0
+    // 服务端生成 4:5 竖版（Instagram），宽:高 = 4:5
+    private let imageAspectRatio: CGFloat = 4.0 / 5.0
 
     var body: some View {
         // 过滤掉生成失败的图片（image_url=null 且无 base64）
@@ -1359,6 +1362,7 @@ struct SceneRestoreImageCarouselView: View {
                         SceneRestoreImageView(
                             sceneImage: sceneImage,
                             baseURL: baseURL,
+                            cornerRadius: imageCornerRadius,
                             onTap: {
                                 fullScreenInitialIndex = index
                                 showFullScreen = true
@@ -1394,6 +1398,7 @@ struct SceneRestoreImageCarouselView: View {
 struct SceneRestoreImageView: View {
     let sceneImage: SceneImage
     var baseURL: String = ""
+    var cornerRadius: CGFloat = 24
     var onTap: (() -> Void)?
 
     @ViewBuilder
@@ -1425,7 +1430,7 @@ struct SceneRestoreImageView: View {
                 }
             }
             .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
-            .aspectRatio(4/3, contentMode: .fill)
+            .aspectRatio(4.0/5.0, contentMode: .fill)
             .clipped()
 
             // 底部渐变遮罩
@@ -1438,7 +1443,7 @@ struct SceneRestoreImageView: View {
                 endPoint: .top
             )
             .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
-            .aspectRatio(4/3, contentMode: .fill)
+            .aspectRatio(4.0/5.0, contentMode: .fill)
             .allowsHitTesting(false)
             
             // 底部文字内容
@@ -1462,9 +1467,9 @@ struct SceneRestoreImageView: View {
         }
         .buttonStyle(.plain)
         .frame(maxWidth: .infinity)
-        .aspectRatio(4/3, contentMode: .fit) // 与后端生成 4:3 图片一致
+        .aspectRatio(4.0/5.0, contentMode: .fit) // 服务端强制裁剪为 4:5 竖版
         .clipped()
-        .cornerRadius(24)
+        .cornerRadius(cornerRadius)
     }
 }
 

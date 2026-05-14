@@ -35,13 +35,14 @@ struct TaskDetailView: View {
                         .padding(.top, 10)
                         .padding(.bottom, 14)
 
-                        // ── Scene image carousel（全宽，4:3 比例与服务端生成一致）──
+                        // ── Scene image carousel（全宽无边，4:5 竖版与服务端一致）──
                         let sceneImgs = strategyAnalysis?.sceneImages ?? []
                         let imgW = geometry.size.width
-                        let imgH = imgW * 3.0 / 4.0   // 4:3 aspect ratio
+                        let imgH = imgW * 5.0 / 4.0   // 服务端强制裁剪 4:5
                         SceneRestoreImageCarouselView(
                             sceneImages: sceneImgs,
-                            baseURL: NetworkManager.shared.getBaseURL()
+                            baseURL: NetworkManager.shared.getBaseURL(),
+                            imageCornerRadius: 0         // 全宽贴边，不需要圆角
                         )
                         .frame(width: imgW, height: imgH)
                         .clipped()
