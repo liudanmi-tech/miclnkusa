@@ -35,12 +35,16 @@ struct TaskDetailView: View {
                         .padding(.top, 10)
                         .padding(.bottom, 14)
 
-                        // ── Scene image carousel ──
+                        // ── Scene image carousel（全宽，4:3 比例与服务端生成一致）──
                         let sceneImgs = strategyAnalysis?.sceneImages ?? []
+                        let imgW = geometry.size.width
+                        let imgH = imgW * 3.0 / 4.0   // 4:3 aspect ratio
                         SceneRestoreImageCarouselView(
                             sceneImages: sceneImgs,
                             baseURL: NetworkManager.shared.getBaseURL()
                         )
+                        .frame(width: imgW, height: imgH)
+                        .clipped()
 
                         // ── Info card ──
                         MomentInfoCard(
