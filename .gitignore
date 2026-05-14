@@ -15,3 +15,15 @@ venv/
 *.xcuserstate
 **/xcuserdata/
 .DS_Store
+
+# 敏感文件
+server_code/*.log
+server_code/service.log
+server_code/.env*
+server_code/SSH
+server_code/ld123456
+server_code/ld123456.pub
+server_code/response.json
+server_code/"# 1.*"
+*.m4a
+Untitled.png
