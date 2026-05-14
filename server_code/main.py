@@ -3610,7 +3610,36 @@ async def generate_strategies(
                     existing_strategy.strategies or [],
                     applied_skills
                 )
-            
+
+            # ── 刷新情绪卡的 mood_emoji_url（预签名 URL 每次服务时重新生成）──
+            try:
+                from api.profiles import _mood_state_to_emotion
+                _refreshed = []
+                for _card in result_dict["skill_cards"]:
+                    _c = dict(_card) if isinstance(_card, dict) else _card
+                    if isinstance(_c, dict) and _c.get("content_type") == "emotion":
+                        _content = dict(_c.get("content") or {})
+                        _mood_state_v = _content.get("mood_state", "")
+                        _slot = _mood_state_to_emotion(_mood_state_v)
+                        _oss_key = f"emotion_avatars/{user_id}/{_slot}.png"
+                        try:
+                            _presigned = await asyncio.to_thread(
+                                s3_client.generate_presigned_url,
+                                "get_object",
+                                Params={"Bucket": OSS_BUCKET_NAME, "Key": _oss_key},
+                                ExpiresIn=604800,
+                            ) if (USE_OSS and s3_client is not None) else None
+                        except Exception:
+                            _presigned = None
+                        _content["mood_emoji_url"] = _presigned
+                        logger.info(f"[情绪头像] 刷新 mood_emoji_url slot={_slot} has_url={bool(_presigned)}")
+                        _c = dict(_c)
+                        _c["content"] = _content
+                    _refreshed.append(_c)
+                result_dict["skill_cards"] = _refreshed
+            except Exception as _e:
+                logger.warning(f"[情绪头像] 刷新 mood_emoji_url 失败（非致命）: {_e}")
+
             logger.info(f"技能信息: applied_skills={applied_skills}, scene_category={scene_category}, scene_confidence={scene_confidence}")
             # 日志：返回给前端的 visual 中每个的 image_url / image_base64 情况
             for idx, v in enumerate(result_dict.get("visual", [])):

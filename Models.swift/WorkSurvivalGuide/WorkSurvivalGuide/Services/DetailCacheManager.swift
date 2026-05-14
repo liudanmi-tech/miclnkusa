@@ -85,6 +85,13 @@ class DetailCacheManager {
         cacheTimestamps[sessionId] = Date()
         print("✅ [DetailCacheManager] 已缓存策略分析: \(sessionId)")
     }
+
+    // 使策略缓存失效（强制下次重新请求）
+    func invalidateStrategy(for sessionId: String) {
+        strategyCache.removeValue(forKey: sessionId)
+        cacheTimestamps.removeValue(forKey: sessionId)
+        print("🗑️ [DetailCacheManager] 策略缓存已失效: \(sessionId)")
+    }
     
     // 检查是否正在加载策略
     func isLoadingStrategy(for sessionId: String) -> Bool {

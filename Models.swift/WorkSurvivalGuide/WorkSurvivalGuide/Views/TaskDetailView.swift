@@ -246,21 +246,33 @@ struct TaskDetailView: View {
     private func loadStrategyAnalysis() {
         let cacheManager = DetailCacheManager.shared
         if let cached = cacheManager.getCachedStrategy(sessionId: task.id) {
-            self.strategyAnalysis = cached
-            return
+            let emotionCard = cached.skillCards?.first(where: { $0.contentType == "emotion" })
+            let cachedUrl = emotionCard?.content?.moodEmojiUrl
+            print("📦 [TaskDetailView] 缓存策略 moodEmojiUrl=\(cachedUrl ?? "nil")")
+            // 如果缓存的情绪卡没有预签名 URL，跳过缓存强制重新请求
+            if cachedUrl != nil {
+                self.strategyAnalysis = cached
+                return
+            }
+            print("⚠️ [TaskDetailView] 缓存无 moodEmojiUrl，跳过缓存重新请求")
+            cacheManager.invalidateStrategy(for: task.id)
         }
         if strategyIsLoading { return }
         strategyIsLoading = true
+        print("🌐 [TaskDetailView] 请求服务端策略 sessionId=\(task.id)")
 
         Task {
             do {
                 let response = try await NetworkManager.shared.getStrategyAnalysis(sessionId: task.id)
+                let emotionCard = response.skillCards?.first(where: { $0.contentType == "emotion" })
+                print("✅ [TaskDetailView] 服务端响应 moodEmojiUrl=\(emotionCard?.content?.moodEmojiUrl ?? "nil")")
                 cacheManager.cacheStrategy(response, for: task.id)
                 await MainActor.run {
                     self.strategyAnalysis = response
                     self.strategyIsLoading = false
                 }
             } catch {
+                print("❌ [TaskDetailView] 策略加载失败: \(error)")
                 await MainActor.run { self.strategyIsLoading = false }
             }
         }
@@ -352,12 +364,17 @@ private struct MomentInfoCard: View {
                                     img.resizable().scaledToFill()
                                         .frame(width: 28, height: 28)
                                         .clipShape(Circle())
+                                case .failure(let err):
+                                    let _ = print("❌ [MomentInfoCard] AsyncImage 失败: \(err.localizedDescription)")
+                                    Text(moodEmoji ?? "😐").font(.system(size: 20))
                                 default:
                                     Text(moodEmoji ?? "😐").font(.system(size: 20))
                                 }
                             }
+                            .onAppear { print("🖼️ [MomentInfoCard] AsyncImage url=\(urlStr.prefix(100))") }
                         } else {
                             Text(moodEmoji ?? "😐").font(.system(size: 20))
+                                .onAppear { print("⚠️ [MomentInfoCard] moodEmojiUrl=nil，使用通用 emoji") }
                         }
                         Text(state)
                             .font(.system(size: 13, weight: .semibold))
