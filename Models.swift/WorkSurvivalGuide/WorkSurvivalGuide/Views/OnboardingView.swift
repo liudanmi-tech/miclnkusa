@@ -17,7 +17,7 @@ struct OnboardingView: View {
     @State private var selectedIdentity: UserIdentity? = nil
     @State private var selectedCategories: Set<OnboardingCategory> = []
 
-    private let maxCategories = 3
+    // 无上限，允许选择任意数量
 
     var body: some View {
         ZStack {
@@ -92,7 +92,7 @@ struct OnboardingView: View {
                         .font(.system(size: 26, weight: .bold))
                         .foregroundColor(.white)
                         .multilineTextAlignment(.center)
-                    Text("Pick up to \(maxCategories) areas")
+                    Text("Pick as many areas as you like")
                         .font(.system(size: 15))
                         .foregroundColor(.white.opacity(0.5))
                 }
@@ -105,11 +105,11 @@ struct OnboardingView: View {
                         CategoryCard(
                             category: category,
                             isSelected: selectedCategories.contains(category),
-                            isDisabled: !selectedCategories.contains(category) && selectedCategories.count >= maxCategories
+                            isDisabled: false
                         ) {
                             if selectedCategories.contains(category) {
                                 selectedCategories.remove(category)
-                            } else if selectedCategories.count < maxCategories {
+                            } else {
                                 selectedCategories.insert(category)
                             }
                         }
