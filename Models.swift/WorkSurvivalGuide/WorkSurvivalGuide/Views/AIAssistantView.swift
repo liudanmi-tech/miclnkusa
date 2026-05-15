@@ -47,6 +47,29 @@ struct AIAssistantView: View {
                 // ── Navigation Bar ──────────────────────────────────────────
                 navBar
 
+                // ── Restored banner ─────────────────────────────────────────
+                if vm.isRestored {
+                    HStack(spacing: 6) {
+                        Image(systemName: "clock.arrow.circlepath")
+                            .font(.system(size: 12))
+                        Text("已恢复上次对话")
+                            .font(.system(size: 12, design: .rounded))
+                        Spacer()
+                        Button {
+                            vm.clearHistory()
+                        } label: {
+                            Text("重新开始")
+                                .font(.system(size: 12, weight: .medium, design: .rounded))
+                                .foregroundColor(Color(hex: "#5E7C8B"))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .foregroundColor(AppColors.headerText.opacity(0.5))
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .background(Color.black.opacity(0.04))
+                }
+
                 // ── Image Stack ─────────────────────────────────────────────
                 if !sceneImages.isEmpty {
                     imageStack
