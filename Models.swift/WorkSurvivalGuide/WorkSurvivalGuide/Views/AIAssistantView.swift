@@ -173,14 +173,12 @@ struct AIAssistantView: View {
                 let offsetY: CGFloat = i == 0 ? 0 : CGFloat(i) * 4
 
                 GeometryReader { geo in
-                    AsyncImage(url: img.getAccessibleImageURL(baseURL: baseURL).flatMap { URL(string: $0) }) { phase in
-                        switch phase {
-                        case .success(let image):
-                            image.resizable().scaledToFill()
-                        default:
-                            Color(hex: "#1A1A2E")
-                        }
-                    }
+                    ImageLoaderView(
+                        imageUrl: img.getAccessibleImageURL(baseURL: baseURL),
+                        imageBase64: img.imageBase64,
+                        placeholder: "",
+                        contentMode: .fill
+                    )
                     .frame(width: geo.size.width, height: geo.size.height)
                     .clipped()
                     .cornerRadius(12)
