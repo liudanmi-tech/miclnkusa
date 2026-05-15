@@ -3216,17 +3216,25 @@ async def _generate_strategies_core(
                 emotion_insight = skill_result["emotion_insight"]
                 _mood_state_val = emotion_insight.get("mood_state", "平常心")
                 # 千人千面情绪头像：R2 预签名 URL（7天有效，无需客户端携带 JWT）
+                # [节点3-生成] mood_emoji_url
                 try:
                     from api.profiles import _mood_state_to_emotion
                     _emotion_slot = _mood_state_to_emotion(_mood_state_val)
                     _oss_key = f"emotion_avatars/{user_id}/{_emotion_slot}.png"
-                    _mood_emoji_url = await asyncio.to_thread(
-                        s3_client.generate_presigned_url,
-                        "get_object",
-                        Params={"Bucket": OSS_BUCKET_NAME, "Key": _oss_key},
-                        ExpiresIn=604800,  # 7天
-                    ) if (USE_OSS and s3_client is not None) else None
-                except Exception:
+                    logger.info(f"[节点3-emoji] user={user_id[:8]} slot={_emotion_slot} oss_key={_oss_key} USE_OSS={USE_OSS} s3_ok={s3_client is not None}")
+                    if USE_OSS and s3_client is not None:
+                        _mood_emoji_url = await asyncio.to_thread(
+                            s3_client.generate_presigned_url,
+                            "get_object",
+                            Params={"Bucket": OSS_BUCKET_NAME, "Key": _oss_key},
+                            ExpiresIn=604800,
+                        )
+                        logger.info(f"[节点3-emoji] ✅ presigned URL 生成成功 url[:80]={str(_mood_emoji_url)[:80]}")
+                    else:
+                        _mood_emoji_url = None
+                        logger.warning(f"[节点3-emoji] ❌ USE_OSS={USE_OSS} s3_client={s3_client is not None}，跳过")
+                except Exception as _ex:
+                    logger.error(f"[节点3-emoji] ❌ 异常: {_ex}", exc_info=True)
                     _mood_emoji_url = None
                 skill_cards.append({
                     "skill_id": skill_id,
@@ -3611,7 +3619,7 @@ async def generate_strategies(
                     applied_skills
                 )
 
-            # ── 刷新情绪卡的 mood_emoji_url（预签名 URL 每次服务时重新生成）──
+            # ── [节点4-缓存] 刷新情绪卡 mood_emoji_url（每次 serve 重新生成预签名 URL）──
             try:
                 from api.profiles import _mood_state_to_emotion
                 _refreshed = []
@@ -3622,23 +3630,29 @@ async def generate_strategies(
                         _mood_state_v = _content.get("mood_state", "")
                         _slot = _mood_state_to_emotion(_mood_state_v)
                         _oss_key = f"emotion_avatars/{user_id}/{_slot}.png"
+                        logger.info(f"[节点4-emoji] 刷新缓存 user={user_id[:8]} slot={_slot} USE_OSS={USE_OSS} s3_ok={s3_client is not None}")
                         try:
-                            _presigned = await asyncio.to_thread(
-                                s3_client.generate_presigned_url,
-                                "get_object",
-                                Params={"Bucket": OSS_BUCKET_NAME, "Key": _oss_key},
-                                ExpiresIn=604800,
-                            ) if (USE_OSS and s3_client is not None) else None
-                        except Exception:
+                            if USE_OSS and s3_client is not None:
+                                _presigned = await asyncio.to_thread(
+                                    s3_client.generate_presigned_url,
+                                    "get_object",
+                                    Params={"Bucket": OSS_BUCKET_NAME, "Key": _oss_key},
+                                    ExpiresIn=604800,
+                                )
+                                logger.info(f"[节点4-emoji] ✅ url[:80]={str(_presigned)[:80]}")
+                            else:
+                                _presigned = None
+                                logger.warning(f"[节点4-emoji] ❌ OSS 不可用")
+                        except Exception as _ex2:
+                            logger.error(f"[节点4-emoji] ❌ presign 失败: {_ex2}")
                             _presigned = None
                         _content["mood_emoji_url"] = _presigned
-                        logger.info(f"[情绪头像] 刷新 mood_emoji_url slot={_slot} has_url={bool(_presigned)}")
                         _c = dict(_c)
                         _c["content"] = _content
                     _refreshed.append(_c)
                 result_dict["skill_cards"] = _refreshed
             except Exception as _e:
-                logger.warning(f"[情绪头像] 刷新 mood_emoji_url 失败（非致命）: {_e}")
+                logger.warning(f"[节点4-emoji] 刷新失败（非致命）: {_e}")
 
             logger.info(f"技能信息: applied_skills={applied_skills}, scene_category={scene_category}, scene_confidence={scene_confidence}")
             # 日志：返回给前端的 visual 中每个的 image_url / image_base64 情况

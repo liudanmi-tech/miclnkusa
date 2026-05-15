@@ -167,12 +167,18 @@ struct DebugPanelView: View {
                 // Session ID
                 sessionRow
 
+                // Emoji User ID (visible once emoji is loaded)
+                if logger.emojiUserId != "—" {
+                    emojiUserRow
+                }
+
                 // Status grid
                 VStack(spacing: 4) {
                     statusRow(icon: "arrow.up.circle.fill",   label: "Upload",   value: logger.uploadStatus,   color: "#60A5FA")
                     statusRow(icon: "waveform",               label: "Analysis", value: logger.analysisStatus, color: "#A78BFA")
                     statusRow(icon: "target",                 label: "Skills",   value: logger.skillStatus,    color: "#FBBF24")
                     statusRow(icon: "photo.stack.fill",       label: "Images",   value: logger.imageStatus,    color: "#34D399")
+                    statusRow(icon: "face.smiling.fill",      label: "Emoji",    value: "\(logger.emojiSlot) \(logger.emojiUrlStatus)", color: "#F472B6")
                 }
 
                 // Last error
@@ -252,6 +258,31 @@ struct DebugPanelView: View {
                 Text("No session yet")
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundColor(Color.white.opacity(0.25))
+            }
+        }
+        .padding(10)
+        .background(Color.white.opacity(0.05))
+        .cornerRadius(8)
+    }
+
+    private var emojiUserRow: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Label("EMOJI USER ID (last 8)", systemImage: "face.smiling.fill")
+                .font(.system(size: 9, weight: .bold, design: .monospaced))
+                .foregroundColor(Color.white.opacity(0.35))
+            HStack {
+                Text("…\(logger.emojiUserId)")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(Color(hex: "#F472B6"))
+                Spacer()
+                Button {
+                    UIPasteboard.general.string = logger.emojiUserId
+                } label: {
+                    Image(systemName: "doc.on.doc")
+                        .font(.system(size: 12))
+                        .foregroundColor(Color(hex: "#F472B6").opacity(0.7))
+                }
+                .buttonStyle(.plain)
             }
         }
         .padding(10)

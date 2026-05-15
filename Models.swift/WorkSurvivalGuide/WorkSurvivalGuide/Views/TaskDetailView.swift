@@ -252,6 +252,13 @@ struct TaskDetailView: View {
             // 如果缓存的情绪卡没有预签名 URL，跳过缓存强制重新请求
             if cachedUrl != nil {
                 self.strategyAnalysis = cached
+                #if DEBUG || INTERNALTEST
+                DebugLogger.shared.setEmojiInfo(
+                    userId: task.id,
+                    slot: emotionCard?.content?.moodState,
+                    urlStr: cachedUrl
+                )
+                #endif
                 return
             }
             print("⚠️ [TaskDetailView] 缓存无 moodEmojiUrl，跳过缓存重新请求")
@@ -266,6 +273,13 @@ struct TaskDetailView: View {
                 let response = try await NetworkManager.shared.getStrategyAnalysis(sessionId: task.id)
                 let emotionCard = response.skillCards?.first(where: { $0.contentType == "emotion" })
                 print("✅ [TaskDetailView] 服务端响应 moodEmojiUrl=\(emotionCard?.content?.moodEmojiUrl ?? "nil")")
+                #if DEBUG || INTERNALTEST
+                DebugLogger.shared.setEmojiInfo(
+                    userId: task.id,
+                    slot: emotionCard?.content?.moodState,
+                    urlStr: emotionCard?.content?.moodEmojiUrl
+                )
+                #endif
                 cacheManager.cacheStrategy(response, for: task.id)
                 await MainActor.run {
                     self.strategyAnalysis = response
@@ -303,19 +317,6 @@ private struct MomentInfoCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             // Scene description
-            if let desc = sceneDescription {
-                Text(desc)
-                    .font(.system(size: 14, weight: .regular))
-                    .foregroundColor(.white.opacity(0.75))
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
-            } else if strategyIsLoading {
-                Text("Analyzing scene…")
-                    .font(.system(size: 13))
-                    .foregroundColor(.white.opacity(0.4))
-                    .italic()
-            }
-
             // Action row: summary | play | share --- mood
             HStack(spacing: 0) {
                 // Summary button
@@ -362,18 +363,18 @@ private struct MomentInfoCard: View {
                                 switch phase {
                                 case .success(let img):
                                     img.resizable().scaledToFill()
-                                        .frame(width: 28, height: 28)
+                                        .frame(width: 56, height: 56)
                                         .clipShape(Circle())
                                 case .failure(let err):
                                     let _ = print("❌ [MomentInfoCard] AsyncImage 失败: \(err.localizedDescription)")
-                                    Text(moodEmoji ?? "😐").font(.system(size: 20))
+                                    Text(moodEmoji ?? "😐").font(.system(size: 40))
                                 default:
-                                    Text(moodEmoji ?? "😐").font(.system(size: 20))
+                                    Text(moodEmoji ?? "😐").font(.system(size: 40))
                                 }
                             }
                             .onAppear { print("🖼️ [MomentInfoCard] AsyncImage url=\(urlStr.prefix(100))") }
                         } else {
-                            Text(moodEmoji ?? "😐").font(.system(size: 20))
+                            Text(moodEmoji ?? "😐").font(.system(size: 40))
                                 .onAppear { print("⚠️ [MomentInfoCard] moodEmojiUrl=nil，使用通用 emoji") }
                         }
                         Text(state)

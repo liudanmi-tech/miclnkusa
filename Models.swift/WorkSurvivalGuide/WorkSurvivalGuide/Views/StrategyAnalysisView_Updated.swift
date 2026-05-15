@@ -111,7 +111,7 @@ struct StrategyAnalysisView_Updated: View {
                         if let skills = analysis.appliedSkills, skills.count >= 1,
                            !analysis.visual.isEmpty || !analysis.strategies.isEmpty {
                             let content = SkillCardContent(
-                                sighCount: nil, hahaCount: nil, moodState: nil, moodEmoji: nil, charCount: nil,
+                                sighCount: nil, hahaCount: nil, moodState: nil, moodEmoji: nil, moodEmojiUrl: nil, charCount: nil,
                                 visual: analysis.visual.isEmpty ? nil : analysis.visual,
                                 strategies: analysis.strategies.isEmpty ? nil : analysis.strategies,
                                 defenseEnergyPct: nil, dominantDefense: nil, statusAssessment: nil,

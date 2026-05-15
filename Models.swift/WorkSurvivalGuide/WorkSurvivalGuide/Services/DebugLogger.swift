@@ -61,6 +61,10 @@ final class DebugLogger: ObservableObject {
     @Published private(set) var skillStatus:    String = "—"
     @Published private(set) var imageStatus:    String = "—"
     @Published private(set) var lastError:      String?
+    /// 千人千面情绪头像状态
+    @Published private(set) var emojiUserId:    String = "—"   // user_id 后8位
+    @Published private(set) var emojiSlot:      String = "—"   // happy/calm/sad/excited
+    @Published private(set) var emojiUrlStatus: String = "—"   // nil / presigned / old-api
     /// 用户点击事件列表（最近 20 条）
     @Published private(set) var tapEvents: [String] = []
 
@@ -97,6 +101,26 @@ final class DebugLogger: ObservableObject {
         run { self.imageStatus = s }
     }
 
+    /// 记录情绪头像 URL 状态，供 Debug 面板展示
+    func setEmojiInfo(userId: String?, slot: String?, urlStr: String?) {
+        run {
+            self.emojiUserId = userId.map { String($0.suffix(8)) } ?? "—"
+            self.emojiSlot   = slot ?? "—"
+            if let u = urlStr {
+                if u.contains("r2.cloudflarestorage.com") {
+                    self.emojiUrlStatus = "✅ presigned"
+                } else if u.contains("emotion-avatar") {
+                    self.emojiUrlStatus = "⚠️ old-api"
+                } else {
+                    self.emojiUrlStatus = "⚠️ unknown"
+                }
+            } else {
+                self.emojiUrlStatus = "❌ nil"
+            }
+            self.append(.info, .images, "Emoji uid=\(self.emojiUserId) slot=\(self.emojiSlot) url=\(self.emojiUrlStatus)")
+        }
+    }
+
     func log(_ level: DebugLogEntry.Level, _ category: DebugLogEntry.Category, _ message: String) {
         run { self.append(level, category, message) }
     }
@@ -119,6 +143,9 @@ final class DebugLogger: ObservableObject {
             self.skillStatus   = "—"
             self.imageStatus   = "—"
             self.lastError     = nil
+            self.emojiUserId   = "—"
+            self.emojiSlot     = "—"
+            self.emojiUrlStatus = "—"
             self.tapEvents.removeAll()
         }
     }
