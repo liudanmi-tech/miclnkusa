@@ -2191,6 +2191,22 @@ async def analyze_audio_async(session_id: str, temp_file_path: str, file_filenam
                         enable_graph=True,
                     ))
                     logger.info(f"[记忆] B 钩子 add_memory 已异步触发（fire-and-forget）: session_id={session_id}")
+
+                    # 结构化记忆写入（带标签格式）
+                    try:
+                        from services.structured_memory import extract_and_save_structured_memories
+                        struct_content = f"{payload}\n\n档案人物：{list(profile_names.values())}"
+                        asyncio.create_task(asyncio.to_thread(
+                            extract_and_save_structured_memories,
+                            struct_content,
+                            user_id,
+                            session_id,
+                            {"source": "transcript"},
+                        ))
+                        logger.info(f"[结构记忆] B 钩子异步触发: session_id={session_id}")
+                    except Exception as sm_err:
+                        logger.warning(f"[结构记忆] B 钩子触发失败: {sm_err}")
+
                 except Exception as mem_err:
                     logger.warning(f"[记忆] B 钩子写入失败: session_id={session_id} error={mem_err}", exc_info=True)
             else:
@@ -3047,9 +3063,14 @@ async def _generate_strategies_core(
                 logger.info(f"[记忆] 检索 query 来源: conversation_summary={bool(getattr(ar_row, 'conversation_summary', None))} summary={bool(ar_row.summary)} search_query_len={len(search_query)}")
                 if search_query:
                     from services.memory_service import search_memory
-                    mem_results = await asyncio.to_thread(
-                        search_memory, search_query, user_id, limit=5
-                    )
+                    try:
+                        mem_results = await asyncio.wait_for(
+                            asyncio.to_thread(search_memory, search_query, user_id, limit=5),
+                            timeout=3.0,
+                        )
+                    except asyncio.TimeoutError:
+                        mem_results = []
+                        logger.warning(f"[记忆] 检索超时(3s)，跳过: session_id={session_id}")
                     if mem_results:
                         memory_context = "\n".join(f"- {m}" for m in mem_results)
                         logger.info(f"[记忆] 检索成功注入技能: session_id={session_id} 命中={len(mem_results)} 条 context_len={len(memory_context)}")

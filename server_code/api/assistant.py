@@ -197,16 +197,21 @@ async def assistant_chat(
     except Exception as exc:
         logger.warning(f"[assistant] 取对话摘要失败: {exc}")
 
-    # 4. 取记忆上下文
+    # 4. 取记忆上下文（含超时保护）
     memory_used = False
     memory_context = ""
     try:
         from services.memory_service import search_memory
         query = f"{skill_name} {conv_summary[:100]}"
-        mem_results = await asyncio.to_thread(search_memory, query, user_id, limit=3)
+        mem_results = await asyncio.wait_for(
+            asyncio.to_thread(search_memory, query, user_id, limit=3),
+            timeout=2.0,
+        )
         if mem_results:
             memory_context = "\n".join(f"- {m}" for m in mem_results)
             memory_used = True
+    except asyncio.TimeoutError:
+        logger.warning("[assistant] 记忆检索超时(2s)，跳过")
     except Exception as exc:
         logger.warning(f"[assistant] 记忆获取失败: {exc}")
 
@@ -293,6 +298,32 @@ async def assistant_chat(
             yield _sse({"type": "suggestions", "items": suggestions[:4]})
 
         yield _sse({"type": "done"})
+
+        # 对话结束后，异步写入结构化记忆（fire-and-forget，不阻塞 SSE）
+        if full_text and req.message != "__INIT__":
+            try:
+                from services.structured_memory import extract_and_save_structured_memories
+                # 组装本轮对话内容（含历史 + 本轮问答）
+                history_text = "\n".join(
+                    f"{'用户' if h.role == 'user' else 'AI'}: {h.content}"
+                    for h in req.history[-6:]   # 最近6条，控制长度
+                )
+                round_content = (
+                    f"技能场景：{skill_name}\n"
+                    f"对话摘要：{conv_summary[:200]}\n"
+                    f"---\n{history_text}\n"
+                    f"用户：{req.message}\nAI：{full_text[:500]}"
+                )
+                asyncio.create_task(asyncio.to_thread(
+                    extract_and_save_structured_memories,
+                    round_content,
+                    user_id,
+                    req.session_id,
+                    {"source": "assistant_chat", "skill_id": req.skill_id},
+                ))
+                logger.info(f"[结构记忆] assistant 对话异步触发: session_id={req.session_id}")
+            except Exception as sm_err:
+                logger.warning(f"[结构记忆] assistant 触发失败: {sm_err}")
 
     return StreamingResponse(
         event_generator(),
