@@ -82,27 +82,37 @@ final class AIAssistantViewModel: ObservableObject {
             message: message,
             history: history,
             onMeta: { [weak self] skillName, memoryUsed in
-                self?.skillName = skillName
-                self?.memoryUsed = memoryUsed
+                Task { @MainActor [weak self] in
+                    self?.skillName = skillName
+                    self?.memoryUsed = memoryUsed
+                }
             },
             onToken: { [weak self] token in
-                self?.streamingText += token
+                Task { @MainActor [weak self] in
+                    self?.streamingText += token
+                }
             },
             onSuggestions: { [weak self] items in
-                self?.suggestions = items
+                Task { @MainActor [weak self] in
+                    self?.suggestions = items
+                }
             },
             onDone: { [weak self] in
-                guard let self else { return }
-                if !streamingText.isEmpty {
-                    messages.append(AssistantMessage(role: .assistant, content: streamingText))
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    if !self.streamingText.isEmpty {
+                        self.messages.append(AssistantMessage(role: .assistant, content: self.streamingText))
+                    }
+                    self.streamingText = ""
+                    self.isStreaming = false
                 }
-                streamingText = ""
-                isStreaming = false
             },
             onError: { [weak self] err in
-                self?.streamingText = ""
-                self?.isStreaming = false
-                self?.errorMessage = err
+                Task { @MainActor [weak self] in
+                    self?.streamingText = ""
+                    self?.isStreaming = false
+                    self?.errorMessage = err
+                }
             }
         )
     }

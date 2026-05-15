@@ -173,7 +173,7 @@ struct AIAssistantView: View {
                 let offsetY: CGFloat = i == 0 ? 0 : CGFloat(i) * 4
 
                 GeometryReader { geo in
-                    AsyncImage(url: img.getAccessibleImageURL(baseURL: baseURL)) { phase in
+                    AsyncImage(url: img.getAccessibleImageURL(baseURL: baseURL).flatMap { URL(string: $0) }) { phase in
                         switch phase {
                         case .success(let image):
                             image.resizable().scaledToFill()
