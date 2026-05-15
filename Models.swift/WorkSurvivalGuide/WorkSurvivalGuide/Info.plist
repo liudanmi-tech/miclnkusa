@@ -6,6 +6,8 @@
 	<string></string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>MicLnk uses the microphone to capture your mood and moments. Your recordings are private and never shared.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>MicLnk uses speech recognition to transcribe your voice messages into text for the AI Assistant.</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSExceptionDomains</key>

@@ -160,6 +160,10 @@ app.include_router(profiles_router)
 from api.audio_segments import router as audio_segments_router
 app.include_router(audio_segments_router)
 
+# 注册 AI Assistant 路由
+from api.assistant import router as assistant_router
+app.include_router(assistant_router, prefix="/api/v1")
+
 # 导入数据库相关
 from database.connection import get_db, init_db, close_db
 from database.models import User, Session, AnalysisResult, StrategyAnalysis, Skill, SkillExecution, Profile

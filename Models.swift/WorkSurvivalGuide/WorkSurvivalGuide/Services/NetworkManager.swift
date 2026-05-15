@@ -855,6 +855,96 @@ class NetworkManager {
         }
     }
 
+    // MARK: - AI Assistant Chat (SSE)
+
+    /// 向 AI Assistant 发消息，SSE 流式接收回复。
+    /// onMeta:        收到元数据（skill_name, memory_used）
+    /// onToken:       收到流式 token（主线程）
+    /// onSuggestions: 收到猜你想问列表（主线程）
+    /// onDone:        流结束（主线程）
+    /// onError:       出错（主线程）
+    func streamAssistantChat(
+        sessionId: String,
+        skillId: String,
+        message: String,
+        history: [[String: String]],
+        onMeta:        @escaping @Sendable (String, Bool) -> Void,
+        onToken:       @escaping @Sendable (String) -> Void,
+        onSuggestions: @escaping @Sendable ([String]) -> Void,
+        onDone:        @escaping @Sendable () -> Void,
+        onError:       @escaping @Sendable (String) -> Void
+    ) {
+        let token = getAuthToken()
+        guard !token.isEmpty else { onError("未登录，请先登录"); return }
+        guard let url = URL(string: "\(baseURLForWrite)/assistant/chat") else {
+            onError("Invalid URL"); return
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = 180
+
+        let body: [String: Any] = [
+            "session_id": sessionId,
+            "skill_id": skillId,
+            "message": message,
+            "history": history
+        ]
+        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+
+        Task {
+            do {
+                let (asyncBytes, response) = try await URLSession.shared.bytes(for: request)
+                guard let http = response as? HTTPURLResponse else {
+                    await MainActor.run { onError("Invalid response") }; return
+                }
+                guard http.statusCode == 200 else {
+                    await MainActor.run { onError("Server error: \(http.statusCode)") }; return
+                }
+
+                for try await line in asyncBytes.lines {
+                    guard line.hasPrefix("data: ") else { continue }
+                    let jsonStr = String(line.dropFirst(6))
+                    guard let data = jsonStr.data(using: .utf8),
+                          let event = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                          let type = event["type"] as? String else { continue }
+
+                    switch type {
+                    case "meta":
+                        let skillName = event["skill_name"] as? String ?? ""
+                        let memUsed   = event["memory_used"] as? Bool ?? false
+                        await MainActor.run { onMeta(skillName, memUsed) }
+
+                    case "token":
+                        let content = event["content"] as? String ?? ""
+                        if !content.isEmpty {
+                            await MainActor.run { onToken(content) }
+                        }
+
+                    case "suggestions":
+                        let items = event["items"] as? [String] ?? []
+                        await MainActor.run { onSuggestions(items) }
+
+                    case "done":
+                        await MainActor.run { onDone() }; return
+
+                    case "error":
+                        let msg = event["content"] as? String ?? "Unknown error"
+                        await MainActor.run { onError(msg) }; return
+
+                    default: break
+                    }
+                }
+                await MainActor.run { onDone() }
+            } catch {
+                await MainActor.run { onError(error.localizedDescription) }
+            }
+        }
+    }
+
     // 获取心情趋势（跨对话）
     func getEmotionTrend(limit: Int = 30) async throws -> EmotionTrendResponse {
         if config.useMockData {

@@ -14,6 +14,8 @@ struct StrategyAnalysisView_Updated: View {
     @State private var strategyPopupItem: StrategyItem?
     @State private var mutableSkillCards: [SkillCard] = []
     @State private var hasScheduledImageRefresh = false
+    @State private var assistantCard: SkillCard? = nil        // AI Assistant 导航
+    @State private var assistantSceneImages: [SceneImage] = []  // 传给 Assistant 的图片
 
     // 跨 View 生命周期的图片刷新标记（UserDefaults 持久化，避免每次进入都重复触发）
     private func imageRefreshKey() -> String { "imgRefreshed_\(sessionId)" }
@@ -139,6 +141,10 @@ struct StrategyAnalysisView_Updated: View {
                                 if let idx = mutableSkillCards.firstIndex(where: { $0.skillId == updatedCard.skillId }) {
                                     mutableSkillCards[idx] = updatedCard
                                 }
+                            },
+                            onOpenAssistant: { card in
+                                assistantSceneImages = analysis.sceneImages ?? []
+                                assistantCard = card
                             }
                         )
                         .padding(.horizontal, 0.69)
@@ -202,6 +208,15 @@ struct StrategyAnalysisView_Updated: View {
             StrategyPouchSheet(strategy: strategy) {
                 strategyPopupItem = nil
             }
+        }
+        .fullScreenCover(item: $assistantCard) { card in
+            AIAssistantView(
+                sessionId: sessionId,
+                skillCard: card,
+                sceneImages: assistantSceneImages,
+                baseURL: baseURL,
+                onDismiss: { assistantCard = nil }
+            )
         }
         .onAppear {
             // 优先使用缓存
@@ -390,6 +405,7 @@ struct SkillCardsTabView: View {
     let sessionId: String
     let baseURL: String
     let onCardUpdated: (SkillCard) -> Void
+    var onOpenAssistant: ((SkillCard) -> Void)? = nil
     @State private var selectedScene: String = ""
     @State private var expandedCardIds: Set<String> = []
 
@@ -449,7 +465,8 @@ struct SkillCardsTabView: View {
                             sessionId: sessionId,
                             isExpanded: expandedCardIds.contains(card.id),
                             baseURL: baseURL,
-                            onCardUpdated: onCardUpdated
+                            onCardUpdated: onCardUpdated,
+                            onOpenAssistant: onOpenAssistant
                         ) {
                             withAnimation(.easeInOut(duration: 0.25)) {
                                 if expandedCardIds.contains(card.id) {
@@ -542,6 +559,7 @@ private struct SkillAccordionPanel: View {
     let isExpanded: Bool
     let baseURL: String
     let onCardUpdated: (SkillCard) -> Void
+    var onOpenAssistant: ((SkillCard) -> Void)? = nil
     let onToggle: () -> Void
 
     @State private var isAnalyzing = false
@@ -664,7 +682,10 @@ private struct SkillAccordionPanel: View {
                         MentalHealthCardView(content: content)
                     } else if let strategies = card.content?.strategies, !strategies.isEmpty {
                         // 策略型卡片只展示策略列表（visual 已在顶部轮播展示）
-                        SkillStrategiesOnlyView(strategies: strategies)
+                        SkillStrategiesOnlyView(
+                            strategies: strategies,
+                            onOpenAssistant: onOpenAssistant.map { handler in { handler(card) } }
+                        )
                     } else {
                         Text("No content")
                             .font(.system(size: 14, design: .rounded))
@@ -704,8 +725,9 @@ private struct SkillAccordionPanel: View {
 // 仅策略列表（不含 visual，用于手风琴面板内部）
 private struct SkillStrategiesOnlyView: View {
     let strategies: [StrategyItem]
+    var onOpenAssistant: (() -> Void)? = nil
     @State private var strategyPopupItem: StrategyItem?
-    
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Recommended Strategy")
@@ -714,7 +736,11 @@ private struct SkillStrategiesOnlyView: View {
                 .textCase(.uppercase)
             ForEach(Array(strategies.prefix(4).enumerated()), id: \.element.id) { index, strategy in
                 StrategyButtonView(strategy: strategy, index: index) {
-                    strategyPopupItem = strategy
+                    if let handler = onOpenAssistant {
+                        handler()   // 跳转 AI Assistant
+                    } else {
+                        strategyPopupItem = strategy  // 兜底：弹窗
+                    }
                 }
             }
         }
