@@ -3,9 +3,6 @@
 //  WorkSurvivalGuide
 //
 //  AI Assistant 全屏对话页
-//  顶部：场景图片堆叠（只展示，不交互）
-//  中间：流式 AI 消息 + 猜你想问
-//  底部：文字 + 语音输入框
 //
 
 import SwiftUI
@@ -23,7 +20,7 @@ struct AIAssistantView: View {
 
     @StateObject private var vm: AIAssistantViewModel
     @State private var inputText: String = ""
-    @State private var scrollProxy: ScrollViewProxy? = nil
+    @FocusState private var inputFocused: Bool
 
     // Voice input
     @State private var isRecording = false
@@ -132,7 +129,7 @@ struct AIAssistantView: View {
                                 .id("bottom")
                         }
                     }
-                    .onAppear { scrollProxy = proxy }
+                    .onTapGesture { inputFocused = false }
                     .onChange(of: vm.streamingText) { _ in
                         withAnimation { proxy.scrollTo("streaming", anchor: .bottom) }
                     }
@@ -213,6 +210,7 @@ struct AIAssistantView: View {
         }
         .frame(height: 130)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .allowsHitTesting(false)
     }
 
     // MARK: - Data Source Tags
@@ -240,6 +238,7 @@ struct AIAssistantView: View {
             LazyVGrid(columns: cols, spacing: 8) {
                 ForEach(vm.suggestions, id: \.self) { q in
                     Button {
+                        inputFocused = false
                         vm.selectSuggestion(q)
                     } label: {
                         Text(q)
@@ -266,10 +265,8 @@ struct AIAssistantView: View {
         HStack(spacing: 10) {
             // Voice button (press and hold)
             MicButton(isRecording: $isRecording) {
-                // Recording started
                 voiceService.startRecording()
             } onRelease: {
-                // Recording stopped → fill input field
                 voiceService.stopRecording { transcribed in
                     if let text = transcribed, !text.isEmpty {
                         inputText = text
@@ -286,6 +283,7 @@ struct AIAssistantView: View {
                         .padding(.leading, 14)
                 }
                 TextField("", text: $inputText)
+                    .focused($inputFocused)
                     .font(.system(size: 15, design: .rounded))
                     .foregroundColor(AppColors.headerText)
                     .padding(.horizontal, 14)
@@ -299,22 +297,38 @@ struct AIAssistantView: View {
                     .overlay(Capsule().stroke(Color(hex: "#E8DCC6").opacity(0.3), lineWidth: 1))
             )
 
-            // Send button
-            Button(action: sendMessage) {
-                Image(systemName: "paperplane.fill")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundColor(inputText.isEmpty || vm.isStreaming ? AppColors.headerText.opacity(0.3) : Color(hex: "#5E7C8B"))
-                    .frame(width: 38, height: 38)
-                    .background(
-                        Circle()
-                            .fill(inputText.isEmpty || vm.isStreaming
-                                  ? Color.black.opacity(0.05)
-                                  : Color(hex: "#5E7C8B").opacity(0.15))
-                    )
+            // 发送 / 停止 按钮
+            if vm.isStreaming {
+                // 生成中 → 点击停止
+                Button(action: { vm.cancelStream() }) {
+                    Image(systemName: "stop.fill")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundColor(.white)
+                        .frame(width: 38, height: 38)
+                        .background(Circle().fill(Color(hex: "#E57373")))
+                }
+                .buttonStyle(.plain)
+                .transition(.scale.combined(with: .opacity))
+            } else {
+                // 空闲 → 发送
+                Button(action: sendMessage) {
+                    Image(systemName: "paperplane.fill")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundColor(inputText.isEmpty ? AppColors.headerText.opacity(0.3) : Color(hex: "#5E7C8B"))
+                        .frame(width: 38, height: 38)
+                        .background(
+                            Circle()
+                                .fill(inputText.isEmpty
+                                      ? Color.black.opacity(0.05)
+                                      : Color(hex: "#5E7C8B").opacity(0.15))
+                        )
+                }
+                .buttonStyle(.plain)
+                .disabled(inputText.isEmpty)
+                .transition(.scale.combined(with: .opacity))
             }
-            .buttonStyle(.plain)
-            .disabled(inputText.isEmpty || vm.isStreaming)
         }
+        .animation(.spring(response: 0.25, dampingFraction: 0.8), value: vm.isStreaming)
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
         .background(
@@ -327,8 +341,92 @@ struct AIAssistantView: View {
 
     private func sendMessage() {
         let text = inputText
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         inputText = ""
+        inputFocused = false   // 收起键盘
         vm.send(text: text)
+    }
+}
+
+// MARK: - Markdown Text View
+
+/// 轻量级 Markdown 渲染：支持 #/##/### 标题、- 列表、**bold**、*italic*
+struct MarkdownTextView: View {
+    let text: String
+    var baseFontSize: CGFloat = 15
+    var textColor: Color = AppColors.headerText
+
+    private enum Block {
+        case h1(String), h2(String), h3(String)
+        case bullet(String)
+        case plain(String)
+        case empty
+    }
+
+    private var blocks: [Block] {
+        text.components(separatedBy: "\n").map { line in
+            if line.hasPrefix("### ") { return .h3(String(line.dropFirst(4))) }
+            if line.hasPrefix("## ")  { return .h2(String(line.dropFirst(3))) }
+            if line.hasPrefix("# ")   { return .h1(String(line.dropFirst(2))) }
+            if line.hasPrefix("- ") || line.hasPrefix("* ") { return .bullet(String(line.dropFirst(2))) }
+            if line.hasPrefix("• ")   { return .bullet(String(line.dropFirst(2))) }
+            if line.trimmingCharacters(in: .whitespaces).isEmpty { return .empty }
+            return .plain(line)
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
+                blockView(block)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func blockView(_ block: Block) -> some View {
+        switch block {
+        case .h1(let t):
+            inlineText(t)
+                .font(.system(size: baseFontSize + 5, weight: .bold, design: .rounded))
+                .foregroundColor(textColor)
+                .padding(.top, 6)
+        case .h2(let t):
+            inlineText(t)
+                .font(.system(size: baseFontSize + 3, weight: .bold, design: .rounded))
+                .foregroundColor(textColor)
+                .padding(.top, 4)
+        case .h3(let t):
+            inlineText(t)
+                .font(.system(size: baseFontSize + 1, weight: .semibold, design: .rounded))
+                .foregroundColor(textColor)
+                .padding(.top, 2)
+        case .bullet(let t):
+            HStack(alignment: .top, spacing: 6) {
+                Text("•")
+                    .font(.system(size: baseFontSize, design: .rounded))
+                    .foregroundColor(textColor.opacity(0.6))
+                inlineText(t)
+                    .font(.system(size: baseFontSize, design: .rounded))
+                    .foregroundColor(textColor)
+            }
+        case .plain(let t):
+            inlineText(t)
+                .font(.system(size: baseFontSize, design: .rounded))
+                .foregroundColor(textColor)
+        case .empty:
+            Color.clear.frame(height: 4)
+        }
+    }
+
+    private func inlineText(_ raw: String) -> Text {
+        if let attr = try? AttributedString(
+            markdown: raw,
+            options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+        ) {
+            return Text(attr)
+        }
+        return Text(raw)
     }
 }
 
@@ -344,18 +442,27 @@ private struct MessageBubble: View {
             if isUser { Spacer(minLength: 60) }
 
             VStack(alignment: isUser ? .trailing : .leading, spacing: 4) {
-                Text(message.content)
-                    .font(.system(size: 15, design: .rounded))
-                    .foregroundColor(isUser ? .white : AppColors.headerText)
-                    .multilineTextAlignment(.leading)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .background(
-                        RoundedRectangle(cornerRadius: 16)
-                            .fill(isUser
-                                  ? Color(hex: "#5E7C8B")
-                                  : Color.black.opacity(0.07))
-                    )
+                if isUser {
+                    Text(message.content)
+                        .font(.system(size: 15, design: .rounded))
+                        .foregroundColor(.white)
+                        .multilineTextAlignment(.leading)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .background(
+                            RoundedRectangle(cornerRadius: 16)
+                                .fill(Color(hex: "#5E7C8B"))
+                        )
+                } else {
+                    MarkdownTextView(text: message.content, baseFontSize: 15, textColor: AppColors.headerText)
+                        .multilineTextAlignment(.leading)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .background(
+                            RoundedRectangle(cornerRadius: 16)
+                                .fill(Color.black.opacity(0.07))
+                        )
+                }
 
                 Text(message.timestamp.formatted(date: .omitted, time: .shortened))
                     .font(.system(size: 10, design: .monospaced))
@@ -378,7 +485,7 @@ private struct StreamingBubble: View {
         HStack(alignment: .bottom, spacing: 0) {
             VStack(alignment: .leading, spacing: 4) {
                 if text.isEmpty && isStreaming {
-                    // Loading dots
+                    // 加载动画
                     HStack(spacing: 5) {
                         ForEach(0..<3) { i in
                             Circle()
@@ -394,21 +501,18 @@ private struct StreamingBubble: View {
                     }
                     .padding(.horizontal, 14)
                     .padding(.vertical, 12)
-                    .background(
-                        RoundedRectangle(cornerRadius: 16)
-                            .fill(Color.black.opacity(0.07))
-                    )
+                    .background(RoundedRectangle(cornerRadius: 16).fill(Color.black.opacity(0.07)))
                 } else {
-                    Text(text + (isStreaming ? "▌" : ""))
-                        .font(.system(size: 15, design: .rounded))
-                        .foregroundColor(AppColors.headerText)
-                        .multilineTextAlignment(.leading)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 10)
-                        .background(
-                            RoundedRectangle(cornerRadius: 16)
-                                .fill(Color.black.opacity(0.07))
-                        )
+                    // 流式渲染：富文本 + 光标
+                    MarkdownTextView(
+                        text: text + (isStreaming ? " ▌" : ""),
+                        baseFontSize: 15,
+                        textColor: AppColors.headerText
+                    )
+                    .multilineTextAlignment(.leading)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(RoundedRectangle(cornerRadius: 16).fill(Color.black.opacity(0.07)))
                 }
             }
             Spacer(minLength: 60)
@@ -487,7 +591,6 @@ final class VoiceInputService: NSObject, ObservableObject {
     }
 
     private func _startEngine() {
-        // Stop previous if any
         recognitionTask?.cancel()
         recognitionTask = nil
 

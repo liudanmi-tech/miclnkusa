@@ -83,6 +83,8 @@ final class AIAssistantViewModel: ObservableObject {
     let sessionId: String
     let skillCard: SkillCard
 
+    private var streamTask: Task<Void, Never>?
+
     init(sessionId: String, skillCard: SkillCard) {
         self.sessionId = sessionId
         self.skillCard = skillCard
@@ -118,6 +120,18 @@ final class AIAssistantViewModel: ObservableObject {
         send(text: question)
     }
 
+    /// 停止当前生成，保留已输出内容
+    func cancelStream() {
+        streamTask?.cancel()
+        streamTask = nil
+        if !streamingText.isEmpty {
+            messages.append(AssistantMessage(role: .assistant, content: streamingText))
+            persistMessages()
+        }
+        streamingText = ""
+        isStreaming = false
+    }
+
     /// 手动清除历史，重新开始
     func clearHistory() {
         messages = []
@@ -134,6 +148,7 @@ final class AIAssistantViewModel: ObservableObject {
     }
 
     private func streamRequest(message: String) {
+        streamTask?.cancel()
         suggestions = []
         isStreaming = true
         streamingText = ""
@@ -144,7 +159,7 @@ final class AIAssistantViewModel: ObservableObject {
              "content": msg.content]
         }
 
-        NetworkManager.shared.streamAssistantChat(
+        streamTask = NetworkManager.shared.streamAssistantChat(
             sessionId: sessionId,
             skillId: skillCard.skillId,
             message: message,

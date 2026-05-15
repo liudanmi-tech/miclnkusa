@@ -863,6 +863,7 @@ class NetworkManager {
     /// onSuggestions: 收到猜你想问列表（主线程）
     /// onDone:        流结束（主线程）
     /// onError:       出错（主线程）
+    @discardableResult
     func streamAssistantChat(
         sessionId: String,
         skillId: String,
@@ -873,11 +874,11 @@ class NetworkManager {
         onSuggestions: @escaping @Sendable ([String]) -> Void,
         onDone:        @escaping @Sendable () -> Void,
         onError:       @escaping @Sendable (String) -> Void
-    ) {
+    ) -> Task<Void, Never> {
         let token = getAuthToken()
-        guard !token.isEmpty else { onError("未登录，请先登录"); return }
+        guard !token.isEmpty else { onError("未登录，请先登录"); return Task {} }
         guard let url = URL(string: "\(baseURLForWrite)/assistant/chat") else {
-            onError("Invalid URL"); return
+            onError("Invalid URL"); return Task {}
         }
 
         var request = URLRequest(url: url)
@@ -895,7 +896,7 @@ class NetworkManager {
         ]
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
 
-        Task {
+        return Task {
             do {
                 let (asyncBytes, response) = try await URLSession.shared.bytes(for: request)
                 guard let http = response as? HTTPURLResponse else {
