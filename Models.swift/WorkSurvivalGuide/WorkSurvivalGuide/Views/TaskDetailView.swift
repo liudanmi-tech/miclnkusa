@@ -65,7 +65,10 @@ struct TaskDetailView: View {
                         if let skillCards = strategySkillCards, !skillCards.isEmpty {
                             MomentSkillsCard(
                                 sceneCategoryName: primarySceneCategory,
-                                skillCards: skillCards
+                                skillCards: skillCards,
+                                sessionId: task.id,
+                                sceneImages: strategyAnalysis?.sceneImages ?? [],
+                                baseURL: NetworkManager.shared.getBaseURL()
                             )
                             .padding(.horizontal, 16)
                             .padding(.top, 12)
@@ -414,7 +417,10 @@ private struct MomentInfoCard: View {
 private struct MomentSkillsCard: View {
     let sceneCategoryName: String?
     let skillCards: [SkillCard]
-    @State private var selectedCard: SkillCard?
+    let sessionId: String
+    let sceneImages: [SceneImage]
+    let baseURL: String
+    @State private var assistantCard: SkillCard?
 
     private func iconFor(_ cat: String) -> String {
         switch cat {
@@ -448,7 +454,7 @@ private struct MomentSkillsCard: View {
             // Skill rows
             VStack(spacing: 0) {
                 ForEach(Array(skillCards.enumerated()), id: \.element.id) { idx, card in
-                    Button(action: { selectedCard = card }) {
+                    Button(action: { assistantCard = card }) {
                         HStack(spacing: 12) {
                             Rectangle()
                                 .fill(Color.blue)
@@ -483,8 +489,14 @@ private struct MomentSkillsCard: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color(hex: "#1C1C1E"))
         .cornerRadius(16)
-        .sheet(item: $selectedCard) { card in
-            SkillCardDetailSheet(card: card)
+        .fullScreenCover(item: $assistantCard) { card in
+            AIAssistantView(
+                sessionId: sessionId,
+                skillCard: card,
+                sceneImages: sceneImages,
+                baseURL: baseURL,
+                onDismiss: { assistantCard = nil }
+            )
         }
     }
 }
