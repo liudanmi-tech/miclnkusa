@@ -82,7 +82,7 @@ def _build_prompt(
 ) -> str:
     """组装发给 Gemini 的完整 prompt"""
     mem_block = f"\n相关历史记忆：\n{memory_context}" if memory_context else ""
-    summary_block = f"\n本次对话摘要：\n{conversation_summary}" if conversation_summary else ""
+    summary_block = f"\n职场对话摘要：\n{conversation_summary}" if conversation_summary else ""
 
     history_block = ""
     if history:
@@ -92,9 +92,16 @@ def _build_prompt(
             lines.append(f"{prefix}: {h.content}")
         history_block = "\n对话历史：\n" + "\n".join(lines)
 
+    # 技能内容：轮次少时完整展示，多轮后仅保留名称节省token
+    history_turns = len(history) // 2  # 每轮 = 1条用户 + 1条AI
+    if history_turns < 3:
+        skill_block = f"职场背景参考（{skill_name}）：\n{skill_content_json}"
+    else:
+        skill_block = f"职场背景参考（{skill_name}）：[已知该技能场景，不再重复展开]"
+
     if message == "__INIT__":
         task_desc = (
-            f"请基于以上分析生成一段友好开场白（2-3句话）：\n"
+            f"请基于以上背景生成一段友好开场白（2-3句话）：\n"
             f"1. 用一句话概括你注意到的对话关键点\n"
             f"2. 表达你可以帮助的方向\n"
             f"3. 以一个开放性问题结尾\n"
@@ -103,7 +110,9 @@ def _build_prompt(
     else:
         task_desc = (
             f"用户说：{message}\n\n"
-            f"请给出有针对性的回复，结合技能分析和用户情况，给出实用建议。"
+            f"请直接回应用户的问题。"
+            f"如果问题与职场背景相关，可结合背景给出更有针对性的建议；"
+            f"如果用户问的是其他事情，就直接帮他解决，不要强行往背景参考上靠。"
         )
 
     suggestions_instruction = (
@@ -122,8 +131,8 @@ def _build_prompt(
     )
 
     return (
-        f"你是用户的 AI Assistant，正在帮助他处理一个真实对话场景。\n\n"
-        f"技能分析结果（{skill_name}）：\n{skill_content_json}"
+        f"你是用户的职场 AI 助手，了解用户的职场处境。用户问什么你答什么，跟随对话自然走向。\n\n"
+        f"{skill_block}"
         f"{summary_block}"
         f"{mem_block}"
         f"{history_block}\n\n"
@@ -273,13 +282,17 @@ async def assistant_chat(
         logger.warning(f"[assistant] 取对话摘要失败: {exc}")
 
     # 4. 取记忆上下文（含超时保护）
+    # 搜索词：__INIT__ 用技能名+摘要，正常消息用用户当前消息，确保记忆跟随话题
     memory_used = False
     memory_context = ""
     try:
         from services.memory_service import search_memory
-        query = f"{skill_name} {conv_summary[:100]}"
+        if req.message == "__INIT__":
+            mem_query = f"{skill_name} {conv_summary[:100]}"
+        else:
+            mem_query = req.message
         mem_results = await asyncio.wait_for(
-            asyncio.to_thread(search_memory, query, user_id, limit=3),
+            asyncio.to_thread(search_memory, mem_query, user_id, limit=3),
             timeout=2.0,
         )
         if mem_results:
