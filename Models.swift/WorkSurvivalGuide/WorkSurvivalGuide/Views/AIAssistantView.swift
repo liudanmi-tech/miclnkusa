@@ -23,7 +23,7 @@ struct AIAssistantView: View {
     @FocusState private var inputFocused: Bool
 
     // Voice input
-    @State private var isRecording = false
+    @State private var isVoiceMode = false
     @StateObject private var voiceService = VoiceInputService()
 
     init(sessionId: String, skillCard: SkillCard, sceneImages: [SceneImage], baseURL: String, onDismiss: (() -> Void)? = nil) {
@@ -263,71 +263,112 @@ struct AIAssistantView: View {
 
     private var inputBar: some View {
         HStack(spacing: 10) {
-            // Voice button (press and hold)
-            MicButton(isRecording: $isRecording) {
-                voiceService.startRecording()
-            } onRelease: {
-                voiceService.stopRecording { transcribed in
-                    if let text = transcribed, !text.isEmpty {
-                        inputText = text
-                    }
+            if isVoiceMode {
+                // ── 语音录制模式 ─────────────────────────────────────────────
+                // 声波字段（占满宽度）
+                HStack(spacing: 8) {
+                    Image(systemName: "mic.fill")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(.white.opacity(0.55))
+                    VoiceWaveformView()
                 }
-            }
+                .frame(maxWidth: .infinity)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 11)
+                .background(
+                    Capsule()
+                        .fill(Color.black.opacity(0.80))
+                        .overlay(Capsule().stroke(Color.white.opacity(0.10), lineWidth: 1))
+                )
 
-            // Text field
-            ZStack(alignment: .leading) {
-                if inputText.isEmpty {
-                    Text(isRecording ? "松开发送..." : "输入消息...")
-                        .font(.system(size: 15, design: .rounded))
-                        .foregroundColor(AppColors.headerText.opacity(0.35))
-                        .padding(.leading, 14)
-                }
-                TextField("", text: $inputText)
-                    .focused($inputFocused)
-                    .font(.system(size: 15, design: .rounded))
-                    .foregroundColor(AppColors.headerText)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .submitLabel(.send)
-                    .onSubmit { sendMessage() }
-            }
-            .background(
-                Capsule()
-                    .fill(Color.black.opacity(0.07))
-                    .overlay(Capsule().stroke(Color(hex: "#E8DCC6").opacity(0.3), lineWidth: 1))
-            )
-
-            // 发送 / 停止 按钮
-            if vm.isStreaming {
-                // 生成中 → 点击停止
-                Button(action: { vm.cancelStream() }) {
+                // 取消按钮（■）
+                Button(action: cancelVoiceMode) {
                     Image(systemName: "stop.fill")
                         .font(.system(size: 13, weight: .bold))
                         .foregroundColor(.white)
                         .frame(width: 38, height: 38)
-                        .background(Circle().fill(Color(hex: "#E57373")))
+                        .background(Circle().fill(Color(hex: "#6B7280")))
                 }
                 .buttonStyle(.plain)
                 .transition(.scale.combined(with: .opacity))
-            } else {
-                // 空闲 → 发送
-                Button(action: sendMessage) {
-                    Image(systemName: "paperplane.fill")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundColor(inputText.isEmpty ? AppColors.headerText.opacity(0.3) : Color(hex: "#5E7C8B"))
+
+                // 发送按钮（>）
+                Button(action: sendVoiceMessage) {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundColor(.white)
                         .frame(width: 38, height: 38)
-                        .background(
-                            Circle()
-                                .fill(inputText.isEmpty
-                                      ? Color.black.opacity(0.05)
-                                      : Color(hex: "#5E7C8B").opacity(0.15))
-                        )
+                        .background(Circle().fill(Color(hex: "#3B82F6")))
                 }
                 .buttonStyle(.plain)
-                .disabled(inputText.isEmpty)
                 .transition(.scale.combined(with: .opacity))
+
+            } else {
+                // ── 文字输入模式 ─────────────────────────────────────────────
+                // 语音输入按钮（单击切换）
+                Button(action: startVoiceMode) {
+                    Image(systemName: "mic.circle.fill")
+                        .font(.system(size: 30))
+                        .foregroundColor(AppColors.headerText.opacity(0.6))
+                }
+                .buttonStyle(.plain)
+
+                // 文字输入框
+                ZStack(alignment: .leading) {
+                    if inputText.isEmpty {
+                        Text("输入消息...")
+                            .font(.system(size: 15, design: .rounded))
+                            .foregroundColor(AppColors.headerText.opacity(0.35))
+                            .padding(.leading, 14)
+                    }
+                    TextField("", text: $inputText)
+                        .focused($inputFocused)
+                        .font(.system(size: 15, design: .rounded))
+                        .foregroundColor(AppColors.headerText)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .submitLabel(.send)
+                        .onSubmit { sendMessage() }
+                }
+                .background(
+                    Capsule()
+                        .fill(Color.black.opacity(0.07))
+                        .overlay(Capsule().stroke(Color(hex: "#E8DCC6").opacity(0.3), lineWidth: 1))
+                )
+
+                // 发送 / 停止生成 按钮
+                if vm.isStreaming {
+                    Button(action: { vm.cancelStream() }) {
+                        Image(systemName: "stop.fill")
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundColor(.white)
+                            .frame(width: 38, height: 38)
+                            .background(Circle().fill(Color(hex: "#E57373")))
+                    }
+                    .buttonStyle(.plain)
+                    .transition(.scale.combined(with: .opacity))
+                } else {
+                    Button(action: sendMessage) {
+                        Image(systemName: "paperplane.fill")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundColor(inputText.isEmpty
+                                             ? AppColors.headerText.opacity(0.3)
+                                             : Color(hex: "#5E7C8B"))
+                            .frame(width: 38, height: 38)
+                            .background(
+                                Circle()
+                                    .fill(inputText.isEmpty
+                                          ? Color.black.opacity(0.05)
+                                          : Color(hex: "#5E7C8B").opacity(0.15))
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(inputText.isEmpty)
+                    .transition(.scale.combined(with: .opacity))
+                }
             }
         }
+        .animation(.spring(response: 0.32, dampingFraction: 0.82), value: isVoiceMode)
         .animation(.spring(response: 0.25, dampingFraction: 0.8), value: vm.isStreaming)
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
@@ -339,12 +380,41 @@ struct AIAssistantView: View {
         )
     }
 
+    // MARK: - Actions
+
     private func sendMessage() {
         let text = inputText
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         inputText = ""
-        inputFocused = false   // 收起键盘
+        inputFocused = false
         vm.send(text: text)
+    }
+
+    private func startVoiceMode() {
+        inputFocused = false
+        withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) {
+            isVoiceMode = true
+        }
+        voiceService.startRecording()
+    }
+
+    private func cancelVoiceMode() {
+        voiceService.stopRecording { _ in }
+        withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) {
+            isVoiceMode = false
+        }
+        // 不唤起键盘
+    }
+
+    private func sendVoiceMessage() {
+        voiceService.stopRecording { transcribed in
+            withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) {
+                isVoiceMode = false
+            }
+            if let text = transcribed, !text.isEmpty {
+                vm.send(text: text)
+            }
+        }
     }
 }
 
@@ -541,32 +611,34 @@ private struct TagChip: View {
     }
 }
 
-// MARK: - Mic Button
+// MARK: - Voice Waveform View
 
-private struct MicButton: View {
-    @Binding var isRecording: Bool
-    var onPress: () -> Void
-    var onRelease: () -> Void
+/// 语音录制时的声波动效（TimelineView 驱动，正弦叠加产生自然波动）
+private struct VoiceWaveformView: View {
+    private let barCount = 22
 
     var body: some View {
-        Image(systemName: isRecording ? "waveform.circle.fill" : "mic.circle.fill")
-            .font(.system(size: 30))
-            .foregroundColor(isRecording ? Color(hex: "#F87171") : AppColors.headerText.opacity(0.6))
-            .scaleEffect(isRecording ? 1.15 : 1.0)
-            .animation(.spring(response: 0.25, dampingFraction: 0.7), value: isRecording)
-            .gesture(
-                DragGesture(minimumDistance: 0)
-                    .onChanged { _ in
-                        if !isRecording {
-                            isRecording = true
-                            onPress()
-                        }
-                    }
-                    .onEnded { _ in
-                        isRecording = false
-                        onRelease()
-                    }
-            )
+        TimelineView(.animation(minimumInterval: 0.1)) { context in
+            HStack(alignment: .center, spacing: 2.5) {
+                ForEach(0..<barCount, id: \.self) { i in
+                    let h = barHeight(index: i, date: context.date)
+                    Capsule()
+                        .fill(Color.white.opacity(0.72))
+                        .frame(width: 2.5, height: h)
+                        .animation(.spring(response: 0.28, dampingFraction: 0.62), value: h)
+                }
+            }
+            .frame(maxWidth: .infinity)
+        }
+    }
+
+    /// 每根柱子的高度：两个不同频率正弦波叠加，产生类似真实音量的波动
+    private func barHeight(index: Int, date: Date) -> CGFloat {
+        let t = date.timeIntervalSinceReferenceDate
+        let f1 = 3.8 + Double(index) * 0.21
+        let f2 = 7.3 + Double(index) * 0.16
+        let v = (sin(t * f1) + sin(t * f2 + Double(index) * 0.9) * 0.55 + 1.55) / 3.1
+        return max(3, CGFloat(v) * 26)
     }
 }
 
