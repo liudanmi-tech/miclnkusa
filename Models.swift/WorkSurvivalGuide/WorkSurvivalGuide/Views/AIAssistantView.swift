@@ -292,13 +292,13 @@ struct AIAssistantView: View {
                 .buttonStyle(.plain)
                 .transition(.scale.combined(with: .opacity))
 
-                // 发送按钮（>）
+                // 发送按钮（样式与文字模式发送按钮一致）
                 Button(action: sendVoiceMessage) {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 15, weight: .bold))
-                        .foregroundColor(.white)
+                    Image(systemName: "paperplane.fill")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundColor(Color(hex: "#5E7C8B"))
                         .frame(width: 38, height: 38)
-                        .background(Circle().fill(Color(hex: "#3B82F6")))
+                        .background(Circle().fill(Color(hex: "#5E7C8B").opacity(0.15)))
                 }
                 .buttonStyle(.plain)
                 .transition(.scale.combined(with: .opacity))
@@ -628,6 +628,9 @@ private struct VoiceWaveformView: View {
                         .animation(.spring(response: 0.28, dampingFraction: 0.62), value: h)
                 }
             }
+            // 固定高度：柱子在内部动，不撑大父容器
+            .frame(height: 28)
+            .clipped()
             .frame(maxWidth: .infinity)
         }
     }
