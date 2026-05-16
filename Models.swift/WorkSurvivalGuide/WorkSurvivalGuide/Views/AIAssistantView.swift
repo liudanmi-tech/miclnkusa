@@ -73,8 +73,8 @@ struct AIAssistantView: View {
                 if !sceneImages.isEmpty {
                     imageStack
                         .padding(.horizontal, 20)
-                        .padding(.top, 12)
-                        .padding(.bottom, 4)
+                        .padding(.top, 8)
+                        .padding(.bottom, 2)
                 }
 
                 Divider()
@@ -205,12 +205,12 @@ struct AIAssistantView: View {
                     .clipped()
                     .cornerRadius(12)
                 }
-                .frame(width: 140, height: 110)
+                .frame(width: 94, height: 74)
                 .rotationEffect(.degrees(rotation))
                 .offset(x: offsetX, y: offsetY)
             }
         }
-        .frame(height: 130)
+        .frame(height: 88)
         .frame(maxWidth: .infinity, alignment: .leading)
         .allowsHitTesting(false)
     }
