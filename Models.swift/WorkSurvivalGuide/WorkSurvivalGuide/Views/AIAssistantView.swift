@@ -567,11 +567,11 @@ private struct MemeGifBubble: View {
                 .clipShape(RoundedRectangle(cornerRadius: 14))
                 .shadow(color: .black.opacity(0.14), radius: 6, x: 0, y: 2)
 
-            // Tenor 归因标注（必须按要求显示）
+            // KLIPY 归因标注
             HStack(spacing: 3) {
                 Image(systemName: "play.rectangle.fill")
                     .font(.system(size: 8))
-                Text("Powered by Tenor")
+                Text("Powered by KLIPY")
                     .font(.system(size: 9, design: .monospaced))
             }
             .foregroundColor(AppColors.headerText.opacity(0.28))

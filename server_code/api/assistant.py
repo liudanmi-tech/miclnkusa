@@ -31,15 +31,15 @@ router = APIRouter()
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 ASSISTANT_MODEL = "gemini-2.0-flash"
 
-# ─── Tenor Meme Config ────────────────────────────────────────────────────────
+# ─── KLIPY Meme Config ────────────────────────────────────────────────────────
 
-TENOR_API_KEY = os.getenv("TENOR_API_KEY", "")
+KLIPY_APP_KEY = os.getenv("KLIPY_APP_KEY", "")
 
-# 情感类别 → Tenor 搜索词
+# 情感类别 → KLIPY 搜索词
 MEME_QUERIES: dict[str, str] = {
-    "feel_you":      "i feel you reaction gif",
+    "feel_you":      "i feel you reaction",
     "hang_in_there": "you got this hang in there",
-    "this_is_fine":  "this is fine meme",
+    "this_is_fine":  "this is fine",
     "mind_blown":    "mind blown reaction",
     "seriously":     "seriously reaction eye roll",
     "celebration":   "congratulations well done",
@@ -48,9 +48,9 @@ MEME_QUERIES: dict[str, str] = {
 }
 
 # 内存缓存（搜索词 → URL列表），每小时刷新
-_tenor_cache: dict[str, list[str]] = {}
-_tenor_cache_ts: dict[str, float] = {}
-_TENOR_CACHE_TTL = 3600
+_klipy_cache: dict[str, list[str]] = {}
+_klipy_cache_ts: dict[str, float] = {}
+_KLIPY_CACHE_TTL = 3600
 
 
 # ─── Request / Response Models ────────────────────────────────────────────────
@@ -142,46 +142,44 @@ def _build_prompt(
     )
 
 
-async def _fetch_tenor_gif(category: str) -> Optional[str]:
-    """根据情感类别从 Tenor 获取一个 GIF URL（带内存缓存，1小时刷新）"""
-    if not TENOR_API_KEY:
-        logger.warning("[meme] TENOR_API_KEY 未配置，跳过梗图")
+async def _fetch_klipy_gif(category: str) -> Optional[str]:
+    """根据情感类别从 KLIPY 获取一个 GIF URL（带内存缓存，1小时刷新）"""
+    if not KLIPY_APP_KEY:
+        logger.warning("[meme] KLIPY_APP_KEY 未配置，跳过梗图")
         return None
     query = MEME_QUERIES.get(category)
     if not query:
         return None
 
     now = time.time()
-    if query in _tenor_cache and now - _tenor_cache_ts.get(query, 0) < _TENOR_CACHE_TTL:
-        urls = _tenor_cache[query]
+    if query in _klipy_cache and now - _klipy_cache_ts.get(query, 0) < _KLIPY_CACHE_TTL:
+        urls = _klipy_cache[query]
         return random.choice(urls) if urls else None
 
     try:
         async with httpx.AsyncClient(timeout=3.0) as client:
             resp = await client.get(
-                "https://api.tenor.com/v1/search",   # v1 接口，兼容 AQ.xxx key
+                f"https://api.klipy.com/api/v1/{KLIPY_APP_KEY}/gifs/search",
                 params={
                     "q": query,
-                    "key": TENOR_API_KEY,
-                    "limit": 20,
-                    "contentfilter": "high",
-                    "media_filter": "tinygif",
-                    "ar_range": "standard",
+                    "per_page": 20,
+                    "content_filter": "high",
+                    "format_filter": "gif",
                 },
             )
             data = resp.json()
-        # v1 响应结构：results[].media[0].tinygif.url
+        # KLIPY 响应结构：data.data[].file.sm.gif.url
         urls = [
-            r["media"][0]["tinygif"]["url"]
-            for r in data.get("results", [])
-            if r.get("media") and r["media"][0].get("tinygif", {}).get("url")
+            r["file"]["sm"]["gif"]["url"]
+            for r in data.get("data", {}).get("data", [])
+            if r.get("file", {}).get("sm", {}).get("gif", {}).get("url")
         ]
-        _tenor_cache[query] = urls
-        _tenor_cache_ts[query] = now
-        logger.info(f"[meme] Tenor 缓存更新 query='{query}' count={len(urls)}")
+        _klipy_cache[query] = urls
+        _klipy_cache_ts[query] = now
+        logger.info(f"[meme] KLIPY 缓存更新 query='{query}' count={len(urls)}")
         return random.choice(urls) if urls else None
     except Exception as exc:
-        logger.warning(f"[meme] Tenor API 失败 query='{query}': {exc}")
+        logger.warning(f"[meme] KLIPY API 失败 query='{query}': {exc}")
         return None
 
 
@@ -394,7 +392,7 @@ async def assistant_chat(
                 if meme_cat != "none":
                     try:
                         gif_url = await asyncio.wait_for(
-                            _fetch_tenor_gif(meme_cat), timeout=3.0
+                            _fetch_klipy_gif(meme_cat), timeout=3.0
                         )
                         if gif_url:
                             yield _sse({"type": "meme", "url": gif_url, "category": meme_cat})
