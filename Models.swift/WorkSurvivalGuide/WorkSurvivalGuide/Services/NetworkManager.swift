@@ -861,6 +861,7 @@ class NetworkManager {
     /// onMeta:        收到元数据（skill_name, memory_used）
     /// onToken:       收到流式 token（主线程）
     /// onSuggestions: 收到猜你想问列表（主线程）
+    /// onMeme:        收到梗图 GIF URL（主线程）
     /// onDone:        流结束（主线程）
     /// onError:       出错（主线程）
     @discardableResult
@@ -872,6 +873,7 @@ class NetworkManager {
         onMeta:        @escaping @Sendable (String, Bool) -> Void,
         onToken:       @escaping @Sendable (String) -> Void,
         onSuggestions: @escaping @Sendable ([String]) -> Void,
+        onMeme:        @escaping @Sendable (String) -> Void = { _ in },
         onDone:        @escaping @Sendable () -> Void,
         onError:       @escaping @Sendable (String) -> Void
     ) -> Task<Void, Never> {
@@ -928,6 +930,12 @@ class NetworkManager {
                     case "suggestions":
                         let items = event["items"] as? [String] ?? []
                         await MainActor.run { onSuggestions(items) }
+
+                    case "meme":
+                        let gifURL = event["url"] as? String ?? ""
+                        if !gifURL.isEmpty {
+                            await MainActor.run { onMeme(gifURL) }
+                        }
 
                     case "done":
                         await MainActor.run { onDone() }; return

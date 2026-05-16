@@ -8,6 +8,8 @@
 import SwiftUI
 import AVFoundation
 import Speech
+import ImageIO
+import UIKit
 
 // MARK: - Main View
 
@@ -508,40 +510,138 @@ private struct MessageBubble: View {
     var isUser: Bool { message.role == .user }
 
     var body: some View {
-        HStack(alignment: .bottom, spacing: 0) {
-            if isUser { Spacer(minLength: 60) }
+        // 梗图消息：独立消息行，左对齐
+        if message.isMeme, let url = message.memeURL {
+            HStack(alignment: .bottom, spacing: 0) {
+                MemeGifBubble(gifURL: url)
+                Spacer(minLength: 60)
+            }
+        } else {
+            HStack(alignment: .bottom, spacing: 0) {
+                if isUser { Spacer(minLength: 60) }
 
-            VStack(alignment: isUser ? .trailing : .leading, spacing: 4) {
-                if isUser {
-                    Text(message.content)
-                        .font(.system(size: 15, design: .rounded))
-                        .foregroundColor(.white)
-                        .multilineTextAlignment(.leading)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 10)
-                        .background(
-                            RoundedRectangle(cornerRadius: 16)
-                                .fill(Color(hex: "#5E7C8B"))
-                        )
-                } else {
-                    MarkdownTextView(text: message.content, baseFontSize: 15, textColor: AppColors.headerText)
-                        .multilineTextAlignment(.leading)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 10)
-                        .background(
-                            RoundedRectangle(cornerRadius: 16)
-                                .fill(Color.black.opacity(0.07))
-                        )
+                VStack(alignment: isUser ? .trailing : .leading, spacing: 4) {
+                    if isUser {
+                        Text(message.content)
+                            .font(.system(size: 15, design: .rounded))
+                            .foregroundColor(.white)
+                            .multilineTextAlignment(.leading)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 10)
+                            .background(
+                                RoundedRectangle(cornerRadius: 16)
+                                    .fill(Color(hex: "#5E7C8B"))
+                            )
+                    } else {
+                        MarkdownTextView(text: message.content, baseFontSize: 15, textColor: AppColors.headerText)
+                            .multilineTextAlignment(.leading)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 10)
+                            .background(
+                                RoundedRectangle(cornerRadius: 16)
+                                    .fill(Color.black.opacity(0.07))
+                            )
+                    }
+
+                    Text(message.timestamp.formatted(date: .omitted, time: .shortened))
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundColor(AppColors.headerText.opacity(0.3))
+                        .padding(.horizontal, 4)
                 }
 
-                Text(message.timestamp.formatted(date: .omitted, time: .shortened))
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundColor(AppColors.headerText.opacity(0.3))
-                    .padding(.horizontal, 4)
+                if !isUser { Spacer(minLength: 60) }
             }
-
-            if !isUser { Spacer(minLength: 60) }
         }
+    }
+}
+
+// MARK: - Meme GIF Bubble
+
+private struct MemeGifBubble: View {
+    let gifURL: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            AnimatedGIFView(url: gifURL)
+                .frame(width: 210, height: 168)   // 5:4 比例，与标准梗图接近
+                .clipShape(RoundedRectangle(cornerRadius: 14))
+                .shadow(color: .black.opacity(0.14), radius: 6, x: 0, y: 2)
+
+            // Tenor 归因标注（必须按要求显示）
+            HStack(spacing: 3) {
+                Image(systemName: "play.rectangle.fill")
+                    .font(.system(size: 8))
+                Text("Powered by Tenor")
+                    .font(.system(size: 9, design: .monospaced))
+            }
+            .foregroundColor(AppColors.headerText.opacity(0.28))
+            .padding(.leading, 4)
+        }
+    }
+}
+
+// MARK: - Animated GIF View
+
+struct AnimatedGIFView: UIViewRepresentable {
+    let url: String
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    func makeUIView(context: Context) -> UIImageView {
+        let iv = UIImageView()
+        iv.contentMode = .scaleAspectFill
+        iv.clipsToBounds = true
+        return iv
+    }
+
+    func updateUIView(_ uiView: UIImageView, context: Context) {
+        guard context.coordinator.loadedURL != url else { return }
+        context.coordinator.loadedURL = url
+        uiView.image = nil
+
+        guard let gifURL = URL(string: url) else { return }
+        Task.detached(priority: .userInitiated) {
+            guard let (data, _) = try? await URLSession.shared.data(from: gifURL) else { return }
+            let image = UIImage.animatedGIF(data: data)
+            await MainActor.run { uiView.image = image }
+        }
+    }
+
+    final class Coordinator: NSObject {
+        var loadedURL: String?
+    }
+}
+
+// MARK: - UIImage GIF Extension
+
+extension UIImage {
+    /// 从 GIF 数据创建动画 UIImage
+    static func animatedGIF(data: Data) -> UIImage? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else {
+            return UIImage(data: data)
+        }
+        let count = CGImageSourceGetCount(source)
+        guard count > 1 else { return UIImage(data: data) }
+
+        var frames: [UIImage] = []
+        var totalDuration: Double = 0
+        for i in 0..<count {
+            guard let cgImage = CGImageSourceCreateImageAtIndex(source, i, nil) else { continue }
+            let delay = gifFrameDelay(source: source, index: i)
+            totalDuration += delay
+            frames.append(UIImage(cgImage: cgImage))
+        }
+        return UIImage.animatedImage(with: frames, duration: max(totalDuration, 0.5))
+    }
+
+    private static func gifFrameDelay(source: CGImageSource, index: Int) -> Double {
+        guard let props = CGImageSourceCopyPropertiesAtIndex(source, index, nil) as? [String: Any],
+              let gif = props[kCGImagePropertyGIFDictionary as String] as? [String: Any] else {
+            return 0.1
+        }
+        if let d = gif[kCGImagePropertyGIFUnclampedDelayTime as String] as? Double, d > 0.01 { return d }
+        if let d = gif[kCGImagePropertyGIFDelayTime as String] as? Double, d > 0.01 { return d }
+        return 0.1
     }
 }
 

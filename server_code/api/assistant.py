@@ -3,13 +3,17 @@ AI Assistant Chat API
 POST /api/v1/assistant/chat  — SSE 流式对话
 """
 import os
+import re
 import json
 import uuid
+import random
 import asyncio
 import threading
 import logging
+import time
 from typing import List, Optional
 
+import httpx
 import google.generativeai as genai
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
@@ -26,6 +30,27 @@ router = APIRouter()
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 ASSISTANT_MODEL = "gemini-2.0-flash"
+
+# ─── Tenor Meme Config ────────────────────────────────────────────────────────
+
+TENOR_API_KEY = os.getenv("TENOR_API_KEY", "")
+
+# 情感类别 → Tenor 搜索词
+MEME_QUERIES: dict[str, str] = {
+    "feel_you":      "i feel you reaction gif",
+    "hang_in_there": "you got this hang in there",
+    "this_is_fine":  "this is fine meme",
+    "mind_blown":    "mind blown reaction",
+    "seriously":     "seriously reaction eye roll",
+    "celebration":   "congratulations well done",
+    "same":          "same relatable reaction",
+    "thinking":      "hmm thinking",
+}
+
+# 内存缓存（搜索词 → URL列表），每小时刷新
+_tenor_cache: dict[str, list[str]] = {}
+_tenor_cache_ts: dict[str, float] = {}
+_TENOR_CACHE_TTL = 3600
 
 
 # ─── Request / Response Models ────────────────────────────────────────────────
@@ -85,7 +110,15 @@ def _build_prompt(
         "\n\n---\n"
         "在你的回复最后，另起一行，严格按以下格式输出4个用户可能追问的问题（不要包含编号）：\n"
         '[SUGGESTIONS]{"items":["问题1","问题2","问题3","问题4"]}[/SUGGESTIONS]\n'
-        "问题需简洁（15字以内），与本次回复内容紧密相关。"
+        "问题需简洁（15字以内），与本次回复内容紧密相关。\n\n"
+        "然后在[/SUGGESTIONS]之后，紧接着另起一行，根据本次回复的情感氛围输出一个梗图标签：\n"
+        "[MEME:category] 或 [MEME:none]（不合适时输出none）\n"
+        "category 可选值及适用场景：\n"
+        "  feel_you=用户被怼/委屈/遭遇不公  hang_in_there=鼓励用户坚持/加油\n"
+        "  this_is_fine=无奈接受职场现实     mind_blown=恍然大悟/关键洞察\n"
+        "  seriously=调侃/吐槽职场荒唐事     celebration=用户达成目标/好消息\n"
+        "  same=共鸣/同感                    thinking=深度思考/策略建议\n"
+        "【不发梗图的情况】：用户情绪崩溃、严肃的利益冲突、回复超过3段时，输出[MEME:none]"
     )
 
     return (
@@ -98,6 +131,48 @@ def _build_prompt(
         f"{suggestions_instruction}\n\n"
         f"用中文回复，语气友好自然。"
     )
+
+
+async def _fetch_tenor_gif(category: str) -> Optional[str]:
+    """根据情感类别从 Tenor 获取一个 GIF URL（带内存缓存，1小时刷新）"""
+    if not TENOR_API_KEY:
+        logger.warning("[meme] TENOR_API_KEY 未配置，跳过梗图")
+        return None
+    query = MEME_QUERIES.get(category)
+    if not query:
+        return None
+
+    now = time.time()
+    if query in _tenor_cache and now - _tenor_cache_ts.get(query, 0) < _TENOR_CACHE_TTL:
+        urls = _tenor_cache[query]
+        return random.choice(urls) if urls else None
+
+    try:
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            resp = await client.get(
+                "https://tenor.googleapis.com/v2/search",
+                params={
+                    "q": query,
+                    "key": TENOR_API_KEY,
+                    "limit": 20,
+                    "contentfilter": "high",
+                    "media_filter": "tinygif",
+                    "ar_range": "standard",
+                },
+            )
+            data = resp.json()
+        urls = [
+            r["media_formats"]["tinygif"]["url"]
+            for r in data.get("results", [])
+            if r.get("media_formats", {}).get("tinygif", {}).get("url")
+        ]
+        _tenor_cache[query] = urls
+        _tenor_cache_ts[query] = now
+        logger.info(f"[meme] Tenor 缓存更新 query='{query}' count={len(urls)}")
+        return random.choice(urls) if urls else None
+    except Exception as exc:
+        logger.warning(f"[meme] Tenor API 失败 query='{query}': {exc}")
+        return None
 
 
 async def _stream_gemini(prompt: str):
@@ -296,6 +371,24 @@ async def assistant_chat(
 
         if suggestions:
             yield _sse({"type": "suggestions", "items": suggestions[:4]})
+
+        # 解析 [MEME:category]（隐藏在 suggestions_raw 末尾，不会出现在用户可见文本中）
+        if req.message != "__INIT__":
+            meme_match = re.search(r"\[MEME:(\w+)\]", suggestions_raw)
+            if meme_match:
+                meme_cat = meme_match.group(1)
+                if meme_cat != "none":
+                    try:
+                        gif_url = await asyncio.wait_for(
+                            _fetch_tenor_gif(meme_cat), timeout=3.0
+                        )
+                        if gif_url:
+                            yield _sse({"type": "meme", "url": gif_url, "category": meme_cat})
+                            logger.info(f"[meme] 发送梗图 category={meme_cat}")
+                    except asyncio.TimeoutError:
+                        logger.warning("[meme] Tenor 请求超时(3s)，跳过")
+                    except Exception as exc:
+                        logger.warning(f"[meme] 梗图获取失败: {exc}")
 
         yield _sse({"type": "done"})
 

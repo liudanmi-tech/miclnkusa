@@ -13,12 +13,27 @@ struct AssistantMessage: Identifiable, Codable {
     let role: MessageRole
     let content: String
     let timestamp: Date
+    let memeURL: String?      // non-nil → 这是一条梗图消息（独立消息行）
 
+    var isMeme: Bool { memeURL != nil }
+
+    /// 普通文字消息
     init(role: MessageRole, content: String) {
         self.id = UUID()
         self.role = role
         self.content = content
         self.timestamp = Date()
+        self.memeURL = nil
+    }
+
+    /// 梗图消息工厂
+    static func meme(url: String) -> AssistantMessage {
+        AssistantMessage(id: UUID(), role: .assistant, content: "", timestamp: Date(), memeURL: url)
+    }
+
+    private init(id: UUID, role: MessageRole, content: String, timestamp: Date, memeURL: String?) {
+        self.id = id; self.role = role; self.content = content
+        self.timestamp = timestamp; self.memeURL = memeURL
     }
 
     enum MessageRole: String, Codable { case user, assistant }
@@ -180,6 +195,13 @@ final class AIAssistantViewModel: ObservableObject {
                     self?.suggestions = items
                 }
             },
+            onMeme: { [weak self] gifURL in
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    self.messages.append(.meme(url: gifURL))
+                    self.persistMessages()
+                }
+            },
             onDone: { [weak self] in
                 Task { @MainActor [weak self] in
                     guard let self else { return }
@@ -188,7 +210,7 @@ final class AIAssistantViewModel: ObservableObject {
                     }
                     self.streamingText = ""
                     self.isStreaming = false
-                    self.persistMessages()   // 每轮结束后持久化
+                    self.persistMessages()
                 }
             },
             onError: { [weak self] err in
