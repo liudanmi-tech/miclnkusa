@@ -159,7 +159,7 @@ async def _fetch_tenor_gif(category: str) -> Optional[str]:
     try:
         async with httpx.AsyncClient(timeout=3.0) as client:
             resp = await client.get(
-                "https://tenor.googleapis.com/v2/search",
+                "https://api.tenor.com/v1/search",   # v1 接口，兼容 AQ.xxx key
                 params={
                     "q": query,
                     "key": TENOR_API_KEY,
@@ -170,10 +170,11 @@ async def _fetch_tenor_gif(category: str) -> Optional[str]:
                 },
             )
             data = resp.json()
+        # v1 响应结构：results[].media[0].tinygif.url
         urls = [
-            r["media_formats"]["tinygif"]["url"]
+            r["media"][0]["tinygif"]["url"]
             for r in data.get("results", [])
-            if r.get("media_formats", {}).get("tinygif", {}).get("url")
+            if r.get("media") and r["media"][0].get("tinygif", {}).get("url")
         ]
         _tenor_cache[query] = urls
         _tenor_cache_ts[query] = now
