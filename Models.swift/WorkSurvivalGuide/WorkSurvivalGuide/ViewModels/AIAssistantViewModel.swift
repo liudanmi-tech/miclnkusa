@@ -99,6 +99,7 @@ final class AIAssistantViewModel: ObservableObject {
     let skillCard: SkillCard
 
     private var streamTask: Task<Void, Never>?
+    private var pendingMemeURL: String?   // onMeme 暂存，onDone 时追加在文字之后
 
     init(sessionId: String, skillCard: SkillCard) {
         self.sessionId = sessionId
@@ -145,6 +146,7 @@ final class AIAssistantViewModel: ObservableObject {
         }
         streamingText = ""
         isStreaming = false
+        pendingMemeURL = nil
     }
 
     /// 手动清除历史，重新开始
@@ -197,16 +199,20 @@ final class AIAssistantViewModel: ObservableObject {
             },
             onMeme: { [weak self] gifURL in
                 Task { @MainActor [weak self] in
-                    guard let self else { return }
-                    self.messages.append(.meme(url: gifURL))
-                    self.persistMessages()
+                    self?.pendingMemeURL = gifURL   // 暂存，等文字先 append
                 }
             },
             onDone: { [weak self] in
                 Task { @MainActor [weak self] in
                     guard let self else { return }
+                    // 1. 先提交文字
                     if !self.streamingText.isEmpty {
                         self.messages.append(AssistantMessage(role: .assistant, content: self.streamingText))
+                    }
+                    // 2. 再追加梗图（文字之后）
+                    if let memeURL = self.pendingMemeURL {
+                        self.messages.append(.meme(url: memeURL))
+                        self.pendingMemeURL = nil
                     }
                     self.streamingText = ""
                     self.isStreaming = false
