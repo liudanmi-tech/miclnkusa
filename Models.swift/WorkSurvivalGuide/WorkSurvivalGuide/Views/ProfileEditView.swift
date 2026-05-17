@@ -136,11 +136,12 @@ struct ProfileEditView: View {
     @State private var isSaving = false
     @State private var showError = false
     @State private var errorMessage = ""
-    @State private var isUploadingPhoto = false
-    @State private var photoUploadError: String?
-    @State private var originalPhotoUrl: String? // 保存原始photoUrl，用于上传失败时恢复
-    @State private var showUploadErrorAlert = false
-    @State private var pendingSaveAction: (() -> Void)? // 待执行的保存操作
+    @State private var imageToCrop: UIImage?
+    @State private var pendingCroppedImage: UIImage? // 裁剪完成但尚未上传，Save 时统一上传
+    @State private var showSelfLimitToast = false
+    @State private var showProLimitToast = false
+    @State private var showSubscriptionView = false
+    @ObservedObject private var subscriptionManager = SubscriptionManager.shared
     
     enum Field {
         case name, notes
@@ -159,19 +160,6 @@ struct ProfileEditView: View {
                             Text("*")
                                 .font(.system(size: 16, weight: .bold))
                                 .foregroundColor(.red)
-
-                            if isUploadingPhoto {
-                                ProgressView()
-                                    .scaleEffect(0.8)
-                                Text("Uploading...")
-                                    .font(.system(size: 12, design: .rounded))
-                                    .foregroundColor(AppColors.secondaryText)
-                            } else if photoUploadError != nil {
-                                Image(systemName: "exclamationmark.triangle.fill")
-                                    .foregroundColor(.red)
-                                    .font(.system(size: 12))
-                            }
-                            
                             Spacer()
                         }
                         
@@ -327,32 +315,49 @@ struct ProfileEditView: View {
                                 .cornerRadius(4)
                         }
                         
-                        Button(action: {
-                            showingAudioSelection = true
-                        }) {
-                            HStack {
-                                if let audioInfo = viewModel.audioInfo {
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        Text("Audio selected")
+                        HStack(spacing: 8) {
+                            Button(action: {
+                                showingAudioSelection = true
+                            }) {
+                                HStack {
+                                    if let audioInfo = viewModel.audioInfo {
+                                        VStack(alignment: .leading, spacing: 4) {
+                                            Text("Audio selected")
+                                                .font(.system(size: 14, design: .rounded))
+                                                .foregroundColor(AppColors.headerText)
+                                            Text(audioInfo)
+                                                .font(.system(size: 12, design: .rounded))
+                                                .foregroundColor(AppColors.secondaryText)
+                                        }
+                                    } else {
+                                        Text("Select from recordings")
                                             .font(.system(size: 14, design: .rounded))
-                                            .foregroundColor(AppColors.headerText)
-                                        Text(audioInfo)
-                                            .font(.system(size: 12, design: .rounded))
                                             .foregroundColor(AppColors.secondaryText)
                                     }
-                                } else {
-                                    Text("Select from recordings")
-                                        .font(.system(size: 14, design: .rounded))
+                                    Spacer()
+                                    Image(systemName: "chevron.right")
+                                        .font(.system(size: 14))
                                         .foregroundColor(AppColors.secondaryText)
                                 }
-                                Spacer()
-                                Image(systemName: "chevron.right")
-                                    .font(.system(size: 14))
-                                    .foregroundColor(AppColors.secondaryText)
+                                .padding()
+                                .background(Color.gray.opacity(0.1))
+                                .cornerRadius(8)
                             }
-                            .padding()
-                            .background(Color.gray.opacity(0.1))
-                            .cornerRadius(8)
+
+                            // 删除音频按钮（有音频时才显示）
+                            if viewModel.audioInfo != nil {
+                                Button(action: {
+                                    viewModel.audioSessionId = nil
+                                    viewModel.audioSegmentId = nil
+                                    viewModel.audioStartTime = nil
+                                    viewModel.audioEndTime   = nil
+                                    viewModel.audioUrl       = nil
+                                }) {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .font(.system(size: 24))
+                                        .foregroundColor(Color.gray.opacity(0.6))
+                                }
+                            }
                         }
                     }
                     .padding(.horizontal, 24)
@@ -367,26 +372,40 @@ struct ProfileEditView: View {
                             return
                         }
                         
-                        // 如果正在上传图片，不允许保存
-                        if isUploadingPhoto {
-                            print("⚠️ [ProfileEditView] 图片正在上传中，阻止保存")
-                            errorMessage = "图片正在上传中，请等待上传完成后再保存\n\n上传完成后，保存按钮将自动可用"
-                            showError = true
-                            return
-                        }
-                        
-                        // 如果图片上传失败，提示用户是否继续保存
-                        if let uploadError = photoUploadError {
-                            print("⚠️ [ProfileEditView] 图片上传失败，询问是否继续保存")
-                            errorMessage = uploadError + "\n\n是否继续保存（保留原有头像）？"
-                            showUploadErrorAlert = true
-                            // 保存待执行的保存操作
-                            pendingSaveAction = {
-                                performSave()
+                        // 档案数量限制（仅创建时校验）
+                        if profile == nil {
+                            let count = ProfileViewModel.shared.profiles.count
+                            if subscriptionManager.isPro {
+                                if count >= 30 {
+                                    showProLimitToast = true
+                                    DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+                                        showProLimitToast = false
+                                    }
+                                    return
+                                }
+                            } else {
+                                if count >= 2 {
+                                    showSubscriptionView = true
+                                    return
+                                }
                             }
-                            return
                         }
-                        
+
+                        // Self 人数校验：只允许一个 Self
+                        if viewModel.relationship == RelationshipType.self_.rawValue {
+                            let existingSelf = ProfileViewModel.shared.profiles.filter {
+                                $0.relationship == RelationshipType.self_.rawValue &&
+                                $0.id != (profile?.id ?? "")
+                            }
+                            if !existingSelf.isEmpty {
+                                showSelfLimitToast = true
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+                                    showSelfLimitToast = false
+                                }
+                                return
+                            }
+                        }
+
                         // 正常保存
                         print("✅ [ProfileEditView] 开始执行保存操作")
                         performSave()
@@ -396,21 +415,15 @@ struct ProfileEditView: View {
                                 ProgressView()
                                     .progressViewStyle(CircularProgressViewStyle(tint: .white))
                                     .scaleEffect(0.8)
-                            } else if isUploadingPhoto {
-                                ProgressView()
-                                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                                    .scaleEffect(0.8)
                             }
-                            Text(
-                                isUploadingPhoto ? "Uploading image..." :
-                                (profile == nil ? (isSaving ? "Creating..." : "Create") : (isSaving ? "Saving..." : "Save"))
-                            )
+                            Text(profile == nil ? (isSaving ? "Creating..." : "Create") : (isSaving ? "Saving..." : "Save"))
                             .font(.system(size: 16, weight: .bold, design: .rounded))
                         }
                         .foregroundColor(.white)
                         .frame(maxWidth: .infinity)
                         .padding()
                         .background(canSave ? Color.blue : Color.gray.opacity(0.4))
+
                         .cornerRadius(12)
                     }
                     .disabled(!canSave)
@@ -425,21 +438,6 @@ struct ProfileEditView: View {
             .navigationBarTitleDisplayMode(.inline)
             .alert("Save failed", isPresented: $showError) {
                 Button("OK", role: .cancel) { }
-            } message: {
-                Text(errorMessage)
-            }
-            .alert("Image upload failed", isPresented: $showUploadErrorAlert) {
-                Button("Cancel", role: .cancel) {
-                    pendingSaveAction = nil
-                }
-                Button("Save anyway", role: .none) {
-                    // 清除上传错误状态，恢复原始photoUrl
-                    photoUploadError = nil
-                    viewModel.photoUrl = originalPhotoUrl
-                    // 执行保存
-                    pendingSaveAction?()
-                    pendingSaveAction = nil
-                }
             } message: {
                 Text(errorMessage)
             }
@@ -459,49 +457,35 @@ struct ProfileEditView: View {
             }
             .onChange(of: selectedPhoto) { newItem in
                 Task {
-                    // 保存原始photoUrl，用于上传失败时恢复
-                    await MainActor.run {
-                        originalPhotoUrl = viewModel.photoUrl
-                        isUploadingPhoto = true
-                        photoUploadError = nil
-                    }
-                    
                     if let data = try? await newItem?.loadTransferable(type: Data.self),
                        let image = UIImage(data: data) {
                         await MainActor.run {
-                            selectedImage = image
-                        }
-                        
-                        // 上传图片到服务器
-                        do {
-                            print("📤 [ProfileEditView] 开始上传图片... profileId=\(profile?.id ?? "新建")")
-                            let photoUrl = try await NetworkManager.shared.uploadProfilePhoto(imageData: data, profileId: profile?.id)
-                            await MainActor.run {
-                                viewModel.photoUrl = photoUrl
-                                isUploadingPhoto = false
-                                photoUploadError = nil
-                                print("✅ [ProfileEditView] 图片上传成功: \(photoUrl)")
-                            }
-                        } catch {
-                            await MainActor.run {
-                                // 上传失败，恢复原始photoUrl
-                                viewModel.photoUrl = originalPhotoUrl
-                                isUploadingPhoto = false
-                                photoUploadError = "图片上传失败: \(error.localizedDescription)"
-                                print("❌ [ProfileEditView] 图片上传失败: \(error)")
-                                // 显示错误提示
-                                errorMessage = photoUploadError ?? "图片上传失败"
-                                showError = true
-                            }
+                            imageToCrop = image
                         }
                     } else {
                         await MainActor.run {
-                            isUploadingPhoto = false
-                            photoUploadError = "无法加载图片"
-                            errorMessage = photoUploadError ?? "无法加载图片"
+                            errorMessage = "无法加载图片"
                             showError = true
                         }
                     }
+                }
+            }
+            .fullScreenCover(
+                isPresented: Binding(
+                    get: { imageToCrop != nil },
+                    set: { if !$0 { imageToCrop = nil } }
+                )
+            ) {
+                if let img = imageToCrop {
+                    ImageCropView(
+                        image: img,
+                        onCrop: { cropped in
+                            imageToCrop = nil
+                            selectedImage = cropped          // 本地预览
+                            pendingCroppedImage = cropped    // 等待 Save 时上传
+                        },
+                        onCancel: { imageToCrop = nil }
+                    )
                 }
             }
             .onAppear {
@@ -532,6 +516,21 @@ struct ProfileEditView: View {
                     notesText = ""
                 }
             }
+            .overlay(alignment: .top) {
+                VStack(spacing: 0) {
+                    if showSelfLimitToast {
+                        toastLabel(text: "Only one \"Self\" profile can be created.")
+                    } else if showProLimitToast {
+                        toastLabel(text: "You've reached the maximum limit of 30 profiles.")
+                    }
+                }
+                .padding(.top, 12)
+                .animation(.easeInOut(duration: 0.3), value: showSelfLimitToast)
+                .animation(.easeInOut(duration: 0.3), value: showProLimitToast)
+            }
+            .sheet(isPresented: $showSubscriptionView) {
+                SubscriptionView()
+            }
             .sheet(isPresented: $showingAudioSelection) {
                 AudioSelectionView(
                     selectedSessionId: $viewModel.audioSessionId,
@@ -551,17 +550,26 @@ struct ProfileEditView: View {
         }
     }
     
-    // 执行保存操作
+    @ViewBuilder
+    private func toastLabel(text: String) -> some View {
+        Text(text)
+            .font(.system(size: 14, weight: .medium, design: .rounded))
+            .foregroundColor(.white)
+            .padding(.horizontal, 18)
+            .padding(.vertical, 12)
+            .background(Color.black.opacity(0.82))
+            .cornerRadius(10)
+            .transition(.move(edge: .top).combined(with: .opacity))
+    }
+
     private var canSave: Bool {
         let hasPhoto = selectedImage != nil || viewModel.photoUrl != nil
         let hasName = !nameText.trimmingCharacters(in: .whitespaces).isEmpty
-        return hasPhoto && hasName && !isUploadingPhoto && !isSaving
+        return hasPhoto && hasName && !isSaving
     }
 
     private func performSave() {
         print("💾 [ProfileEditView] performSave 开始执行")
-        print("   isUploadingPhoto: \(isUploadingPhoto)")
-        print("   photoUploadError: \(photoUploadError ?? "nil")")
         print("   viewModel.photoUrl: \(viewModel.photoUrl ?? "nil")")
         
         // 确保同步最新的输入值
@@ -576,9 +584,28 @@ struct ProfileEditView: View {
         print("   photoUrl: \(viewModel.photoUrl ?? "nil")")
         
         isSaving = true
-        
+
         Task {
             do {
+                // ── 如果有待上传图片，先上传再保存 ──────────────────────
+                if let imageToUpload = pendingCroppedImage {
+                    guard let data = imageToUpload.jpegData(compressionQuality: 0.85) else {
+                        await MainActor.run {
+                            isSaving = false
+                            errorMessage = "图片处理失败"
+                            showError = true
+                        }
+                        return
+                    }
+                    print("📤 [ProfileEditView] Save 阶段上传图片 profileId=\(profile?.id ?? "新建")")
+                    let url = try await NetworkManager.shared.uploadProfilePhoto(imageData: data, profileId: profile?.id)
+                    await MainActor.run {
+                        viewModel.photoUrl = url
+                        pendingCroppedImage = nil
+                        print("✅ [ProfileEditView] 图片上传成功: \(url)")
+                    }
+                }
+
                 if let profile = profile {
                     // 更新档案
                     print("💾 [ProfileEditView] 开始更新档案: \(profile.id)")

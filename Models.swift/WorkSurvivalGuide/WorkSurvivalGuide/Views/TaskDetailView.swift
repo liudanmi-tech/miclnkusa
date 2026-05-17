@@ -331,12 +331,20 @@ private struct MomentInfoCard: View {
 
                 // Play/pause button
                 Button(action: { audioPlayer.togglePlayback() }) {
-                    Image(systemName: audioPlayer.isPlaying ? "pause.fill" : "play.fill")
-                        .font(.system(size: 22))
-                        .foregroundColor(.white.opacity(0.85))
+                    Group {
+                        if audioPlayer.isBuffering {
+                            ProgressView()
+                                .progressViewStyle(CircularProgressViewStyle(tint: .white.opacity(0.85)))
+                                .scaleEffect(0.85)
+                                .frame(width: 22, height: 22)
+                        } else {
+                            Image(systemName: audioPlayer.isPlaying ? "pause.fill" : "play.fill")
+                                .font(.system(size: 22))
+                                .foregroundColor(.white.opacity(0.85))
+                        }
+                    }
                 }
                 .padding(.leading, 22)
-                .disabled(audioPlayer.isBuffering)
 
                 // Share button
                 Button(action: {
@@ -349,7 +357,7 @@ private struct MomentInfoCard: View {
                         root.present(av, animated: true)
                     }
                 }) {
-                    Image(systemName: "square.and.arrow.up")
+                    Image(systemName: "paperplane.fill")
                         .font(.system(size: 22))
                         .foregroundColor(.white.opacity(0.85))
                 }
@@ -447,7 +455,7 @@ private struct MomentSkillsCard: View {
                 .foregroundColor(.white)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 6)
-                .background(Color.blue)
+                .background(Color(white: 0.28))
                 .cornerRadius(20)
             }
 
@@ -464,7 +472,7 @@ private struct MomentSkillsCard: View {
 
                             Text(card.accordionTitle)
                                 .font(.system(size: 15, weight: .medium, design: .rounded))
-                                .foregroundColor(.white.opacity(0.9))
+                                .foregroundColor(Color(hex: "#5E9BF5"))
                                 .lineLimit(1)
 
                             Spacer()
@@ -474,6 +482,7 @@ private struct MomentSkillsCard: View {
                                 .foregroundColor(.white.opacity(0.35))
                         }
                         .frame(minHeight: 46)
+                    .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
 
@@ -581,7 +590,7 @@ private struct SummarySheet: View {
     let summary: String?
     let dialogues: [DialogueItem]
     @Environment(\.dismiss) private var dismiss
-    @State private var showDialogue = false
+    @State private var showDialogue = true  // 默认展开
 
     var body: some View {
         NavigationView {
@@ -590,13 +599,13 @@ private struct SummarySheet: View {
                     if let summary = summary, !summary.isEmpty {
                         Text(summary)
                             .font(.system(size: 15, weight: .regular, design: .rounded))
-                            .foregroundColor(.primary)
+                            .foregroundColor(.white)
                             .lineSpacing(7)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     } else {
                         Text("Summary not available yet.")
                             .font(.system(size: 14, design: .rounded))
-                            .foregroundColor(.secondary)
+                            .foregroundColor(.white.opacity(0.5))
                     }
 
                     // View Details & Recording toggle
@@ -612,26 +621,38 @@ private struct SummarySheet: View {
                             Image(systemName: showDialogue ? "chevron.up" : "chevron.down")
                                 .font(.system(size: 13))
                         }
-                        .foregroundColor(.blue)
+                        .foregroundColor(Color(hex: "#5E9BF5"))
                     }
                     .buttonStyle(.plain)
                     .padding(.top, 4)
 
                     if showDialogue {
                         Divider()
-                        DialogueReviewView(summary: nil, dialogues: dialogues)
+                            .background(Color.white.opacity(0.15))
+                        VStack(spacing: 16) {
+                            ForEach(Array(dialogues.enumerated()), id: \.offset) { _, dialogue in
+                                DialogueBubbleView(
+                                    dialogue: dialogue,
+                                    isOwn: dialogue.isMe ?? false
+                                )
+                            }
+                        }
+                        .padding(.top, 4)
                     }
                 }
                 .padding(20)
             }
+            .background(Color.black)
             .navigationTitle("Summary")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button("Done") { dismiss() }
+                        .foregroundColor(Color(hex: "#5E9BF5"))
                 }
             }
         }
+        .preferredColorScheme(.dark)
     }
 }
 

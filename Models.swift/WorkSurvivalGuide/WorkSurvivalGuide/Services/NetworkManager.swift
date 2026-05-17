@@ -1338,7 +1338,48 @@ class NetworkManager {
         print("✅ [NetworkManager] 档案列表获取成功，数量: \(response.profiles.count)")
         return response
     }
-    
+
+    // 获取档案记忆
+    func fetchProfileMemories(profileId: String) async throws -> ProfileMemoriesResponse {
+        guard hasValidToken() else {
+            throw NSError(domain: "NetworkError", code: 401,
+                          userInfo: [NSLocalizedDescriptionKey: "请先登录"])
+        }
+
+        let dataTask = AF.request(
+            "\(baseURLForRead)/profiles/\(profileId)/memories",
+            method: .get,
+            headers: [
+                "Content-Type": "application/json",
+                "Authorization": "Bearer \(getAuthToken())"
+            ],
+            requestModifier: { $0.timeoutInterval = 15 }
+        )
+
+        let dataResponse = await dataTask.serializingData().response
+        let responseData = dataResponse.data ?? Data()
+
+        if let statusCode = dataResponse.response?.statusCode {
+            if statusCode == 401 {
+                throw NSError(domain: "NetworkError", code: 401,
+                              userInfo: [NSLocalizedDescriptionKey: "认证失败，请重新登录"])
+            } else if statusCode != 200 {
+                throw NSError(domain: "NetworkError", code: statusCode,
+                              userInfo: [NSLocalizedDescriptionKey: "HTTP \(statusCode) 错误"])
+            }
+        }
+
+        guard !responseData.isEmpty else {
+            throw NSError(domain: "NetworkError", code: -1,
+                          userInfo: [NSLocalizedDescriptionKey: "服务端返回空响应"])
+        }
+
+        let decoder = JSONDecoder()
+        let memoriesResponse = try decoder.decode(ProfileMemoriesResponse.self, from: responseData)
+        print("✅ [NetworkManager] 档案记忆获取成功，total=\(memoriesResponse.total)")
+        return memoriesResponse
+    }
+
     // 创建档案
     func createProfile(_ profile: Profile) async throws -> Profile {
         // 如果使用 Mock 数据

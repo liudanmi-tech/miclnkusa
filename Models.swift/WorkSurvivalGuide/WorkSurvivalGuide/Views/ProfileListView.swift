@@ -48,33 +48,39 @@ struct ProfileListView: View {
                     }
                     Spacer()
                 } else {
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 23.99053955078125) { // 根据Figma: gap 23.99px
-                            // 会员计划卡片（可选，暂时不显示）
-                            // MembershipCardView()
-                            
-                            // 档案列表
-                            ForEach(viewModel.profiles) { profile in
-                                ProfileCardView(profile: profile, onDelete: {
-                                    Task {
-                                        try? await viewModel.deleteProfile(profile.id)
-                                        await MainActor.run {
-                                            if selectedProfile?.id == profile.id { selectedProfile = nil }
+                    List {
+                        ForEach(viewModel.profiles) { profile in
+                            ProfileCardView(profile: profile, onTap: {
+                                print("📋 [ProfileListView] 点击档案: \(profile.id)")
+                                selectedProfile = profile
+                            })
+                                .id("\(profile.id)-\(profile.updatedAt.timeIntervalSince1970)")
+                                .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                    Button(role: .destructive) {
+                                        Task {
+                                            try? await viewModel.deleteProfile(profile.id)
+                                            await MainActor.run {
+                                                if selectedProfile?.id == profile.id {
+                                                    selectedProfile = nil
+                                                }
+                                            }
                                         }
+                                    } label: {
+                                        Label("Delete", systemImage: "trash")
                                     }
-                                })
-                                    .id("\(profile.id)-\(profile.updatedAt.timeIntervalSince1970)")
-                                    .padding(.horizontal, 19.992115020751953) // 根据Figma: padding horizontal 19.99px
-                                    .onTapGesture {
-                                        print("📋 [ProfileListView] 点击档案: \(profile.id)")
-                                        selectedProfile = profile
-                                        print("📋 [ProfileListView] selectedProfile 已设置: \(selectedProfile?.id ?? "nil")")
-                                    }
-                            }
+                                }
+                                .listRowBackground(Color.clear)
+                                .listRowSeparator(.hidden)
+                                .listRowInsets(EdgeInsets(top: 6, leading: 20, bottom: 6, trailing: 20))
                         }
-                        .padding(.top, 0)
-                        .padding(.bottom, 100) // 为底部导航栏留出空间
+                        // 底部留白，避免被 tab bar 遮挡
+                        Color.clear
+                            .frame(height: 80)
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
                     }
+                    .listStyle(.plain)
+                    .scrollContentBackground(.hidden)
                 }
             }
         }
@@ -265,209 +271,160 @@ struct ProfileHeaderView: View {
 // 档案卡片视图
 struct ProfileCardView: View {
     let profile: Profile
-    var onDelete: (() -> Void)? = nil
+    var onTap: (() -> Void)? = nil
     @ObservedObject private var audioPlayer = ProfileAudioPlayerService.shared
-    @State private var showDeleteAlert = false
-    
+    @State private var showMemorySheet = false
+
+    // 只有 audioUrl 是真实可播放的 http URL 时才显示播放键
+    private var playableAudioUrl: String? {
+        guard let url = profile.audioUrl, url.hasPrefix("http") else { return nil }
+        return url
+    }
+
     var body: some View {
-        ZStack(alignment: .topTrailing) {
+        ZStack(alignment: .trailing) {
+
+            // ── 层1（最底）：透明全卡片按钮 → 点击进编辑页 ──────────
+            // 用透明 Color 做 hit area，避免 Button label 内容影响手势
+            Button(action: { onTap?() }) {
+                Color.clear.contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            // ── 层2（中间）：纯视觉内容，allowsHitTesting(false) 让点击穿透到层1/层3
             VStack(alignment: .leading, spacing: 0) {
-            // 照片、名称、关系区域
-            VStack(alignment: .center, spacing: 0) {
-                // 照片（圆形，带白色边框，OSS URL 需转换为 API URL）
-                if let photoUrl = profile.getAccessiblePhotoURL(baseURL: NetworkManager.shared.getBaseURL()) {
-                    if let url = URL(string: photoUrl) {
-                        RemoteImageView(
-                            url: url,
-                            width: 95.99,
-                            height: 95.99
-                        )
-                        .overlay(
-                            Circle()
-                                .stroke(Color.white, lineWidth: 3.448770046234131) // 根据Figma: strokeWeight 3.45px
-                        )
-                        .shadow(color: Color.black.opacity(0.1), radius: 2, x: 0, y: 2) // 根据Figma: boxShadow
-                    } else {
-                        // URL格式不正确
+                HStack(alignment: .center, spacing: 14) {
+                    avatarView(size: 64)
+
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(profile.name)
+                            .font(.system(size: 18, weight: .black, design: .rounded))
+                            .foregroundColor(AppColors.headerText)
+                            .lineLimit(1)
+
+                        HStack(spacing: 4) {
+                            Image(systemName: "person.circle.fill")
+                                .font(.system(size: 11))
+                                .foregroundColor(.white)
+                            Text(profile.relationship)
+                                .font(.system(size: 11, weight: .bold, design: .rounded))
+                                .foregroundColor(.white)
+                        }
+                        .padding(.horizontal, 10)
+                        .frame(height: 22)
+                        .background(Capsule().fill(Color(white: 0.28)))
+                    }
+
+                    Spacer()
+
+                    // 占位宽度：记忆按钮 36 + 间距 8 + 音频按钮 40 (可选) + padding 16
+                    Color.clear.frame(width: 52, height: playableAudioUrl != nil ? 92 : 44)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 16)
+
+                if let notes = profile.notes, !notes.isEmpty {
+                    HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: "note.text")
+                            .font(.system(size: 15))
+                            .foregroundColor(AppColors.headerText.opacity(0.6))
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Notes")
+                                .font(.system(size: 11, weight: .bold, design: .rounded))
+                                .foregroundColor(AppColors.headerText.opacity(0.5))
+                            Text(notes)
+                                .font(.system(size: 13, weight: .medium, design: .rounded))
+                                .foregroundColor(AppColors.headerText)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    .padding(14)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(RoundedRectangle(cornerRadius: 12).fill(Color.white.opacity(0.08)))
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 16)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .allowsHitTesting(false)   // 纯视觉层，所有点击穿透给层1或层3
+
+            // ── 层3（最顶）：记忆按钮 + 播放键，ZStack 后声明 = hit-test 最优先 ──
+            VStack(spacing: 8) {
+                // 记忆按钮（始终显示）
+                Button(action: { showMemorySheet = true }) {
+                    ZStack {
                         Circle()
-                            .fill(Color.gray.opacity(0.2))
-                            .frame(width: 95.99, height: 95.99)
-                            .overlay(
-                                Image(systemName: "exclamationmark.triangle")
-                                    .foregroundColor(.red)
-                                    .font(.system(size: 20))
-                            )
-                            .onAppear {
-                                print("❌ [ProfileListView] URL格式不正确: \(photoUrl)")
-                            }
-                            .overlay(
-                                Circle()
-                                    .stroke(Color.white, lineWidth: 3.448770046234131)
-                            )
-                            .shadow(color: Color.black.opacity(0.1), radius: 2, x: 0, y: 2)
+                            .fill(Color(.systemGray5))
+                            .frame(width: 36, height: 36)
+                            .overlay(Circle().stroke(Color(.systemGray4), lineWidth: 0.5))
+                        Image(systemName: "brain")
+                            .font(.system(size: 13))
+                            .foregroundColor(AppColors.headerText.opacity(0.7))
                     }
-                } else {
-                    // 默认头像
-                    Circle()
-                        .fill(Color.gray.opacity(0.2))
-                        .frame(width: 95.99, height: 95.99)
-                        .overlay(
-                            Image(systemName: "person.fill")
-                                .font(.system(size: 40))
-                                .foregroundColor(AppColors.secondaryText)
-                        )
-                        .overlay(
+                }
+                .buttonStyle(.borderless)
+
+                // 音频播放键（有音频时才显示）
+                if playableAudioUrl != nil {
+                    let isCurrent   = audioPlayer.currentPlayingProfileId == profile.id
+                    let isBuffering = isCurrent && audioPlayer.isBuffering
+                    let isPlaying   = isCurrent && audioPlayer.isPlaying
+
+                    Button(action: { audioPlayer.togglePlayback(for: profile) }) {
+                        ZStack {
                             Circle()
-                                .stroke(Color.white, lineWidth: 3.448770046234131)
-                        )
-                        .shadow(color: Color.black.opacity(0.1), radius: 2, x: 0, y: 2)
-                }
-                
-                // 名称（居中）
-                Text(profile.name)
-                    .font(.system(size: 24, weight: .black, design: .rounded)) // Nunito 900, 24px
-                    .foregroundColor(AppColors.headerText) // #5E4B35
-                    .padding(.top, 111.99) // 根据Figma: 照片下方间距
-                
-                // 关系标签
-                HStack(alignment: .center, spacing: 3.9984331130981445) { // 根据Figma: gap 3.99px
-                    Image(systemName: "person.circle.fill")
-                        .font(.system(size: 12))
-                        .foregroundColor(Color(hex: "#E68A00")) // 根据Figma: #E68A00
-                    
-                    Text(profile.relationship)
-                        .font(.system(size: 12, weight: .bold, design: .rounded)) // Nunito 700, 12px
-                        .foregroundColor(Color(hex: "#E68A00")) // #E68A00
-                }
-                .padding(.horizontal, 11.995254516601562) // 根据Figma: padding left 11.99px
-                .padding(.vertical, 0)
-                .frame(height: 23.99) // 根据Figma: height 23.99px
-                .background(
-                    Capsule()
-                        .fill(Color(hex: "#FFD59E").opacity(0.3)) // rgba(255, 213, 158, 0.3)
-                )
-                .padding(.top, 4) // 根据Figma: 名称下方间距
-                
-                // 音频播放按钮和波形图
-                if profile.audioUrl != nil || (profile.audioStartTime != nil && profile.audioEndTime != nil) {
-                    HStack(alignment: .center, spacing: 11.995262145996094) { // 根据Figma: gap 11.99px
-                        // 播放按钮（圆形）：有 audioUrl 时点击播放/暂停
-                        Button(action: {
-                            audioPlayer.togglePlayback(for: profile)
-                        }) {
-                            ZStack {
-                                Circle()
-                                    .fill(Color(hex: "#FFD59E")) // #FFD59E
-                                    .frame(width: 39.99, height: 39.99)
-                                    .shadow(color: Color.black.opacity(0.1), radius: 1, x: 0, y: 1)
-                                
-                                Image(systemName: audioPlayer.currentPlayingProfileId == profile.id ? "pause.fill" : "play.fill")
-                                    .font(.system(size: 18))
-                                    .foregroundColor(AppColors.headerText)
-                                    .offset(x: 1) // 稍微向右偏移，视觉居中
-                            }
-                        }
-                        .disabled(profile.audioUrl == nil || !(profile.audioUrl?.hasPrefix("http") ?? false))
-                        
-                        // 时长和波形图
-                        HStack(alignment: .center, spacing: 11.995264053344727) {
-                            // 时长
-                            if let startTime = profile.audioStartTime,
-                               let endTime = profile.audioEndTime {
-                                Text(formatDuration(endTime - startTime))
-                                    .font(.system(size: 14, weight: .bold, design: .rounded)) // Nunito 700, 14px
-                                    .foregroundColor(AppColors.headerText.opacity(0.8))
-                            }
-                            
-                            // 波形图（简化版，使用多个小矩形）
-                            HStack(alignment: .bottom, spacing: 1.9938182830810547) {
-                                let heights: [CGFloat] = [3.19, 6.39, 9.59, 12.79, 9.59, 6.39, 3.19, 6.39, 9.59, 12.79, 9.59]
-                                ForEach(0..<11) { index in
-                                    RoundedRectangle(cornerRadius: 23144300)
-                                        .fill(AppColors.headerText.opacity(0.6))
-                                        .frame(
-                                            width: 1.99,
-                                            height: heights[index]
-                                        )
-                                }
+                                .fill(Color(.systemGray5))
+                                .frame(width: 40, height: 40)
+                                .overlay(Circle().stroke(Color(.systemGray4), lineWidth: 0.5))
+                                .shadow(color: Color.black.opacity(0.08), radius: 1, x: 0, y: 1)
+
+                            if isBuffering {
+                                ProgressView()
+                                    .progressViewStyle(
+                                        CircularProgressViewStyle(tint: AppColors.headerText.opacity(0.7))
+                                    )
+                                    .scaleEffect(0.75)
+                            } else {
+                                Image(systemName: isPlaying ? "pause.fill" : "play.fill")
+                                    .font(.system(size: 15))
+                                    .foregroundColor(AppColors.headerText.opacity(0.75))
+                                    .offset(x: isPlaying ? 0 : 1)
                             }
                         }
                     }
-                    .padding(.top, 4) // 关系标签下方间距
+                    .buttonStyle(.borderless)
+                    .disabled(isBuffering)
                 }
             }
-            .frame(maxWidth: .infinity)
-            .padding(.top, 23.990509033203125) // 根据Figma: padding top 23.99px
-            .padding(.horizontal, 23.990520477294922) // 根据Figma: padding horizontal 23.99px
-            
-            // 备注区域
-            if let notes = profile.notes, !notes.isEmpty {
-                HStack(alignment: .top, spacing: 11.995269775390625) { // 根据Figma: gap 11.99px
-                    Image(systemName: "note.text")
-                        .font(.system(size: 19.99))
-                        .foregroundColor(AppColors.headerText.opacity(0.6))
-                        .frame(width: 19.99, height: 19.99)
-                    
-                    VStack(alignment: .leading, spacing: 3.9983787536621094) { // 根据Figma: gap 3.99px
-                        Text("Notes")
-                            .font(.system(size: 12, weight: .bold, design: .rounded)) // Nunito 700, 12px
-                            .foregroundColor(AppColors.headerText.opacity(0.5)) // rgba(94, 75, 53, 0.5)
-                        
-                        Text(notes)
-                            .font(.system(size: 14, weight: .medium, design: .rounded)) // Nunito 500, 14px
-                            .foregroundColor(AppColors.headerText) // #5E4B35
-                            .lineSpacing(22.75) // lineHeight 1.625em of 14px = 22.75px
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-                .padding(.horizontal, 15.99368667602539) // 根据Figma: padding horizontal 15.99px
-                .padding(.vertical, 15.99371337890625) // 根据Figma: padding vertical 15.99px
-                .padding(.top, 0)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(
-                    RoundedRectangle(cornerRadius: 16)
-                        .fill(Color.white.opacity(0.08))
-                )
-                .padding(.top, 260.64 - 196.66 - 39.99) // 根据Figma计算间距
-            }
+            .padding(.trailing, 16)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.vertical, 23.990509033203125) // 根据Figma: padding vertical 23.99px
         .background(AppColors.cardBackground)
-        .cornerRadius(32) // 根据Figma: borderRadius 32px
-        .shadow(color: Color.black.opacity(0.1), radius: 1, x: 0, y: 1) // 根据Figma: boxShadow
-            
-            // 档案删除按钮（卡片右上角）
-            if let onDelete = onDelete {
-                Button(action: { showDeleteAlert = true }) {
-                    Image(systemName: "trash")
-                        .font(.system(size: 18, weight: .medium))
-                        .foregroundColor(AppColors.headerText.opacity(0.7))
-                        .frame(width: 36, height: 36)
-                        .background(Circle().fill(Color.white.opacity(0.2)))
-                }
-                .padding(.top, 20)
-                .padding(.trailing, 20)
-            }
+        .cornerRadius(20)
+        .shadow(color: Color.black.opacity(0.1), radius: 1, x: 0, y: 1)
+        .sheet(isPresented: $showMemorySheet) {
+            ProfileMemoryView(profile: profile)
         }
-        .alert("Delete Profile", isPresented: $showDeleteAlert) {
-            Button("Cancel", role: .cancel) {}
-            Button("Delete", role: .destructive) {
-                onDelete?()
-            }
-        } message: {
-            Text("Delete \"\(profile.name)\"? This cannot be undone.")
+    }
+
+    @ViewBuilder
+    private func avatarView(size: CGFloat) -> some View {
+        if let photoUrl = profile.getAccessiblePhotoURL(baseURL: NetworkManager.shared.getBaseURL()),
+           let url = URL(string: photoUrl) {
+            RemoteImageView(url: url, width: size, height: size)
+                .overlay(Circle().stroke(Color.white, lineWidth: 2.5))
+                .shadow(color: Color.black.opacity(0.1), radius: 2, x: 0, y: 2)
+        } else {
+            Circle()
+                .fill(Color.gray.opacity(0.2))
+                .frame(width: size, height: size)
+                .overlay(
+                    Image(systemName: "person.fill")
+                        .font(.system(size: size * 0.4))
+                        .foregroundColor(AppColors.secondaryText)
+                )
+                .overlay(Circle().stroke(Color.white, lineWidth: 2.5))
+                .shadow(color: Color.black.opacity(0.1), radius: 2, x: 0, y: 2)
         }
     }
     
-    // 格式化时长显示
-    private func formatDuration(_ duration: Double) -> String {
-        let minutes = Int(duration) / 60
-        let seconds = Int(duration) % 60
-        if minutes > 0 {
-            return String(format: "%d:%02d", minutes, seconds)
-        } else {
-            return String(format: "0:%02d", seconds)
-        }
-    }
 }

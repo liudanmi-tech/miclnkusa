@@ -14,26 +14,28 @@ struct AssistantMessage: Identifiable, Codable {
     let content: String
     let timestamp: Date
     let memeURL: String?      // non-nil → 这是一条梗图消息（独立消息行）
+    let skillName: String?    // AI 回复时关联的技能名，用于消息气泡标签
 
     var isMeme: Bool { memeURL != nil }
 
     /// 普通文字消息
-    init(role: MessageRole, content: String) {
+    init(role: MessageRole, content: String, skillName: String? = nil) {
         self.id = UUID()
         self.role = role
         self.content = content
         self.timestamp = Date()
         self.memeURL = nil
+        self.skillName = skillName
     }
 
     /// 梗图消息工厂
     static func meme(url: String) -> AssistantMessage {
-        AssistantMessage(id: UUID(), role: .assistant, content: "", timestamp: Date(), memeURL: url)
+        AssistantMessage(id: UUID(), role: .assistant, content: "", timestamp: Date(), memeURL: url, skillName: nil)
     }
 
-    private init(id: UUID, role: MessageRole, content: String, timestamp: Date, memeURL: String?) {
+    private init(id: UUID, role: MessageRole, content: String, timestamp: Date, memeURL: String?, skillName: String?) {
         self.id = id; self.role = role; self.content = content
-        self.timestamp = timestamp; self.memeURL = memeURL
+        self.timestamp = timestamp; self.memeURL = memeURL; self.skillName = skillName
     }
 
     enum MessageRole: String, Codable { case user, assistant }
@@ -51,7 +53,18 @@ private enum ChatHistoryStore {
     static let maxMessages = 20
 
     static func key(sessionId: String, skillId: String) -> String {
-        "assistant_chat_\(sessionId)_\(skillId)"
+        "assistant_chat_\(sessionId)"   // 同一录音下所有技能共享同一对话
+    }
+
+    // MARK: 追踪上次使用的 skillId，用于切换检测
+    private static func lastSkillKey(sessionId: String) -> String {
+        "assistant_last_skill_\(sessionId)"
+    }
+    static func saveLastSkill(_ skillId: String, sessionId: String) {
+        UserDefaults.standard.set(skillId, forKey: lastSkillKey(sessionId: sessionId))
+    }
+    static func loadLastSkill(sessionId: String) -> String? {
+        UserDefaults.standard.string(forKey: lastSkillKey(sessionId: sessionId))
     }
 
     static func load(sessionId: String, skillId: String) -> [AssistantMessage] {
@@ -75,6 +88,7 @@ private enum ChatHistoryStore {
 
     static func clear(sessionId: String, skillId: String) {
         UserDefaults.standard.removeObject(forKey: key(sessionId: sessionId, skillId: skillId))
+        UserDefaults.standard.removeObject(forKey: lastSkillKey(sessionId: sessionId))
     }
 }
 
@@ -116,10 +130,22 @@ final class AIAssistantViewModel: ObservableObject {
 
     // MARK: - Public API
 
-    /// 页面出现时自动触发首条 AI 开场白（仅首次，历史恢复时跳过）
+    /// 页面出现时自动触发开场白或技能切换回复
     func initSession() {
-        guard messages.isEmpty, !isStreaming else { return }
-        streamRequest(message: "__INIT__")
+        guard !isStreaming else { return }
+        if messages.isEmpty {
+            // 首次进入：正常 __INIT__
+            ChatHistoryStore.saveLastSkill(skillCard.skillId, sessionId: sessionId)
+            streamRequest(message: "__INIT__")
+        } else {
+            // 有历史：检测是否切换了技能
+            let lastSkillId = ChatHistoryStore.loadLastSkill(sessionId: sessionId)
+            if lastSkillId != skillCard.skillId {
+                ChatHistoryStore.saveLastSkill(skillCard.skillId, sessionId: sessionId)
+                streamRequest(message: "__SWITCH__")
+            }
+            // 同一技能重新进入 → 静默恢复，不触发任何请求
+        }
     }
 
     /// 用户发送文字消息
@@ -205,9 +231,9 @@ final class AIAssistantViewModel: ObservableObject {
             onDone: { [weak self] in
                 Task { @MainActor [weak self] in
                     guard let self else { return }
-                    // 1. 先提交文字
+                    // 1. 先提交文字（带技能名标签）
                     if !self.streamingText.isEmpty {
-                        self.messages.append(AssistantMessage(role: .assistant, content: self.streamingText))
+                        self.messages.append(AssistantMessage(role: .assistant, content: self.streamingText, skillName: self.skillName))
                     }
                     // 2. 再追加梗图（文字之后）
                     if let memeURL = self.pendingMemeURL {

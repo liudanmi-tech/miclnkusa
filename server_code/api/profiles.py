@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 import logging
 import traceback
 import asyncio
@@ -249,7 +249,7 @@ async def get_profiles(
                 return [ProfileResponse(**d) for d in cached]
 
         result = await db.execute(
-            select(Profile).where(Profile.user_id == uuid.UUID(user_id))
+            select(Profile).where(Profile.user_id == uuid.UUID(user_id)).order_by(Profile.created_at)
         )
         profiles = result.scalars().all()
         out = [_profile_to_response(p) for p in profiles]
@@ -350,7 +350,10 @@ async def update_profile(
         profile.audio_end_time = int(profile_data.audio_end_time)
     if profile_data.audio_url is not None:
         profile.audio_url = profile_data.audio_url
-    
+
+    # 强制更新 updated_at，确保 iOS 端 cacheBuster URL 变化、图片缓存失效
+    profile.updated_at = datetime.now(timezone.utc)
+
     await db.commit()
     _invalidate_profiles_cache(user_id)
     logger.info(f"[档案更新] ✅ 成功 profile_id={profile_id} photo_url={profile.photo_url}")
@@ -371,6 +374,110 @@ async def update_profile(
         created_at=profile.created_at.isoformat(),
         updated_at=profile.updated_at.isoformat()
     )
+
+
+@router.get("/{profile_id}/audio", summary="返回档案音频 OSS 预签名 URL（302 重定向）")
+async def get_profile_audio(
+    profile_id: str,
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    验证 JWT 后，生成 60 秒有效的 OSS 预签名 URL，以 302 重定向返回。
+    AVPlayer 自动跟随重定向，直接从 OSS 流式播放，支持 Range 请求和 seek。
+    """
+    from fastapi.responses import RedirectResponse
+    from urllib.parse import urlparse
+
+    result = await db.execute(
+        select(Profile).where(
+            Profile.id == uuid.UUID(profile_id),
+            Profile.user_id == uuid.UUID(user_id)
+        )
+    )
+    profile = result.scalar_one_or_none()
+    if not profile or not profile.audio_url:
+        raise HTTPException(status_code=404, detail="音频不存在")
+
+    try:
+        import oss2
+        ak          = os.getenv("OSS_ACCESS_KEY_ID")
+        sk          = os.getenv("OSS_ACCESS_KEY_SECRET")
+        ep          = os.getenv("OSS_ENDPOINT", "oss-cn-beijing.aliyuncs.com")
+        bucket_name = os.getenv("OSS_BUCKET_NAME")
+
+        if not all([ak, sk, ep, bucket_name]):
+            raise HTTPException(status_code=503, detail="OSS 配置不完整")
+
+        parsed  = urlparse(profile.audio_url)
+        oss_key = parsed.path.lstrip("/")
+
+        auth   = oss2.Auth(ak, sk)
+        bucket = oss2.Bucket(auth, ep, bucket_name)
+
+        # 生成 60 秒有效预签名 URL，AVPlayer 跟随 302 后直接流式播放
+        signed_url = await asyncio.to_thread(
+            bucket.sign_url, "GET", oss_key, 60, slash_safe=True
+        )
+        logger.info(f"[档案音频] 302 → OSS signed_url (60s) profile_id={profile_id}")
+        return RedirectResponse(url=signed_url, status_code=302)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[档案音频] 生成预签名 URL 失败 profile_id={profile_id}: {e}")
+        raise HTTPException(status_code=502, detail=f"无法获取音频: {str(e)[:120]}")
+
+
+def _parse_memory(raw: str) -> dict:
+    import re
+    type_m   = re.search(r'\[TYPE:(\w+)\]', raw)
+    date_m   = re.search(r'\[DATE:([\d-]+)\]', raw)
+    status_m = re.search(r'\[STATUS:(\w+)\]', raw)
+    is_goal  = bool(re.search(r'\[GOAL\]', raw))
+    content  = re.sub(r'\[[^\]]+\]', '', raw).strip(' :：-')
+    mem_type = "goal" if is_goal else (type_m.group(1) if type_m else "other")
+    return {"content": content, "type": mem_type,
+            "date": date_m.group(1) if date_m else None,
+            "status": status_m.group(1) if status_m else None}
+
+
+@router.get("/{profile_id}/memories", summary="获取档案关联记忆")
+async def get_profile_memories(
+    profile_id: str,
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    获取与指定档案关联的记忆，按类型分组返回。
+    数据来源：PostgreSQL KG（人物/事件/目标/技能），精准 SQL JOIN，零语义漂移。
+    """
+    from services.knowledge_graph import get_profile_memories_kg
+
+    # 1. 验证档案属于当前用户
+    result = await db.execute(
+        select(Profile).where(
+            Profile.id == uuid.UUID(profile_id),
+            Profile.user_id == uuid.UUID(user_id)
+        )
+    )
+    profile = result.scalar_one_or_none()
+    if not profile:
+        raise HTTPException(status_code=404, detail="档案不存在")
+
+    # 2. PostgreSQL KG 查询（替代 mem0 向量搜索）
+    memories = await get_profile_memories_kg(profile.name, user_id, db)
+
+    return {
+        "profile_id": profile_id,
+        "profile_name": memories["profile_name"],
+        "relationship": memories["relationship"],
+        "events": memories["events"],
+        "goals": memories["goals"],
+        "skills": memories["skills"],
+        "other": memories["other"],
+        "total": memories["total"],
+    }
 
 
 @router.delete("/{profile_id}", status_code=204)

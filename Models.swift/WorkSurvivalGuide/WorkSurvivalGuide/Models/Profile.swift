@@ -109,7 +109,7 @@ struct Profile: Codable, Identifiable {
     }
 }
 
-// 档案照片 URL 转换（OSS 私有，需转 API URL）
+// 档案照片 URL 转换
 extension Profile {
     /// 获取可访问的档案照片 URL（含 cacheBuster 防止修改后不刷新）
     func getAccessiblePhotoURL(baseURL: String, cacheBuster: String? = nil) -> String? {
@@ -121,8 +121,12 @@ extension Profile {
     static func getAccessiblePhotoURL(photoUrl: String?, baseURL: String, cacheBuster: String? = nil) -> String? {
         guard let photoUrl = photoUrl, !photoUrl.isEmpty else { return nil }
         var url: String
-        if photoUrl.contains("/api/v1/images/") { url = photoUrl.components(separatedBy: "?").first ?? photoUrl }
-        else if photoUrl.contains("/images/"), let pathRange = photoUrl.range(of: "/images/") {
+        // R2 公开 URL（https://xxx.r2.dev/... 或其他 https 直链）直接使用，无需代理
+        if photoUrl.hasPrefix("https://") && !photoUrl.contains("/api/v1/images/") {
+            url = photoUrl.components(separatedBy: "?").first ?? photoUrl
+        } else if photoUrl.contains("/api/v1/images/") {
+            url = photoUrl.components(separatedBy: "?").first ?? photoUrl
+        } else if photoUrl.contains("/images/"), let pathRange = photoUrl.range(of: "/images/") {
             let path = String(photoUrl[pathRange.upperBound...])
             let parts = path.components(separatedBy: "/")
             if parts.count >= 3 {
@@ -199,6 +203,31 @@ struct AudioSegment: Codable, Identifiable {
 // 档案列表响应
 struct ProfileListResponse: Codable {
     let profiles: [Profile]
+}
+
+// 档案记忆条目
+struct ProfileMemoryItem: Codable {
+    let content: String
+    let type: String    // "relationship" | "event" | "goal" | "skill" | "other"
+    let date: String?
+    let status: String?
+}
+
+// 档案记忆响应
+struct ProfileMemoriesResponse: Codable {
+    let profileId: String
+    let profileName: String
+    let relationship: [ProfileMemoryItem]
+    let events: [ProfileMemoryItem]
+    let goals: [ProfileMemoryItem]
+    let skills: [ProfileMemoryItem]   // 与该人物相关的技能应用记录
+    let other: [ProfileMemoryItem]
+    let total: Int
+    enum CodingKeys: String, CodingKey {
+        case profileId = "profile_id"
+        case profileName = "profile_name"
+        case relationship, events, goals, skills, other, total
+    }
 }
 
 // 音频片段列表响应

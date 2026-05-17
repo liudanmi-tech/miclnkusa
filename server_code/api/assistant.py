@@ -107,6 +107,12 @@ def _build_prompt(
             f"3. 以一个开放性问题结尾\n"
             f"语气亲切自然，像一个了解用户的朋友。"
         )
+    elif message == "__SWITCH__":
+        task_desc = (
+            f"用户刚从之前的话题切换到了「{skill_name}」这个技能。\n"
+            f"请用1-2句话自然地承接，简要说明「{skill_name}」能帮到用户的核心点，"
+            f"不要重复之前对话的内容，最后以一个针对性的问题结尾。语气轻快自然。"
+        )
     else:
         task_desc = (
             f"用户说：{message}\n\n"
@@ -280,27 +286,25 @@ async def assistant_chat(
     except Exception as exc:
         logger.warning(f"[assistant] 取对话摘要失败: {exc}")
 
-    # 4. 取记忆上下文（含超时保护）
-    # 搜索词：__INIT__ 用技能名+摘要，正常消息用用户当前消息，确保记忆跟随话题
+    # 4. 取记忆上下文（PostgreSQL KG，精准人物隔离，替代 mem0 向量搜索）
     memory_used = False
     memory_context = ""
     try:
-        from services.memory_service import search_memory
-        if req.message == "__INIT__":
-            mem_query = f"{skill_name} {conv_summary[:100]}"
+        from services.knowledge_graph import get_ai_context_kg
+        if req.message in ("__INIT__", "__SWITCH__"):
+            # INIT/SWITCH：用对话摘要检索背景
+            mem_query = conv_summary[:200] or skill_name
         else:
             mem_query = req.message
-        mem_results = await asyncio.wait_for(
-            asyncio.to_thread(search_memory, mem_query, user_id, limit=3),
-            timeout=2.0,
+        memory_context = await asyncio.wait_for(
+            get_ai_context_kg(mem_query, user_id, db),
+            timeout=3.0,
         )
-        if mem_results:
-            memory_context = "\n".join(f"- {m}" for m in mem_results)
-            memory_used = True
+        memory_used = bool(memory_context)
     except asyncio.TimeoutError:
-        logger.warning("[assistant] 记忆检索超时(2s)，跳过")
+        logger.warning("[assistant] KG 记忆检索超时(3s)，跳过")
     except Exception as exc:
-        logger.warning(f"[assistant] 记忆获取失败: {exc}")
+        logger.warning(f"[assistant] KG 记忆获取失败: {exc}")
 
     # 5. 组装 prompt
     prompt = _build_prompt(
@@ -385,7 +389,7 @@ async def assistant_chat(
             yield _sse({"type": "suggestions", "items": suggestions[:4]})
 
         # 解析 [MEME:category]（隐藏在 suggestions_raw 末尾，不会出现在用户可见文本中）
-        if req.message != "__INIT__":
+        if req.message not in ("__INIT__", "__SWITCH__"):
             meme_match = re.search(r"\[MEME:(\w+)\]", suggestions_raw)
             if meme_match:
                 meme_cat = meme_match.group(1)
@@ -404,14 +408,13 @@ async def assistant_chat(
 
         yield _sse({"type": "done"})
 
-        # 对话结束后，异步写入结构化记忆（fire-and-forget，不阻塞 SSE）
-        if full_text and req.message != "__INIT__":
+        # 对话结束后，异步写入 PostgreSQL KG（fire-and-forget，不阻塞 SSE）
+        if full_text and req.message not in ("__INIT__", "__SWITCH__"):
             try:
-                from services.structured_memory import extract_and_save_structured_memories
-                # 组装本轮对话内容（含历史 + 本轮问答）
+                from services.knowledge_graph import save_kg_from_chat
                 history_text = "\n".join(
                     f"{'用户' if h.role == 'user' else 'AI'}: {h.content}"
-                    for h in req.history[-6:]   # 最近6条，控制长度
+                    for h in req.history[-6:]
                 )
                 round_content = (
                     f"技能场景：{skill_name}\n"
@@ -419,16 +422,18 @@ async def assistant_chat(
                     f"---\n{history_text}\n"
                     f"用户：{req.message}\nAI：{full_text[:500]}"
                 )
-                asyncio.create_task(asyncio.to_thread(
-                    extract_and_save_structured_memories,
-                    round_content,
-                    user_id,
-                    req.session_id,
-                    {"source": "assistant_chat", "skill_id": req.skill_id},
-                ))
-                logger.info(f"[结构记忆] assistant 对话异步触发: session_id={req.session_id}")
+                asyncio.create_task(
+                    save_kg_from_chat(
+                        content=round_content,
+                        user_id=user_id,
+                        session_id=req.session_id,
+                        skill_id=req.skill_id,
+                        skill_name=skill_name,
+                    )
+                )
+                logger.info(f"[KG] assistant 对话异步触发: session_id={req.session_id}")
             except Exception as sm_err:
-                logger.warning(f"[结构记忆] assistant 触发失败: {sm_err}")
+                logger.warning(f"[KG] assistant 触发失败: {sm_err}")
 
     return StreamingResponse(
         event_generator(),

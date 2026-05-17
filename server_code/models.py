@@ -16,6 +16,7 @@ class User(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     phone = Column(String(11), unique=True, nullable=False, index=True)
+    email = Column(String(200), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     last_login_at = Column(DateTime(timezone=True))
@@ -171,6 +172,22 @@ class Profile(Base):
     audio_session = relationship("Session", foreign_keys=[audio_session_id])
 
 
+class CustomSkill(Base):
+    """用户自定义技能表（扩展用）"""
+    __tablename__ = "custom_skills"
+
+    id          = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id     = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    name        = Column(String(200), nullable=False)
+    description = Column(Text)
+    prompt      = Column(Text)
+    enabled     = Column(Boolean, default=True)
+    created_at  = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at  = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    user = relationship("User", backref="custom_skills")
+
+
 class UserSkillPreference(Base):
     """用户技能偏好表"""
     __tablename__ = "user_skill_preferences"
@@ -186,3 +203,78 @@ class UserSkillPreference(Base):
     )
 
     user = relationship("User", backref="skill_preferences")
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Knowledge Graph 表（替代 mem0 的结构化记忆存储）
+# ──────────────────────────────────────────────────────────────────────────────
+
+class KgPerson(Base):
+    """KG 人物节点：同一用户同名自动合并，亲密度/摩擦值滑动平均更新"""
+    __tablename__ = "kg_persons"
+
+    id         = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id    = Column(UUID(as_uuid=True), nullable=False, index=True)
+    name       = Column(String(100), nullable=False)
+    rel_type   = Column(String(50))   # boss/colleague/friend/family/romantic/other
+    rel_desc   = Column(Text)         # "直属上司"、"同部门同事"
+    intimacy   = Column(Integer)      # 1-10，滑动平均
+    friction   = Column(Integer)      # 1-10，滑动平均
+    power      = Column(String(20))   # superior/equal/subordinate
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "name", name="uq_kg_person"),
+    )
+
+
+class KgEvent(Base):
+    """KG 事件节点：一个事件可通过 KgEventPerson 关联多个人物"""
+    __tablename__ = "kg_events"
+
+    id         = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id    = Column(UUID(as_uuid=True), nullable=False, index=True)
+    event_date = Column(String(20))   # ISO date string，如 "2026-05-17"
+    summary    = Column(Text, nullable=False)
+    sentiment  = Column(String(20))   # positive/neutral/negative
+    outcome    = Column(String(20))   # resolved/ongoing/escalated
+    location   = Column(String(100))
+    session_id = Column(UUID(as_uuid=True))
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+
+class KgEventPerson(Base):
+    """KG 人物↔事件 多对多关联"""
+    __tablename__ = "kg_event_persons"
+
+    event_id  = Column(UUID(as_uuid=True), ForeignKey("kg_events.id", ondelete="CASCADE"), primary_key=True)
+    person_id = Column(UUID(as_uuid=True), ForeignKey("kg_persons.id", ondelete="CASCADE"), primary_key=True)
+
+
+class KgGoal(Base):
+    """KG 目标节点"""
+    __tablename__ = "kg_goals"
+
+    id          = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id     = Column(UUID(as_uuid=True), nullable=False, index=True)
+    description = Column(Text, nullable=False)
+    status      = Column(String(20), default="in_progress")  # in_progress/completed/abandoned
+    person_id   = Column(UUID(as_uuid=True), ForeignKey("kg_persons.id", ondelete="SET NULL"), nullable=True)
+    session_id  = Column(UUID(as_uuid=True))
+    created_at  = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at  = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class KgSkill(Base):
+    """KG 技能应用记录：记录每次会话/对话匹配的技能及关联人物"""
+    __tablename__ = "kg_skills"
+
+    id             = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id        = Column(UUID(as_uuid=True), nullable=False, index=True)
+    session_id     = Column(UUID(as_uuid=True))
+    skill_id       = Column(String(100), nullable=False)   # "workplace_jungle"
+    skill_name     = Column(String(200))                   # "职场丛林法则"
+    skill_category = Column(String(50))                    # workplace/family/etc
+    person_ids     = Column(ARRAY(UUID(as_uuid=True)))     # 本次对话涉及的人物 id 列表
+    summary        = Column(Text)                          # 应用场景摘要（可选）
+    applied_at     = Column(DateTime(timezone=True), server_default=func.now(), index=True)

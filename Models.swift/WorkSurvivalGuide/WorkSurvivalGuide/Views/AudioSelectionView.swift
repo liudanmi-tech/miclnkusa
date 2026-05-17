@@ -67,7 +67,7 @@ struct AudioSelectionView: View {
                                         }) {
                                             HStack {
                                                 VStack(alignment: .leading, spacing: 4) {
-                                                    Text(task.title)
+                                                    Text(task.cardTitle ?? task.refinedTitle)
                                                         .font(.system(size: 16, weight: .medium, design: .rounded))
                                                         .foregroundColor(Color.black)
 

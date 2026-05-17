@@ -115,6 +115,7 @@ final class SessionAudioPlayerService: ObservableObject {
             Task { @MainActor in
                 self?.isPlaying = false
                 self?.isBuffering = false
+                self?.player?.seek(to: .zero)   // 播完归零，下次点击从头播
             }
         }
     }

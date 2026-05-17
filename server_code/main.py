@@ -1379,9 +1379,9 @@ async def analyze_audio_from_path(temp_file_path: str, file_filename: str, sessi
 
 3. **laugh_count**: (Integer) 识别并统计全场出现的所有类型笑声（包括愉快的、尴尬的或嘲讽的笑）。
 
-4. **summary**: (String) A concise English summary of the conversation content, key conflicts, and emotional turning points (50-100 words). Write in English.
+4. **summary**: (String) A first-person diary-style English summary (50-100 words) written from Speaker_1's perspective using "I". Describe who I talked with (use "someone" if the other person is unknown), what happened, the key tension or conflict, and how I felt. If Speaker_1 is not clearly identifiable in the audio, describe what happened between the people in third person. Write in English.
 
-5. **card_title**: (String) A short English title (max 8 words) that captures the core topic or key conflict of this conversation, suitable for standalone display on a card. Write in English.
+5. **card_title**: (String) A first-person diary-style English title (max 20 words) written from Speaker_1's perspective. Start with "I" and capture who I talked with, what happened, and the emotional tone (e.g. "I pushed back on my boss's overtime demand and felt dismissed"). If Speaker_1 is not clearly identifiable, describe what happened between the people. Write in English.
 
 6. **transcript**: (Array) 按时间顺序包含所有对话，每个对话包含：
    - speaker: 说话人标识（如：Speaker_0, Speaker_1，其中Speaker_1为用户）
@@ -1398,8 +1398,8 @@ async def analyze_audio_from_path(temp_file_path: str, file_filename: str, sessi
   "mood_score": 75,
   "sigh_count": 2,
   "laugh_count": 5,
-  "summary": "对话气氛整体缓和，但在周末加班的截止日期问题上存在明显的隐形拉锯，用户试图防御个人时间。",
-  "card_title": "加班边界的隐形拉锯",
+  "summary": "I had a tense exchange with someone about a weekend deadline. I tried to hold my ground on personal time, but felt a familiar passive pressure building throughout the conversation.",
+  "card_title": "I pushed back on an overtime request but felt unheard",
   "transcript": [
     {
       "speaker": "Speaker_0",
@@ -2150,7 +2150,7 @@ async def analyze_audio_async(session_id: str, temp_file_path: str, file_filenam
                         text = (t.get("text") or "").strip()
                         lines.append(f"{name}: {text}")
                     display_text = "\n".join(lines)
-                    prompt = f"""根据以下对话，总结这是谁和谁的对话（角色关系、对话主题、双方立场等）。对话格式为 说话人: 内容。请用一两段话概括，不要列点。
+                    prompt = f"""根据以下对话，以第一人称日记口吻写一段总结，从用户（Speaker_1）的视角出发，用"我"代指用户。描述我和谁对话（用对方的真实姓名和关系称呼），我们之间发生了什么事，双方的立场和情绪，以及我当时的心情感受。如果录音中无法识别出用户（没有 Speaker_1 或标注为 is_me），则用第三人称描述对话双方发生的事情。请用一两段话，语气自然像写日记，不要列点。
 
 对话：
 {display_text}
@@ -2169,48 +2169,29 @@ async def analyze_audio_async(session_id: str, temp_file_path: str, file_filenam
                 except Exception as e:
                     logger.warning(f"第二次 Gemini 总结失败: {e}", exc_info=True)
             
-            # v0.6 记忆提取（B 钩子）：档案匹配完成后写入 Mem0
+            # v0.7 记忆提取（B 钩子）：档案匹配完成后写入 PostgreSQL KG
             if speaker_mapping and conversation_summary and profile_names:
-                logger.info(f"[记忆] B 钩子触发: session_id={session_id} speaker_mapping={speaker_mapping} profile_names_keys={list(profile_names.keys())}")
+                logger.info(f"[KG] B 钩子触发: session_id={session_id} profile_names={list(profile_names.values())}")
                 try:
-                    from services.memory_service import build_memory_payload, add_memory
+                    from services.memory_service import build_memory_payload
+                    from services.knowledge_graph import save_kg_from_transcript
                     payload = build_memory_payload(
                         transcript, conversation_summary, speaker_mapping, profile_names
                     )
-                    metadata = {
-                        "session_id": session_id,
-                        "profile_ids": list(speaker_mapping.values()),
-                    }
-                    logger.info(f"[记忆] B 钩子调用 add_memory: session_id={session_id} payload_len={len(payload)}")
-                    # fire-and-forget：不等待 add_memory 完成，立即继续后续流程
-                    asyncio.create_task(asyncio.to_thread(
-                        add_memory,
-                        payload,
-                        user_id,
-                        metadata=metadata,
-                        enable_graph=True,
-                    ))
-                    logger.info(f"[记忆] B 钩子 add_memory 已异步触发（fire-and-forget）: session_id={session_id}")
-
-                    # 结构化记忆写入（带标签格式）
-                    try:
-                        from services.structured_memory import extract_and_save_structured_memories
-                        struct_content = f"{payload}\n\n档案人物：{list(profile_names.values())}"
-                        asyncio.create_task(asyncio.to_thread(
-                            extract_and_save_structured_memories,
-                            struct_content,
-                            user_id,
-                            session_id,
-                            {"source": "transcript"},
-                        ))
-                        logger.info(f"[结构记忆] B 钩子异步触发: session_id={session_id}")
-                    except Exception as sm_err:
-                        logger.warning(f"[结构记忆] B 钩子触发失败: {sm_err}")
-
+                    struct_content = f"{payload}\n\n档案人物：{list(profile_names.values())}"
+                    asyncio.create_task(
+                        save_kg_from_transcript(
+                            content=struct_content,
+                            user_id=user_id,
+                            session_id=session_id,
+                            profile_names=profile_names,
+                        )
+                    )
+                    logger.info(f"[KG] B 钩子已异步触发: session_id={session_id}")
                 except Exception as mem_err:
-                    logger.warning(f"[记忆] B 钩子写入失败: session_id={session_id} error={mem_err}", exc_info=True)
+                    logger.warning(f"[KG] B 钩子写入失败: session_id={session_id} error={mem_err}", exc_info=True)
             else:
-                logger.info(f"[记忆] B 钩子跳过: session_id={session_id} speaker_mapping={bool(speaker_mapping)} conversation_summary={bool(conversation_summary)} profile_names={bool(profile_names)}")
+                logger.info(f"[KG] B 钩子跳过: session_id={session_id} speaker_mapping={bool(speaker_mapping)} conversation_summary={bool(conversation_summary)} profile_names={bool(profile_names)}")
             
             # 存储分析结果到内存（向后兼容）
             analysis_storage[session_id] = {
@@ -2853,7 +2834,6 @@ _SKILL_ID_TO_NAME = {
     "education_communication": "教育沟通",
     "brainstorm": "头脑风暴",
     "emotion_recognition": "情绪识别",
-    "depression_prevention": "防抑郁监控",
 }
 
 
@@ -3005,8 +2985,8 @@ async def _generate_strategies_core(
             if _is_manual:
                 _user_selected = _pref_ids - {"__manual_mode__"}
                 if _user_selected:
-                    # 情绪/防抑郁技能强制保留（不受手动模式限制）
-                    _ALWAYS_KEEP = {"emotion_recognition", "depression_prevention"}
+                    # 情绪识别技能强制保留（不受手动模式限制）
+                    _ALWAYS_KEEP = {"emotion_recognition"}
                     matched_skills = [
                         s for s in matched_skills
                         if s["skill_id"] in _user_selected or s["skill_id"] in _ALWAYS_KEEP
@@ -3279,28 +3259,6 @@ async def _generate_strategies_core(
                 })
                 logger.info(f"  ✅ 情绪卡: {skill_id} mood={emotion_insight.get('mood_state')} sigh={emotion_insight.get('sigh_count')} haha={emotion_insight.get('haha_count')}")
                 continue
-            # 防抑郁监控技能
-            if skill_result.get("mental_health_insight") is not None:
-                mh = skill_result["mental_health_insight"]
-                skill_cards.append({
-                    "skill_id": skill_id,
-                    "skill_name": skill_name,
-                    "content_type": "mental_health",
-                    "category": card_category or "personal",
-                    "dimension": card_dimension,
-                    "matched_sub_skill": card_sub_skill,
-                    "content": {
-                        "defense_energy_pct": mh.get("defense_energy_pct", 50),
-                        "dominant_defense": mh.get("dominant_defense", ""),
-                        "status_assessment": mh.get("status_assessment", ""),
-                        "cognitive_triad": mh.get("cognitive_triad", {}),
-                        "insight": mh.get("insight", ""),
-                        "strategy": mh.get("strategy", ""),
-                        "crisis_alert": mh.get("crisis_alert", False),
-                    }
-                })
-                logger.info(f"  ✅ 防抑郁卡: {skill_id} crisis_alert={mh.get('crisis_alert')} energy={mh.get('defense_energy_pct')}%")
-                continue
             # 策略技能（图片生成已移至并行的 scene_image_generator，此处直接使用 visual）
             result = skill_result.get("result")
             if result and hasattr(result, "visual") and hasattr(result, "strategies"):
@@ -3332,34 +3290,53 @@ async def _generate_strategies_core(
             call2_result = Call2Response(visual=[], strategies=[])
         logger.info(f"[策略流程] 步骤2.3a: 完成 skill_cards={len(skill_cards)} 兼容visual={len(call2_result.visual)} 兼容strategies={len(call2_result.strategies)}")
         
-        # v0.6 记忆补充（C 钩子）：策略文本写入 Mem0
-        if call2_result.strategies:
-            logger.info(f"[记忆] C 钩子触发: session_id={session_id} 策略数={len(call2_result.strategies)}")
+        # v0.7 记忆补充（C 钩子）：将本次匹配技能写入 PostgreSQL KG（kg_skills）
+        if skill_results:
+            logger.info(f"[KG] C 钩子触发: session_id={session_id} 技能数={len(skill_results)}")
             try:
-                from services.memory_service import add_memory
-                strategy_text = "\n\n".join(
-                    f"[{s.title}] {s.content}" for s in call2_result.strategies
-                )
+                from services.knowledge_graph import save_kg_from_skills
+                # 查询本次对话涉及的人物名
                 ar_q = await db.execute(
                     select(AnalysisResult).where(AnalysisResult.session_id == uuid.UUID(session_id))
                 )
                 ar = ar_q.scalar_one_or_none()
-                profile_ids = []
+                person_names = []
                 if ar and isinstance(getattr(ar, "speaker_mapping", None), dict):
                     profile_ids = list(ar.speaker_mapping.values())
-                skill_ids = [s["skill_id"] for s in skill_results if s.get("success")]
-                metadata = {"session_id": session_id, "profile_ids": profile_ids}
-                if skill_ids:
-                    metadata["skill_ids"] = skill_ids
-                logger.info(f"[记忆] C 钩子调用 add_memory: session_id={session_id} strategy_text_len={len(strategy_text)} metadata={metadata}")
-                ok = await asyncio.to_thread(
-                    add_memory, strategy_text, user_id, metadata=metadata, enable_graph=True
+                    if profile_ids:
+                        from database.models import Profile
+                        pq = await db.execute(
+                            select(Profile).where(
+                                Profile.id.in_([uuid.UUID(pid) for pid in profile_ids if pid])
+                            )
+                        )
+                        person_names = [p.name for p in pq.scalars().all()]
+
+                # 构建技能列表（含 skill_name）
+                skill_info = []
+                for sr in skill_results:
+                    if sr.get("success"):
+                        # 从 skill_cards 中补全 skill_name
+                        card = next((c for c in skill_cards if c.get("skill_id") == sr.get("skill_id")), {})
+                        skill_info.append({
+                            "skill_id": sr.get("skill_id", ""),
+                            "skill_name": card.get("skill_name", sr.get("skill_id", "")),
+                            "category": sr.get("scene_category", ""),
+                        })
+
+                asyncio.create_task(
+                    save_kg_from_skills(
+                        user_id=user_id,
+                        session_id=session_id,
+                        skill_results=skill_info,
+                        person_names=person_names,
+                    )
                 )
-                logger.info(f"[记忆] C 钩子 add_memory 结果: session_id={session_id} success={ok}")
+                logger.info(f"[KG] C 钩子已异步触发: session_id={session_id} skills={[s['skill_id'] for s in skill_info]}")
             except Exception as mem_err:
-                logger.warning(f"[记忆] C 钩子写入失败: session_id={session_id} error={mem_err}", exc_info=True)
+                logger.warning(f"[KG] C 钩子写入失败: session_id={session_id} error={mem_err}", exc_info=True)
         else:
-            logger.info(f"[记忆] C 钩子跳过: session_id={session_id} strategies 为空")
+            logger.info(f"[KG] C 钩子跳过: session_id={session_id} skill_results 为空")
         
         # 6. 保存策略分析到数据库（若此处或 commit 后报 PG type 114，说明 strategy_analysis 表列为 json 未改为 jsonb）
         logger.info("[策略流程] 步骤2.4: 写入策略分析到数据库(StrategyAnalysis)...")
@@ -4216,7 +4193,7 @@ ABILITY_SKILL_MAP = {
     "control":   ["workplace_jungle", "workplace_psychology", "workplace_career"],
     "insight":   ["workplace_scenario", "workplace_capability", "workplace_psychology"],
     "influence": ["workplace_role", "brainstorm", "workplace_jungle"],
-    "defense":   ["depression_prevention", "emotion_recognition", "workplace_jungle"],
+    "defense":   ["emotion_recognition", "workplace_jungle"],
     "execution": ["brainstorm", "workplace_career", "workplace_capability"],
 }
 
@@ -4461,11 +4438,11 @@ async def _check_badges(user_uuid, abilities: list, db: AsyncSession) -> list:
         new_badges.append({"id": "upward", "name": "向上高手", "icon": "👑",
                             "desc": "向上管理能力卓越，深受领导认可"})
 
-    # 5. 铁壁防御：depression_prevention ≥5次
+    # 5. 铁壁防御：workplace_jungle ≥5次
     defense_sql = text("""
         SELECT COUNT(*) AS cnt FROM skill_executions se
         JOIN sessions s ON se.session_id = s.id
-        WHERE s.user_id = :uid AND se.skill_id = 'depression_prevention'
+        WHERE s.user_id = :uid AND se.skill_id = 'workplace_jungle'
     """)
     defense_row = (await db.execute(defense_sql, {"uid": user_uuid})).fetchone()
     if defense_row and int(defense_row.cnt or 0) >= 5:

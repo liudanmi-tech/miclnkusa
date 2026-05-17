@@ -346,10 +346,10 @@ async def generate_scene_images(
 
 规则：
 - 场景数量1-3个，选最有代表性的，不要重复相似场景
-- 每个场景必须明确说明【谁】在做【什么动作】，使用"the user"和"the other person"指代（不要用Speaker_0/1）
-- 必须符合对话实际逻辑：如果是用户在向对方汇报，就写"The user is reporting to the other person"，不能颠倒
+- 每个场景必须明确说明【谁】在做【什么动作】，使用"I"代指用户（第一人称），使用"the other person"代指对方（不要用Speaker_0/1）
+- 必须符合对话实际逻辑：如果是用户在向对方汇报，就写"I am reporting to the other person"，不能颠倒
 - 场景描述必须用英文输出（English only）
-- 描述示例："The user is reporting work progress to the other person, looking focused"、"The other person questions the user, who is explaining"
+- 描述示例："I am reporting work progress to the other person, looking focused"、"The other person questions me as I explain"
 - 只返回JSON：{{"scene_count": 2, "scenes": ["scene 1 in English", "scene 2 in English"]}}"""
 
                 model = genai.GenerativeModel(gemini_flash_model)
@@ -361,7 +361,7 @@ async def generate_scene_images(
 
             if not scenes:
                 logger.warning(f"[场景生图] 未提取到场景, session={session_id}")
-                scenes = ["The user and the other person are having a face-to-face conversation"]
+                scenes = ["I am having a face-to-face conversation with the other person"]
 
             logger.info(f"[场景生图] 步骤4 Gemini场景提取完成 耗时={time.time()-t_scene_extract:.2f}s 场景数={len(scenes)} elapsed={time.time()-t_start:.2f}s")
             logger.info(f"[场景生图] 提取到 {len(scenes)} 个场景: {scenes}")
@@ -462,15 +462,13 @@ async def generate_scene_images(
                     if user_photo:
                         ref_images.append(user_photo)
 
-                    # 右侧：场景中提到的人物（大小写/空格不敏感匹配）
+                    # 右侧：所有匹配到的人物（不做 per-scene 过滤，避免中文名无法在英文 scene 中命中）
                     for person_name, ref_data in people_refs.items():
-                        _pkey = person_name.lower().replace(" ", "")
-                        if _pkey in scene.lower().replace(" ", ""):
-                            if ref_data["photo"]:
-                                ref_images.append(ref_data["photo"])
-                            elif ref_data["appearance"]:
-                                # 无照片时注入外貌描述保持一致性
-                                desc_parts.append(f"对方为{ref_data['appearance']}")
+                        if ref_data["photo"]:
+                            ref_images.append(ref_data["photo"])
+                        elif ref_data["appearance"]:
+                            # 无照片时注入外貌描述保持一致性
+                            desc_parts.append(f"对方为{ref_data['appearance']}")
 
                     # 将降级外貌描述拼接到场景文本最前
                     if desc_parts:
