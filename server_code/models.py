@@ -21,6 +21,8 @@ class User(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     last_login_at = Column(DateTime(timezone=True))
     is_active = Column(Boolean, default=True)
+    subscription_tier = Column(String(50), default="free", nullable=False, server_default="free")
+    subscription_expires_at = Column(DateTime(timezone=True), nullable=True)
 
     # 关系
     sessions = relationship("Session", back_populates="user", cascade="all, delete-orphan")
