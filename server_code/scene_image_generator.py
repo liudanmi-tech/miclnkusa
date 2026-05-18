@@ -333,6 +333,18 @@ async def generate_scene_images(
                         _matched_profiles[transcript_name] = _profile_name_map[profile_name]
 
                 logger.info(f"[场景2 合并调用] 名称对照: {_name_mapping}, 场景数: {len(scenes)}")
+                # 将名字匹配结果回写 kg_persons.profile_id，供记忆查询使用
+                if _name_mapping and db:
+                    from services.knowledge_graph import link_kg_person_to_profile
+                    import asyncio as _aio
+                    for _t_name, _p_name in _name_mapping.items():
+                        _prof = _matched_profiles.get(_t_name)
+                        if _prof:
+                            _aio.ensure_future(
+                                link_kg_person_to_profile(
+                                    user_id, _t_name, str(_prof.id), db
+                                )
+                            )
             else:
                 # 场景1：仅生成场景描述
                 scene_prompt = f"""分析以下录音对话，识别1-3个最有画面感的场景。

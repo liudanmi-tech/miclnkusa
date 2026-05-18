@@ -452,7 +452,7 @@ async def get_profile_memories(
     获取与指定档案关联的记忆，按类型分组返回。
     数据来源：PostgreSQL KG（人物/事件/目标/技能），精准 SQL JOIN，零语义漂移。
     """
-    from services.knowledge_graph import get_profile_memories_kg
+    from services.knowledge_graph import get_profile_memories_kg, get_self_memories_kg
 
     # 1. 验证档案属于当前用户
     result = await db.execute(
@@ -465,8 +465,12 @@ async def get_profile_memories(
     if not profile:
         raise HTTPException(status_code=404, detail="档案不存在")
 
-    # 2. PostgreSQL KG 查询（替代 mem0 向量搜索）
-    memories = await get_profile_memories_kg(profile.name, user_id, db)
+    # 2. Self 档案走专用路径（goals + skills），其余走 KG person 查询
+    _rel = (getattr(profile, "relationship_type", "") or "").lower()
+    if _rel in ("自己", "self"):
+        memories = await get_self_memories_kg(profile.name, user_id, db)
+    else:
+        memories = await get_profile_memories_kg(profile.name, user_id, db, profile_id=profile_id)
 
     return {
         "profile_id": profile_id,
@@ -575,11 +579,15 @@ async def upload_profile_photo(
             logger.error(f"[档案照片] ❌ OSS上传返回None，可能OSS未启用或上传失败")
             raise HTTPException(status_code=500, detail="图片上传失败：OSS未启用或上传失败")
         
-        logger.info(f"[档案照片] ✅ OSS上传成功")
-        
-        # 返回完整 API URL（OSS 为私有，需经后端 /api/v1/images/{session_id}/{index} 代理）
-        api_base = os.getenv("API_PUBLIC_URL", "http://47.79.254.213")
-        photo_url = f"{api_base.rstrip('/')}/api/v1/images/{session_id}/0"
+        logger.info(f"[档案照片] ✅ R2上传成功")
+
+        # 直接返回 R2 公开 URL（无需代理，公开可访问）
+        r2_public = os.getenv("R2_PUBLIC_URL", "").rstrip("/")
+        if r2_public:
+            photo_url = f"{r2_public}/images/{user_id}/{session_id}/0.png"
+        else:
+            api_base = os.getenv("API_PUBLIC_URL", "http://47.79.254.213")
+            photo_url = f"{api_base.rstrip('/')}/api/v1/images/{session_id}/0"
         
         # 有 profile_id 时同步更新 Profile.photo_url，确保策略图片生成能获取参考图
         if profile_id and profile_id.strip() and session_id.startswith("profile_"):

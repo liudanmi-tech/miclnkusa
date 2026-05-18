@@ -197,6 +197,7 @@ if not GEMINI_API_KEY:
 
 # 策略/场景模型名，可通过环境变量覆盖（默认 gemini-3-flash-preview）
 GEMINI_FLASH_MODEL = os.getenv("GEMINI_FLASH_MODEL", "gemini-3-flash-preview")
+GEMINI_TEXT_MODEL  = os.getenv("GEMINI_TEXT_MODEL",  "gemini-2.5-flash")  # 纯文字分析：转录/总结/场景分类
 
 # 配置 Gemini 客户端，使用反向代理服务器
 logger.info(f"API Key: {GEMINI_API_KEY[:10]}... (已隐藏)")
@@ -776,7 +777,7 @@ def _fetch_profile_image_from_oss(user_id: str, profile_id: str, photo_url: Opti
         # 从 photo_url 提取真实 OSS session_id（上传路径含随机 UUID，如 profile_f264cb3d...）
         oss_session_id = None
         if photo_url:
-            m = re.search(r"/images/(profile_[^/]+)/", photo_url)
+            m = re.search(r"(profile_[0-9a-f-]+)", photo_url)
             if m:
                 oss_session_id = m.group(1)
         if not oss_session_id:
@@ -1363,7 +1364,7 @@ async def analyze_audio_from_path(temp_file_path: str, file_filename: str, sessi
         
         logger.info(f"[分析-{_sid}-step6] ✅ 文件 ACTIVE，即将调用 generate_content")
         
-        model_name = GEMINI_FLASH_MODEL
+        model_name = GEMINI_TEXT_MODEL
         model = genai.GenerativeModel(model_name)
         
         # 单文件 / 多文件 共用基础提示词
@@ -2156,7 +2157,7 @@ async def analyze_audio_async(session_id: str, temp_file_path: str, file_filenam
 {display_text}
 
 总结："""
-                    model = genai.GenerativeModel(GEMINI_FLASH_MODEL)
+                    model = genai.GenerativeModel(GEMINI_TEXT_MODEL)
                     resp = model.generate_content(prompt)
                     if resp and resp.text:
                         conversation_summary = resp.text.strip()
@@ -2908,7 +2909,7 @@ async def _generate_strategies_core(
         # 2.1 场景识别（Router Agent）
         _t21 = _time.time()
         logger.info(f"[策略流程] 步骤2.1: 场景识别(Gemini classify_scene)开始 elapsed={_t21-_t0:.2f}s")
-        model = genai.GenerativeModel(GEMINI_FLASH_MODEL)
+        model = genai.GenerativeModel(GEMINI_TEXT_MODEL)
         scene_result = classify_scene(transcript, model)
         primary_scene = scene_result.get("primary_scene", "other")
         scenes = scene_result.get("scenes", [])
@@ -3493,7 +3494,7 @@ async def classify_scene_endpoint(
             raise HTTPException(status_code=400, detail="对话转录数据不存在，请先完成音频分析")
         
         # 场景识别
-        model = genai.GenerativeModel(GEMINI_FLASH_MODEL)
+        model = genai.GenerativeModel(GEMINI_TEXT_MODEL)
         scene_result = classify_scene(transcript, model)
 
         # 档案查询（通过 speaker_mapping 获取参与者关系）
@@ -4661,6 +4662,7 @@ async def get_subscription_status(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
+
     tier = (getattr(user, "subscription_tier", None) or "free")
     expires_at = getattr(user, "subscription_expires_at", None)
 
@@ -4684,13 +4686,15 @@ async def get_subscription_status(
     )
     monthly_count = cnt.scalar() or 0
 
-    return {
+    resp = {
         "tier": tier,
         "expires_at": expires_at.isoformat() if expires_at else None,
         "monthly_recording_count": monthly_count,
         "monthly_limit": limits["monthly_limit"],
         "images_per_recording": limits["images_per_recording"],
     }
+    logger.info(f"[Subscription/status] user={user_id} tier={tier} expires={expires_at} resp={resp}")
+    return resp
 
 
 @app.post("/api/v1/subscription/verify")

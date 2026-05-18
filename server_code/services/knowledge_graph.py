@@ -18,7 +18,7 @@ from datetime import date, datetime, timezone
 from typing import Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, any_
 
 from database.models import KgPerson, KgEvent, KgEventPerson, KgGoal, KgSkill
 
@@ -238,6 +238,7 @@ async def get_profile_memories_kg(
     profile_name: str,
     user_id: str,
     db: AsyncSession,
+    profile_id: Optional[str] = None,
 ) -> dict:
     """
     替代 vector 搜索 + 过滤，精准 SQL JOIN，人物隔离 100%。
@@ -246,11 +247,27 @@ async def get_profile_memories_kg(
     try:
         uid = uuid_module.UUID(user_id)
 
-        # 1. 查人物节点
+        # 1. 查人物节点（先精确匹配名字，再按 speaker_mapping→session 链条 fallback）
         person_r = await db.execute(
             select(KgPerson).where(KgPerson.user_id == uid, KgPerson.name == profile_name)
         )
         person = person_r.scalar_one_or_none()
+
+        if not person and profile_id:
+            # Fallback: 按 profile_id 直接查（场景生成写入的链接）
+            import uuid as _uuid_mod
+            pid_uuid = _uuid_mod.UUID(profile_id)
+            fb_r = await db.execute(
+                select(KgPerson)
+                .where(KgPerson.user_id == uid, KgPerson.profile_id == pid_uuid)
+                .order_by(KgPerson.updated_at.desc())
+            )
+            person = fb_r.scalars().first()
+            if person:
+                logger.info(
+                    f"[KG] memories fallback 命中: profile_id={profile_id} → kg_person={person.name}"
+                )
+
         if not person:
             return _empty_response(profile_name)
 
@@ -296,7 +313,7 @@ async def get_profile_memories_kg(
             select(KgSkill)
             .where(
                 KgSkill.user_id == uid,
-                KgSkill.person_ids.contains([person.id]),
+                person.id == any_(KgSkill.person_ids),
             )
             .order_by(KgSkill.applied_at.desc())
             .limit(10)
@@ -457,7 +474,7 @@ async def _format_person_block(db: AsyncSession, person: KgPerson) -> str:
         select(KgSkill)
         .where(
             KgSkill.user_id == person.user_id,
-            KgSkill.person_ids.contains([person.id]),
+            person.id == any_(KgSkill.person_ids),
         )
         .order_by(KgSkill.applied_at.desc())
         .limit(3)
@@ -478,3 +495,85 @@ def _empty_response(profile_name: str) -> dict:
         "other": [],
         "total": 0,
     }
+
+
+
+async def get_self_memories_kg(
+    profile_name: str,
+    user_id: str,
+    db: AsyncSession,
+) -> dict:
+    """Self 档案专用：展示用户自己的目标和使用过的技能。"""
+    try:
+        import uuid as _uuid_mod
+        uid = _uuid_mod.UUID(user_id)
+
+        # goals: person_id IS NULL，属于用户自身的目标
+        goals_r = await db.execute(
+            select(KgGoal)
+            .where(KgGoal.user_id == uid, KgGoal.person_id == None)
+            .order_by(KgGoal.updated_at.desc())
+            .limit(30)
+        )
+        goals = [{"content": g.description, "type": "goal",
+                  "date": None, "status": g.status}
+                 for g in goals_r.scalars()]
+        goals.sort(key=lambda x: x["status"] != "in_progress")
+
+        # skills: 该用户所有会话中应用过的技能，去重
+        skills_r = await db.execute(
+            select(KgSkill)
+            .where(KgSkill.user_id == uid)
+            .order_by(KgSkill.applied_at.desc())
+            .limit(50)
+        )
+        seen = set()
+        skills = []
+        for s in skills_r.scalars():
+            if s.skill_id not in seen:
+                seen.add(s.skill_id)
+                skills.append({
+                    "content": s.skill_name or s.skill_id,
+                    "type": "skill",
+                    "date": s.applied_at.strftime("%Y-%m-%d") if s.applied_at else None,
+                    "status": None,
+                })
+
+        total = len(goals) + len(skills)
+        return {
+            "profile_name": profile_name,
+            "relationship": [],
+            "events": [],
+            "goals": goals,
+            "skills": skills,
+            "other": [],
+            "total": total,
+        }
+    except Exception as exc:
+        logger.warning(f"[KG] get_self_memories_kg failed: {exc}")
+        return _empty_response(profile_name)
+
+async def link_kg_person_to_profile(
+    user_id: str,
+    person_name: str,
+    profile_id: str,
+    db: AsyncSession,
+) -> None:
+    """
+    场景生成完成 _name_mapping 后调用，把 kg_persons.profile_id 指向匹配的档案。
+    幂等：已设置则跳过。
+    """
+    try:
+        import uuid as _uuid_mod
+        uid = _uuid_mod.UUID(user_id)
+        pid = _uuid_mod.UUID(profile_id)
+        r = await db.execute(
+            select(KgPerson).where(KgPerson.user_id == uid, KgPerson.name == person_name)
+        )
+        person = r.scalar_one_or_none()
+        if person and person.profile_id != pid:
+            person.profile_id = pid
+            await db.commit()
+            logger.info(f"[KG] kg_persons 链接: {person_name} → profile_id={profile_id}")
+    except Exception as exc:
+        logger.warning(f"[KG] link_kg_person_to_profile 失败: {exc}")
