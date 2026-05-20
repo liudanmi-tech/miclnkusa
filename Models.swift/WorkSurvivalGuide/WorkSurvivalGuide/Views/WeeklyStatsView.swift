@@ -133,66 +133,250 @@ private struct EmptyCardContent: View {
     }
 }
 
+// MARK: - Mood emoji helper
+
+private func scoreMoodEmoji(_ score: Double) -> String {
+    switch score {
+    case 80...: return "😄"
+    case 65..<80: return "😊"
+    case 45..<65: return "😐"
+    case 30..<45: return "😔"
+    default:      return "😢"
+    }
+}
+
 // MARK: - Card 1: Mood Curve
 
 private struct MoodCurveCard: View {
     let stats: WeeklyStats?
     let isLoading: Bool
 
-    private var points: [(day: String, score: Double?, polarity: String?)] {
-        stats?.mood_series.map { ($0.date, $0.score, $0.polarity) } ?? []
+    private var filledPoints: [(day: String, score: Double, polarity: String?)] {
+        (stats?.mood_series ?? []).compactMap { p in
+            guard let s = p.score else { return nil }
+            return (p.date, s, p.polarity)
+        }
     }
 
     var body: some View {
         let vm = WeeklyStatsViewModel.shared
-        CardBase(title: "😊 Mood Trend", subtitle: vm.periodLabel, accentColor: Color(hex: "#FB923C")) {
+        CardBase(title: "😊 Mood Trend", subtitle: vm.periodLabel, accentColor: .white) {
             if isLoading {
                 LoadingCardContent()
-            } else if points.filter({ $0.score != nil }).isEmpty {
-                EmptyCardContent(message: "No recordings this period")
             } else {
-                MoodSparkline(points: points)
-                    .padding(.horizontal, 14)
-                    .padding(.bottom, 12)
-                    .frame(height: 190)
+                switch filledPoints.count {
+                case 0:
+                    MoodEmptyView()
+                case 1:
+                    MoodSingleDayView(point: filledPoints[0])
+                case 2:
+                    MoodTwoDayView(points: filledPoints)
+                default:
+                    MoodCartoonChart(points: filledPoints)
+                        .frame(height: 162)
+                        .padding(.horizontal, 10)
+                        .padding(.bottom, 10)
+                }
             }
         }
     }
 }
 
-private struct MoodSparkline: View {
-    let points: [(day: String, score: Double?, polarity: String?)]
+// 0 recordings
+private struct MoodEmptyView: View {
+    var body: some View {
+        VStack(spacing: 10) {
+            Text("📝").font(.system(size: 30))
+            Text("Record a moment to start\nyour mood story")
+                .font(.system(size: 11, design: .rounded))
+                .foregroundColor(.white.opacity(0.3))
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity).frame(height: 130)
+    }
+}
+
+// 1 recording — big emoji card
+private struct MoodSingleDayView: View {
+    let point: (day: String, score: Double, polarity: String?)
 
     var body: some View {
-        let filled = points.filter { $0.score != nil }
-        if #available(iOS 16.0, *) {
-            Chart {
-                ForEach(Array(points.enumerated()), id: \.offset) { i, p in
-                    if let score = p.score {
-                        LineMark(
-                            x: .value("Day", i),
-                            y: .value("Score", score)
-                        )
-                        .foregroundStyle(
-                            LinearGradient(colors: [Color(hex: "#FB923C"), Color(hex: "#60A5FA")],
-                                           startPoint: .top, endPoint: .bottom)
-                        )
-                        .interpolationMethod(.catmullRom)
+        VStack(spacing: 8) {
+            Text(scoreMoodEmoji(point.score)).font(.system(size: 44))
+            Text(moodLabel(point.polarity))
+                .font(.system(size: 13, weight: .medium, design: .rounded))
+                .foregroundColor(.white.opacity(0.65))
+            Text("Record more to see your trend →")
+                .font(.system(size: 10, design: .rounded))
+                .foregroundColor(.white.opacity(0.3))
+        }
+        .frame(maxWidth: .infinity).frame(height: 130)
+    }
 
-                        PointMark(x: .value("Day", i), y: .value("Score", score))
-                            .foregroundStyle(WeeklyStatsViewModel.moodColor(for: p.polarity))
-                            .symbolSize(28)
+    private func moodLabel(_ polarity: String?) -> String {
+        switch polarity {
+        case "positive": return "Good vibes ✨"
+        case "negative": return "Rough day 💙"
+        default:         return "Feeling neutral"
+        }
+    }
+}
+
+// 2 recordings — side-by-side comparison
+private struct MoodTwoDayView: View {
+    let points: [(day: String, score: Double, polarity: String?)]
+
+    private var delta: Double { (points.last?.score ?? 0) - (points.first?.score ?? 0) }
+
+    var body: some View {
+        HStack(spacing: 0) {
+            Spacer(minLength: 0)
+            moodCard(points[0])
+            arrowView
+            moodCard(points[1])
+            Spacer(minLength: 0)
+        }
+        .frame(height: 130)
+    }
+
+    @ViewBuilder
+    private func moodCard(_ pt: (day: String, score: Double, polarity: String?)) -> some View {
+        VStack(spacing: 6) {
+            Text(scoreMoodEmoji(pt.score)).font(.system(size: 32))
+            Text(shortDay(pt.day))
+                .font(.system(size: 10, design: .rounded))
+                .foregroundColor(.white.opacity(0.4))
+        }
+        .frame(width: 72, height: 96)
+        .background(Color.white.opacity(0.05))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    private var arrowView: some View {
+        VStack(spacing: 4) {
+            Text(delta > 3 ? "↗" : delta < -3 ? "↘" : "→")
+                .font(.system(size: 20, weight: .ultraLight))
+                .foregroundColor(.white.opacity(0.45))
+            Text(delta > 3 ? "+\(Int(delta))" : delta < -3 ? "\(Int(delta))" : "—")
+                .font(.system(size: 10, design: .rounded))
+                .foregroundColor(delta > 3 ? Color(hex: "#34D399").opacity(0.8)
+                                 : delta < -3 ? Color(hex: "#F87171").opacity(0.8)
+                                 : Color.white.opacity(0.3))
+        }
+        .frame(width: 44)
+    }
+
+    private func shortDay(_ dateStr: String) -> String {
+        let days = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"]
+        let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"
+        guard let d = f.date(from: dateStr) else { return "" }
+        return days[(Calendar.current.component(.weekday, from: d) + 5) % 7]
+    }
+}
+
+// ≥3 recordings — black-and-white cartoon line chart
+private struct MoodCartoonChart: View {
+    let points: [(day: String, score: Double, polarity: String?)]
+
+    var body: some View {
+        GeometryReader { geo in
+            let w = geo.size.width
+            let h = geo.size.height
+            let topPad: CGFloat  = 26
+            let bottomPad: CGFloat = 16
+            let sidePad: CGFloat = 10
+            let chartH = h - topPad - bottomPad
+            let chartW = w - sidePad * 2
+            let n = points.count
+
+            let xs: [CGFloat] = points.indices.map { i in
+                sidePad + chartW * CGFloat(i) / CGFloat(n - 1)
+            }
+            let ys: [CGFloat] = points.map { p in
+                topPad + chartH * CGFloat(1.0 - min(max(p.score, 0), 100) / 100.0)
+            }
+            let emojiSet = Set(emojiIndices(n: n))
+
+            ZStack(alignment: .topLeading) {
+                // Line + nodes via Canvas
+                Canvas { ctx, _ in
+                    // Neutral dashed baseline
+                    let neutralY = topPad + chartH * 0.5
+                    var dash = Path()
+                    dash.move(to: CGPoint(x: sidePad, y: neutralY))
+                    dash.addLine(to: CGPoint(x: w - sidePad, y: neutralY))
+                    ctx.stroke(dash, with: .color(.white.opacity(0.12)),
+                               style: StrokeStyle(lineWidth: 1, dash: [3, 5]))
+
+                    // Smooth cubic bezier
+                    var path = Path()
+                    path.move(to: CGPoint(x: xs[0], y: ys[0]))
+                    for i in 1..<n {
+                        let p0 = CGPoint(x: xs[i-1], y: ys[i-1])
+                        let p1 = CGPoint(x: xs[i],   y: ys[i])
+                        let cp1 = CGPoint(x: (p0.x + p1.x) / 2, y: p0.y)
+                        let cp2 = CGPoint(x: (p0.x + p1.x) / 2, y: p1.y)
+                        path.addCurve(to: p1, control1: cp1, control2: cp2)
+                    }
+                    ctx.stroke(path, with: .color(.white.opacity(0.85)),
+                               style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
+
+                    // Nodes
+                    for i in 0..<n {
+                        let r: CGFloat = 4
+                        let rect = CGRect(x: xs[i] - r, y: ys[i] - r, width: r * 2, height: r * 2)
+                        ctx.fill(Path(ellipseIn: rect), with: .color(.white))
+                        ctx.stroke(Path(ellipseIn: rect), with: .color(.white.opacity(0.35)), lineWidth: 0.5)
                     }
                 }
-                // neutral band
-                RuleMark(y: .value("Neutral", 50))
-                    .foregroundStyle(Color.white.opacity(0.1))
-                    .lineStyle(StrokeStyle(lineWidth: 1, dash: [3]))
+                .frame(width: w, height: h)
+
+                // Emoji above selected nodes
+                ForEach(Array(emojiSet), id: \.self) { i in
+                    Text(scoreMoodEmoji(points[i].score))
+                        .font(.system(size: 14))
+                        .frame(width: 24, height: 20, alignment: .center)
+                        .position(x: xs[i], y: ys[i] - 18)
+                }
+
+                // Day labels at bottom
+                ForEach(0..<n, id: \.self) { i in
+                    if shouldShowDay(i: i, n: n) {
+                        Text(shortDay(points[i].day))
+                            .font(.system(size: 9))
+                            .foregroundColor(.white.opacity(0.3))
+                            .frame(width: 28, alignment: .center)
+                            .position(x: xs[i], y: h - 6)
+                    }
+                }
             }
-            .chartXAxis(.hidden)
-            .chartYAxis(.hidden)
-            .chartYScale(domain: 0...100)
+            .frame(width: w, height: h)
         }
+    }
+
+    private func emojiIndices(n: Int) -> [Int] {
+        if n <= 7 { return Array(0..<n) }
+        var result: Set<Int> = [0, n - 1]
+        for i in 1..<(n - 1) {
+            let prev = points[i-1].score, curr = points[i].score, next = points[i+1].score
+            if (curr >= prev && curr >= next) || (curr <= prev && curr <= next) {
+                result.insert(i)
+            }
+        }
+        return Array(result).sorted()
+    }
+
+    private func shouldShowDay(i: Int, n: Int) -> Bool {
+        if n <= 7 { return true }
+        if n <= 14 { return i % 2 == 0 || i == n - 1 }
+        return i == 0 || i == n - 1 || i % 5 == 0
+    }
+
+    private func shortDay(_ dateStr: String) -> String {
+        let days = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"]
+        let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"
+        guard let d = f.date(from: dateStr) else { return "" }
+        return days[(Calendar.current.component(.weekday, from: d) + 5) % 7]
     }
 }
 
@@ -554,33 +738,26 @@ private struct MoodDetailChart: View {
             .frame(maxWidth: .infinity)
             .frame(height: 180)
         } else if #available(iOS 16.0, *) {
+            let emojiSet = detailEmojiIndices(points: points)
             Chart {
                 ForEach(Array(points.enumerated()), id: \.offset) { i, p in
                     if let score = p.score {
-                        AreaMark(
-                            x: .value("Day", i),
-                            yStart: .value("Base", 50),
-                            yEnd:   .value("Score", score)
-                        )
-                        .foregroundStyle(
-                            score >= 50
-                            ? Color(hex: "#FB923C").opacity(0.15)
-                            : Color(hex: "#60A5FA").opacity(0.15)
-                        )
-                        .interpolationMethod(.catmullRom)
-
                         LineMark(x: .value("Day", i), y: .value("Score", score))
-                            .foregroundStyle(
-                                LinearGradient(colors: [Color(hex: "#FB923C"), Color(hex: "#60A5FA")],
-                                               startPoint: .top, endPoint: .bottom)
-                            )
+                            .foregroundStyle(Color.white.opacity(0.8))
                             .interpolationMethod(.catmullRom)
                             .lineStyle(StrokeStyle(lineWidth: 2))
 
-                        // 选中状态放大点
                         PointMark(x: .value("Day", i), y: .value("Score", score))
-                            .foregroundStyle(WeeklyStatsViewModel.moodColor(for: p.polarity))
-                            .symbolSize(p.session_id == highlightedSessionId ? 90 : 40)
+                            .foregroundStyle(p.session_id == highlightedSessionId
+                                             ? Color(hex: "#FB923C")
+                                             : Color.white.opacity(0.75))
+                            .symbolSize(p.session_id == highlightedSessionId ? 90 : 36)
+                            .annotation(position: .top, alignment: .center, spacing: 3) {
+                                if emojiSet.contains(i) {
+                                    Text(scoreMoodEmoji(score))
+                                        .font(.system(size: 12))
+                                }
+                            }
                     }
                 }
                 RuleMark(y: .value("Neutral", 50))
@@ -639,6 +816,24 @@ private struct MoodDetailChart: View {
                 }
             }
         }
+    }
+
+    private func detailEmojiIndices(points: [MoodPoint]) -> Set<Int> {
+        let scored = points.enumerated().compactMap { i, p -> (Int, Double)? in
+            guard let s = p.score else { return nil }
+            return (i, s)
+        }
+        let n = scored.count
+        if n == 0 { return [] }
+        if n <= 7 { return Set(scored.map { $0.0 }) }
+        var result: Set<Int> = [scored.first!.0, scored.last!.0]
+        for k in 1..<(n - 1) {
+            let prev = scored[k-1].1, curr = scored[k].1, next = scored[k+1].1
+            if (curr >= prev && curr >= next) || (curr <= prev && curr <= next) {
+                result.insert(scored[k].0)
+            }
+        }
+        return result
     }
 
     private func shortDay(from dateStr: String) -> String {
