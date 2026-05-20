@@ -734,6 +734,10 @@ async def get_emotion_avatar_urls(
         url = None
         for oss_key in keys_to_try:
             try:
+                # 先确认文件存在（generate_presigned_url 不检查存在性）
+                await asyncio.to_thread(
+                    s3_client.head_object, Bucket=OSS_BUCKET_NAME, Key=oss_key
+                )
                 url = await asyncio.to_thread(
                     s3_client.generate_presigned_url,
                     "get_object",

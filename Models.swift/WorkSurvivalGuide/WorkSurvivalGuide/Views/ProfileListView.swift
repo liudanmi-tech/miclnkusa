@@ -158,11 +158,14 @@ struct ProfileListView: View {
 
                 // Emoji Style
                 Button(action: {
-                    // 读取 Self 档案当前的 emojiType
                     selfEmojiType = ProfileViewModel.shared.profiles
                         .first(where: { $0.relationship.lowercased() == "self" })?
                         .emojiType ?? "self"
-                    showEmojiTypePicker = true
+                    // 先关闭 Settings sheet，再打开 emoji picker（SwiftUI 不支持叠加两个 sheet）
+                    showSettingsSheet = false
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                        showEmojiTypePicker = true
+                    }
                 }) {
                     HStack(spacing: 10) {
                         Text(selfEmojiType == "dog" ? "🐶" : selfEmojiType == "cat" ? "🐱" : "🪞")
