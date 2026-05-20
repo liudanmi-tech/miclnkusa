@@ -12,6 +12,8 @@ struct ImageStylePickerSheet: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var styleRepo = ImageStyleRepository.shared
 
+    @State private var confirmingStyleId: String? = nil
+
     private let columns = [
         GridItem(.flexible(), spacing: 12),
         GridItem(.flexible(), spacing: 12)
@@ -24,12 +26,19 @@ struct ImageStylePickerSheet: View {
                     ForEach(styleRepo.styles) { style in
                         StyleCard(
                             style: style,
-                            isSelected: selectedStyleId == style.id
+                            isSelected: selectedStyleId == style.id,
+                            isConfirming: confirmingStyleId == style.id
                         ) {
+                            guard confirmingStyleId == nil else { return }
                             selectedStyleId = style.id
                             UserDefaults.standard.set(style.id, forKey: "image_style")
                             Task { await NetworkManager.shared.updateUserPreferences(imageStyle: style.id) }
-                            dismiss()
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) {
+                                confirmingStyleId = style.id
+                            }
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+                                dismiss()
+                            }
                         }
                     }
                 }
@@ -53,6 +62,7 @@ struct ImageStylePickerSheet: View {
 private struct StyleCard: View {
     let style: ImageStyle
     let isSelected: Bool
+    let isConfirming: Bool
     let onSelect: () -> Void
 
     @GestureState private var isPressed = false
@@ -63,8 +73,25 @@ private struct StyleCard: View {
                 .aspectRatio(4/3, contentMode: .fit)
                 .clipShape(RoundedRectangle(cornerRadius: 10))
                 .overlay(
+                    // 选中确认蒙层：深色底 + 白色 ✓
+                    Group {
+                        if isConfirming {
+                            ZStack {
+                                RoundedRectangle(cornerRadius: 10)
+                                    .fill(Color.black.opacity(0.45))
+                                Image(systemName: "checkmark.circle.fill")
+                                    .font(.system(size: 38, weight: .semibold))
+                                    .foregroundColor(.white)
+                                    .shadow(color: .black.opacity(0.3), radius: 6, x: 0, y: 2)
+                            }
+                            .transition(.opacity.combined(with: .scale(scale: 0.75)))
+                        }
+                    }
+                )
+                .overlay(
                     RoundedRectangle(cornerRadius: 10)
-                        .stroke(isSelected ? Color.blue : Color.clear, lineWidth: 3)
+                        .stroke(isConfirming ? Color.blue : (isSelected ? Color.blue : Color.clear),
+                                lineWidth: isConfirming ? 3 : 3)
                 )
 
             Text(style.nameEn)
@@ -77,9 +104,10 @@ private struct StyleCard: View {
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .overlay(
             RoundedRectangle(cornerRadius: 12)
-                .stroke(isSelected ? Color.blue.opacity(0.5) : Color.clear, lineWidth: 1)
+                .stroke(isConfirming ? Color.blue : (isSelected ? Color.blue.opacity(0.5) : Color.clear),
+                        lineWidth: isConfirming ? 2 : 1)
         )
-        .scaleEffect(isPressed ? 0.96 : 1.0)
+        .scaleEffect(isConfirming ? 1.06 : (isPressed ? 0.96 : 1.0))
         .animation(.easeInOut(duration: 0.1), value: isPressed)
         .contentShape(Rectangle())
         .simultaneousGesture(
