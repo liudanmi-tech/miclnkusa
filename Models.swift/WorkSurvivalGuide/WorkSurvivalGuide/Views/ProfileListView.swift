@@ -15,6 +15,8 @@ struct ProfileListView: View {
     @State private var showSettingsSheet = false
     @State private var showSubscription = false
     @AppStorage("contentFilterEnabled") private var contentFilterEnabled = true
+    @State private var showEmojiTypePicker = false
+    @State private var selfEmojiType: String = "self"
     
     var body: some View {
         ZStack {
@@ -154,6 +156,38 @@ struct ProfileListView: View {
                 .cornerRadius(10)
                 .padding(.horizontal, 24)
 
+                // Emoji Style
+                Button(action: {
+                    // 读取 Self 档案当前的 emojiType
+                    selfEmojiType = ProfileViewModel.shared.profiles
+                        .first(where: { $0.relationship.lowercased() == "self" })?
+                        .emojiType ?? "self"
+                    showEmojiTypePicker = true
+                }) {
+                    HStack(spacing: 10) {
+                        Text(selfEmojiType == "dog" ? "🐶" : selfEmojiType == "cat" ? "🐱" : "🪞")
+                            .font(.system(size: 18))
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Emoji Style")
+                                .font(AppFonts.cardTitle)
+                                .foregroundColor(AppColors.primaryText)
+                            Text(selfEmojiType == "dog" ? "Dog" : selfEmojiType == "cat" ? "Cat" : "Self Portrait")
+                                .font(.system(size: 11, design: .rounded))
+                                .foregroundColor(AppColors.secondaryText)
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .foregroundColor(AppColors.secondaryText)
+                            .font(.system(size: 14))
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 12)
+                    .background(Color.white.opacity(0.05))
+                    .cornerRadius(10)
+                }
+                .buttonStyle(.plain)
+                .padding(.horizontal, 24)
+
                 // Privacy Policy
                 Link(destination: URL(string: "https://docs.qq.com/doc/DZHBUZm9CT1haTndI")!) {
                     HStack(spacing: 10) {
@@ -213,6 +247,22 @@ struct ProfileListView: View {
         }
         .sheet(isPresented: $showSubscription) {
             SubscriptionView()
+        }
+        .sheet(isPresented: $showEmojiTypePicker, onDismiss: {
+            // 保存 emoji_type 到 Self 档案
+            guard let selfProfile = ProfileViewModel.shared.profiles
+                .first(where: { $0.relationship.lowercased() == "self" }),
+                selfProfile.emojiType != selfEmojiType else { return }
+            var updated = selfProfile
+            updated.emojiType = selfEmojiType
+            Task {
+                try? await ProfileViewModel.shared.updateProfile(updated)
+                await MainActor.run {
+                    ProfileViewModel.shared.loadProfiles(forceRefresh: true)
+                }
+            }
+        }) {
+            EmojiTypePickerSheet(selectedEmojiType: $selfEmojiType)
         }
     }
 }
