@@ -152,7 +152,7 @@ private struct EmojiTypeCard: View {
 // MARK: - EmotionSlotPreview
 
 private let slotLabels: [String: String] = [
-    "very_happy":   "Very",
+    "very_happy":   "Excited",
     "happy":        "Happy",
     "neutral":      "Calm",
     "slightly_sad": "Slight",
@@ -206,19 +206,24 @@ private struct EmotionSlotPreview: View {
                 .lineLimit(1)
         }
         .frame(maxWidth: .infinity)
-        .onAppear(perform: loadImage)
-        .onChange(of: selfUrl) { _ in loadImage() }
+        .onAppear { loadImage(force: false) }
+        .onChange(of: selfUrl) { _ in loadImage(force: true) }
     }
 
-    private func loadImage() {
-        guard loadedImage == nil, let url = remoteURL else { return }
+    private func loadImage(force: Bool = false) {
+        guard let url = remoteURL else { return }
+        // force=true 时允许覆盖（self 类型 URL 延迟到达）
+        if !force && loadedImage != nil { return }
         let urlStr = url.absoluteString
         if let cached = ImageCacheManager.shared.image(for: urlStr) {
             loadedImage = cached
             return
         }
-        URLSession.shared.dataTask(with: url) { data, _, _ in
-            guard let data = data, let img = UIImage(data: data) else { return }
+        URLSession.shared.dataTask(with: url) { data, response, _ in
+            // 非 200 时不缓存（避免缓存 404 响应）
+            guard let data = data,
+                  (response as? HTTPURLResponse)?.statusCode == 200,
+                  let img = UIImage(data: data) else { return }
             ImageCacheManager.shared.cache(img, for: urlStr)
             DispatchQueue.main.async { loadedImage = img }
         }.resume()
