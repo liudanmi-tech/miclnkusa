@@ -14,10 +14,64 @@ class TaskListViewModel: ObservableObject {
     @Published var tasks: [TaskItem] = []
     @Published var isLoading = false
     @Published var errorMessage: String?
+    /// true = 上一条录音仍在分析中，禁止开始新录音
+    @Published var isProcessing = false
 
     private let networkManager = NetworkManager.shared
     private(set) var hasLoaded = false // 记录是否已经加载过数据（服务器成功响应后置 true）
     private var loadingTask: Task<Void, Never>? // 当前加载任务，用于取消重复请求
+
+    // MARK: - 并发锁（单条录音分析完成/失败前，禁止新录音）
+    private var processingSessionId: String?
+    private var processingTimeoutTask: Task<Void, Never>?
+    private let processingTimeoutSeconds: Double = 360 // 6 分钟
+
+    /// 标记某 session 进入处理中，启动 6 分钟超时兜底
+    func setProcessing(sessionId: String, startedAt: Date = Date()) {
+        processingSessionId = sessionId
+        isProcessing = true
+        processingTimeoutTask?.cancel()
+        // 计算剩余超时（场景C：App 重启时剩余时间可能已缩短）
+        let elapsed  = max(0, Date().timeIntervalSince(startedAt))
+        let remaining = max(5, processingTimeoutSeconds - elapsed)
+        processingTimeoutTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(remaining * 1_000_000_000))
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                self?.clearProcessing()
+                print("⏰ [TaskListViewModel] 分析超时（6min），自动解锁录音按钮 sessionId=\(sessionId)")
+            }
+        }
+        print("🔒 [TaskListViewModel] 录音锁定 sessionId=\(sessionId) 剩余超时=\(Int(remaining))s")
+    }
+
+    /// 解除锁定；传入 sessionId 时仅当匹配才解锁（防止旧通知误解锁新 session）
+    func clearProcessing(for sessionId: String? = nil) {
+        if let sid = sessionId, processingSessionId != sid { return }
+        processingTimeoutTask?.cancel()
+        processingTimeoutTask = nil
+        processingSessionId = nil
+        isProcessing = false
+        print("🔓 [TaskListViewModel] 录音解锁")
+    }
+
+    /// 加载/刷新后调用：根据 tasks 状态同步 isProcessing（处理 App 重启场景）
+    private func reconcileProcessingState() {
+        let cutoff = Date().addingTimeInterval(-processingTimeoutSeconds)
+        // 找最近的非终态 session（6 分钟内）
+        let active = tasks.first {
+            ![TaskStatus.archived, .failed, .burned].contains($0.status)
+            && $0.startTime > cutoff
+        }
+        if let active {
+            if processingSessionId != active.id {
+                setProcessing(sessionId: active.id, startedAt: active.startTime)
+            }
+        } else if isProcessing {
+            // 没有进行中的 session → 解锁（包含已超时的卡死场景）
+            clearProcessing()
+        }
+    }
 
     // MARK: - 磁盘缓存
     private static var cacheFileURL: URL? {
@@ -31,6 +85,7 @@ class TaskListViewModel: ObservableObject {
               let cached = try? JSONDecoder().decode([TaskItem].self, from: data) else { return }
         tasks = cached
         print("✅ [TaskListViewModel] 磁盘缓存加载完成，任务数量: \(cached.count)")
+        reconcileProcessingState() // 场景C：冷启动后根据缓存恢复锁状态
     }
 
     private func saveToCache() {
@@ -92,6 +147,7 @@ class TaskListViewModel: ObservableObject {
                     self.isLoading = false
                     self.hasLoaded = true
                     self.saveToCache() // 持久化到磁盘，供下次冷启动使用
+                    self.reconcileProcessingState() // 网络数据到位后再校准一次锁状态
 
                     let totalTime = Date().timeIntervalSince(loadStartTime)
                     print("⏱️ [TaskListViewModel] ========== 任务列表加载完成 ==========")
@@ -130,6 +186,7 @@ class TaskListViewModel: ObservableObject {
         isLoading = false
         errorMessage = nil
         clearCache()
+        clearProcessing() // 登出时同步解锁
     }
 
     // 刷新任务列表（强制刷新）
@@ -171,9 +228,10 @@ class TaskListViewModel: ObservableObject {
         print("📝 [TaskListViewModel] 任务标题: \(task.title)")
         print("📝 [TaskListViewModel] 任务状态: \(task.status)")
         print("📝 [TaskListViewModel] 当前任务数量: \(tasks.count)")
-        
+
         tasks.insert(task, at: 0) // 添加到列表顶部
-        
+        setProcessing(sessionId: task.id) // 新录音上传后立即锁定
+
         print("✅ [TaskListViewModel] 任务已添加，当前任务数量: \(tasks.count)")
     }
     
@@ -191,24 +249,31 @@ class TaskListViewModel: ObservableObject {
             print("✅ [TaskListViewModel] 任务已更新")
         } else {
             print("⚠️ [TaskListViewModel] 未找到要更新的任务，直接插入到列表顶部作为兜底")
-            // 兜底：如果任务不在列表中（可能被意外清除），直接插入到顶部确保卡片可点击
             tasks.insert(updatedTask, at: 0)
             print("✅ [TaskListViewModel] 任务已插入到列表顶部")
         }
+        // 终态（完成/失败）→ 解锁录音按钮
+        if [TaskStatus.archived, .failed, .burned].contains(updatedTask.status) {
+            clearProcessing(for: updatedTask.id)
+        }
     }
-    
+
     // 更新任务状态（用于录音停止后更新状态）
     func updateTaskStatus(_ updatedTask: TaskItem) {
         print("🔄 [TaskListViewModel] ========== 更新任务状态 ==========")
         print("🔄 [TaskListViewModel] 任务ID: \(updatedTask.id)")
         print("🔄 [TaskListViewModel] 任务状态: \(updatedTask.status)")
-        
+
         if let index = tasks.firstIndex(where: { $0.id == updatedTask.id }) {
             print("✅ [TaskListViewModel] 找到任务，索引: \(index)")
             tasks[index] = updatedTask
             print("✅ [TaskListViewModel] 任务状态已更新")
         } else {
             print("⚠️ [TaskListViewModel] 未找到要更新的任务")
+        }
+        // 终态 → 解锁
+        if [TaskStatus.archived, .failed, .burned].contains(updatedTask.status) {
+            clearProcessing(for: updatedTask.id)
         }
     }
 
@@ -254,18 +319,15 @@ class TaskListViewModel: ObservableObject {
         tasks[index] = updated
     }
     
-    // 删除任务（用于替换本地创建的卡片）
+    // 删除任务（本地移除 + 更新磁盘缓存）
+    @MainActor
     func deleteTask(taskId: String) {
-        print("🗑️ [TaskListViewModel] ========== 删除任务 ==========")
-        print("🗑️ [TaskListViewModel] 任务ID: \(taskId)")
-        print("🗑️ [TaskListViewModel] 当前任务数量: \(tasks.count)")
-        
         if let index = tasks.firstIndex(where: { $0.id == taskId }) {
-            print("✅ [TaskListViewModel] 找到任务，索引: \(index)")
             tasks.remove(at: index)
-            print("✅ [TaskListViewModel] 任务已删除，当前任务数量: \(tasks.count)")
+            saveToCache()
+            print("✅ [TaskListViewModel] 录音已从列表删除 id=\(taskId) 剩余=\(tasks.count)")
         } else {
-            print("⚠️ [TaskListViewModel] 未找到要删除的任务")
+            print("⚠️ [TaskListViewModel] 未找到要删除的录音 id=\(taskId)")
         }
     }
     

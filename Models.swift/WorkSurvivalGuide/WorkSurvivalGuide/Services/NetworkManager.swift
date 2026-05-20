@@ -870,6 +870,7 @@ class NetworkManager {
         skillId: String,
         message: String,
         history: [[String: String]],
+        imageBase64List: [String] = [],
         onMeta:        @escaping @Sendable (String, Bool) -> Void,
         onToken:       @escaping @Sendable (String) -> Void,
         onSuggestions: @escaping @Sendable ([String]) -> Void,
@@ -890,12 +891,15 @@ class NetworkManager {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.timeoutInterval = 180
 
-        let body: [String: Any] = [
+        var body: [String: Any] = [
             "session_id": sessionId,
             "skill_id": skillId,
             "message": message,
             "history": history
         ]
+        if !imageBase64List.isEmpty {
+            body["image_base64_list"] = imageBase64List
+        }
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
 
         return Task {
@@ -1596,7 +1600,29 @@ class NetworkManager {
         
         print("✅ [NetworkManager] 档案删除成功")
     }
-    
+
+    // 删除录音及关联 KG 记忆
+    func deleteSession(_ sessionId: String) async throws {
+        if config.useMockData {
+            print("📦 [Mock] 模拟删除录音 \(sessionId)")
+            return
+        }
+        print("🌐 [Real] 删除录音 session_id=\(sessionId)")
+        _ = try await AF.request(
+            "\(baseURLForWrite)/tasks/sessions/\(sessionId)",
+            method: .delete,
+            headers: [
+                "Content-Type": "application/json",
+                "Authorization": "Bearer \(getAuthToken())"
+            ],
+            requestModifier: { $0.timeoutInterval = 15 }
+        )
+        .validate(statusCode: 200..<300)
+        .serializingData()
+        .value
+        print("✅ [NetworkManager] 录音删除成功 session_id=\(sessionId)")
+    }
+
     // MARK: - 图片上传API
     
     // 上传档案照片（profileId 可选，传入则照片与该档案绑定）

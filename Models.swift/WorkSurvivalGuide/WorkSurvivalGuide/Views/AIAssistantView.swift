@@ -10,6 +10,7 @@ import AVFoundation
 import Speech
 import ImageIO
 import UIKit
+import PhotosUI
 
 // MARK: - Main View
 
@@ -27,6 +28,10 @@ struct AIAssistantView: View {
     // Voice input
     @State private var isVoiceMode = false
     @StateObject private var voiceService = VoiceInputService()
+
+    // Photo attachment (max 3)
+    @State private var attachedImages: [UIImage] = []
+    @State private var selectedPhotoItems: [PhotosPickerItem] = []
 
     init(sessionId: String, skillCard: SkillCard, sceneImages: [SceneImage], baseURL: String, onDismiss: (() -> Void)? = nil) {
         self.sessionId = sessionId
@@ -150,6 +155,18 @@ struct AIAssistantView: View {
         .onAppear {
             vm.initSession()
         }
+        .onChange(of: selectedPhotoItems) { newItems in
+            Task {
+                var loaded: [UIImage] = []
+                for item in newItems {
+                    if let data = try? await item.loadTransferable(type: Data.self),
+                       let uiImage = UIImage(data: data) {
+                        loaded.append(uiImage)
+                    }
+                }
+                attachedImages = loaded
+            }
+        }
     }
 
     // MARK: - Navigation Bar
@@ -264,116 +281,177 @@ struct AIAssistantView: View {
     // MARK: - Input Bar
 
     private var inputBar: some View {
-        HStack(spacing: 10) {
-            if isVoiceMode {
-                // ── 语音录制模式 ─────────────────────────────────────────────
-                // 声波字段（占满宽度）
-                HStack(spacing: 8) {
-                    Image(systemName: "mic.fill")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(.white.opacity(0.55))
-                    VoiceWaveformView()
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 11)
-                .background(
-                    Capsule()
-                        .fill(Color.black.opacity(0.80))
-                        .overlay(Capsule().stroke(Color.white.opacity(0.10), lineWidth: 1))
-                )
-
-                // 取消按钮（■）
-                Button(action: cancelVoiceMode) {
-                    Image(systemName: "stop.fill")
-                        .font(.system(size: 13, weight: .bold))
-                        .foregroundColor(.white)
-                        .frame(width: 38, height: 38)
-                        .background(Circle().fill(Color(hex: "#6B7280")))
-                }
-                .buttonStyle(.plain)
-                .transition(.scale.combined(with: .opacity))
-
-                // 发送按钮（样式与文字模式发送按钮一致）
-                Button(action: sendVoiceMessage) {
-                    Image(systemName: "paperplane.fill")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundColor(Color(hex: "#5E7C8B"))
-                        .frame(width: 38, height: 38)
-                        .background(Circle().fill(Color(hex: "#5E7C8B").opacity(0.15)))
-                }
-                .buttonStyle(.plain)
-                .transition(.scale.combined(with: .opacity))
-
-            } else {
-                // ── 文字输入模式 ─────────────────────────────────────────────
-                // 语音输入按钮（单击切换）
-                Button(action: startVoiceMode) {
-                    Image(systemName: "mic.circle.fill")
-                        .font(.system(size: 30))
-                        .foregroundColor(AppColors.headerText.opacity(0.6))
-                }
-                .buttonStyle(.plain)
-
-                // 文字输入框
-                ZStack(alignment: .leading) {
-                    if inputText.isEmpty {
-                        Text("输入消息...")
-                            .font(.system(size: 15, design: .rounded))
-                            .foregroundColor(AppColors.headerText.opacity(0.35))
-                            .padding(.leading, 14)
+        VStack(spacing: 0) {
+            // ── 图片缩略图（有附件时显示，最多3张）─────────────────────────────
+            if !attachedImages.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 10) {
+                        ForEach(Array(attachedImages.enumerated()), id: \.offset) { index, image in
+                            ZStack(alignment: .topTrailing) {
+                                Image(uiImage: image)
+                                    .resizable()
+                                    .scaledToFill()
+                                    .frame(width: 64, height: 64)
+                                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                Button(action: {
+                                    attachedImages.remove(at: index)
+                                    if index < selectedPhotoItems.count {
+                                        selectedPhotoItems.remove(at: index)
+                                    }
+                                }) {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .font(.system(size: 20))
+                                        .foregroundColor(.white)
+                                        .shadow(color: .black.opacity(0.4), radius: 2)
+                                }
+                                .buttonStyle(.plain)
+                                .offset(x: 8, y: -8)
+                            }
+                        }
                     }
-                    TextField("", text: $inputText)
-                        .focused($inputFocused)
-                        .font(.system(size: 15, design: .rounded))
-                        .foregroundColor(AppColors.headerText)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 10)
-                        .submitLabel(.send)
-                        .onSubmit { sendMessage() }
+                    .padding(.horizontal, 14)
                 }
-                .background(
-                    Capsule()
-                        .fill(Color.black.opacity(0.07))
-                        .overlay(Capsule().stroke(Color(hex: "#E8DCC6").opacity(0.3), lineWidth: 1))
-                )
+                .frame(height: 80)
+                .padding(.top, 6)
+                .transition(.opacity.combined(with: .move(edge: .bottom)))
+            }
 
-                // 发送 / 停止生成 按钮
-                if vm.isStreaming {
-                    Button(action: { vm.cancelStream() }) {
+            // ── 输入行 ────────────────────────────────────────────────────────
+            HStack(spacing: 10) {
+                if isVoiceMode {
+                    // ── 语音录制模式 ─────────────────────────────────────────────
+                    // 声波字段（占满宽度）
+                    HStack(spacing: 8) {
+                        Image(systemName: "mic.fill")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(.white.opacity(0.55))
+                        VoiceWaveformView()
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 11)
+                    .background(
+                        Capsule()
+                            .fill(Color.black.opacity(0.80))
+                            .overlay(Capsule().stroke(Color.white.opacity(0.10), lineWidth: 1))
+                    )
+
+                    // 取消按钮（■）
+                    Button(action: cancelVoiceMode) {
                         Image(systemName: "stop.fill")
                             .font(.system(size: 13, weight: .bold))
                             .foregroundColor(.white)
                             .frame(width: 38, height: 38)
-                            .background(Circle().fill(Color(hex: "#E57373")))
+                            .background(Circle().fill(Color(hex: "#6B7280")))
                     }
                     .buttonStyle(.plain)
                     .transition(.scale.combined(with: .opacity))
-                } else {
-                    Button(action: sendMessage) {
+
+                    // 发送按钮（样式与文字模式发送按钮一致）
+                    Button(action: sendVoiceMessage) {
                         Image(systemName: "paperplane.fill")
                             .font(.system(size: 15, weight: .semibold))
-                            .foregroundColor(inputText.isEmpty
-                                             ? AppColors.headerText.opacity(0.3)
-                                             : Color(hex: "#5E7C8B"))
+                            .foregroundColor(Color(hex: "#5E7C8B"))
                             .frame(width: 38, height: 38)
-                            .background(
-                                Circle()
-                                    .fill(inputText.isEmpty
-                                          ? Color.black.opacity(0.05)
-                                          : Color(hex: "#5E7C8B").opacity(0.15))
-                            )
+                            .background(Circle().fill(Color(hex: "#5E7C8B").opacity(0.15)))
                     }
                     .buttonStyle(.plain)
-                    .disabled(inputText.isEmpty)
                     .transition(.scale.combined(with: .opacity))
+
+                } else {
+                    // ── 文字输入模式 ─────────────────────────────────────────────
+                    // 图片选择按钮（➕，最多3张）
+                    PhotosPicker(
+                        selection: $selectedPhotoItems,
+                        maxSelectionCount: 3,
+                        matching: .images
+                    ) {
+                        ZStack(alignment: .topTrailing) {
+                            Image(systemName: "plus.circle.fill")
+                                .font(.system(size: 30))
+                                .foregroundColor(AppColors.headerText.opacity(attachedImages.isEmpty ? 0.6 : 0.9))
+                            if !attachedImages.isEmpty {
+                                Text("\(attachedImages.count)")
+                                    .font(.system(size: 9, weight: .bold))
+                                    .foregroundColor(.white)
+                                    .frame(width: 14, height: 14)
+                                    .background(Circle().fill(Color(hex: "#5E7C8B")))
+                                    .offset(x: 4, y: -4)
+                            }
+                        }
+                    }
+                    .buttonStyle(.plain)
+
+                    // 语音输入按钮（单击切换）
+                    Button(action: startVoiceMode) {
+                        Image(systemName: "mic.circle.fill")
+                            .font(.system(size: 30))
+                            .foregroundColor(AppColors.headerText.opacity(0.6))
+                    }
+                    .buttonStyle(.plain)
+
+                    // 文字输入框
+                    ZStack(alignment: .leading) {
+                        if inputText.isEmpty {
+                            Text("输入消息...")
+                                .font(.system(size: 15, design: .rounded))
+                                .foregroundColor(AppColors.headerText.opacity(0.35))
+                                .padding(.leading, 14)
+                        }
+                        TextField("", text: $inputText)
+                            .focused($inputFocused)
+                            .font(.system(size: 15, design: .rounded))
+                            .foregroundColor(AppColors.headerText)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 10)
+                            .submitLabel(.send)
+                            .onSubmit { sendMessage() }
+                    }
+                    .background(
+                        Capsule()
+                            .fill(Color.black.opacity(0.07))
+                            .overlay(Capsule().stroke(Color(hex: "#E8DCC6").opacity(0.3), lineWidth: 1))
+                    )
+
+                    // 发送 / 停止生成 按钮
+                    let canSend = !inputText.isEmpty || !attachedImages.isEmpty
+                    if vm.isStreaming {
+                        Button(action: { vm.cancelStream() }) {
+                            Image(systemName: "stop.fill")
+                                .font(.system(size: 13, weight: .bold))
+                                .foregroundColor(.white)
+                                .frame(width: 38, height: 38)
+                                .background(Circle().fill(Color(hex: "#E57373")))
+                        }
+                        .buttonStyle(.plain)
+                        .transition(.scale.combined(with: .opacity))
+                    } else {
+                        Button(action: sendMessage) {
+                            Image(systemName: "paperplane.fill")
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundColor(canSend
+                                                 ? Color(hex: "#5E7C8B")
+                                                 : AppColors.headerText.opacity(0.3))
+                                .frame(width: 38, height: 38)
+                                .background(
+                                    Circle()
+                                        .fill(canSend
+                                              ? Color(hex: "#5E7C8B").opacity(0.15)
+                                              : Color.black.opacity(0.05))
+                                )
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(!canSend)
+                        .transition(.scale.combined(with: .opacity))
+                    }
                 }
             }
+            .animation(.spring(response: 0.32, dampingFraction: 0.82), value: isVoiceMode)
+            .animation(.spring(response: 0.25, dampingFraction: 0.8), value: vm.isStreaming)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
         }
-        .animation(.spring(response: 0.32, dampingFraction: 0.82), value: isVoiceMode)
-        .animation(.spring(response: 0.25, dampingFraction: 0.8), value: vm.isStreaming)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
+        .animation(.spring(response: 0.3, dampingFraction: 0.82), value: attachedImages.isEmpty)
         .background(
             Rectangle()
                 .fill(AppColors.cardBackground)
@@ -386,10 +464,13 @@ struct AIAssistantView: View {
 
     private func sendMessage() {
         let text = inputText
-        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        let images = attachedImages
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !images.isEmpty else { return }
         inputText = ""
+        attachedImages = []
+        selectedPhotoItems = []
         inputFocused = false
-        vm.send(text: text)
+        vm.send(text: text, images: images)
     }
 
     private func startVoiceMode() {
@@ -409,12 +490,16 @@ struct AIAssistantView: View {
     }
 
     private func sendVoiceMessage() {
+        let images = attachedImages
         voiceService.stopRecording { transcribed in
             withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) {
                 isVoiceMode = false
             }
-            if let text = transcribed, !text.isEmpty {
-                vm.send(text: text)
+            let hasText = transcribed != nil && !transcribed!.isEmpty
+            if hasText || !images.isEmpty {
+                attachedImages = []
+                selectedPhotoItems = []
+                vm.send(text: transcribed ?? "", images: images)
             }
         }
     }

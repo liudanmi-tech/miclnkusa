@@ -16,47 +16,15 @@ struct ImageCropView: View {
     @State private var offset: CGSize = .zero
     @State private var lastOffset: CGSize = .zero
 
-    // Stored from GeometryReader so Done (outside the reader) can render
     @State private var storedCropDiam: CGFloat = 0
     @State private var storedBaseW: CGFloat = 0
     @State private var storedBaseH: CGFloat = 0
     @State private var storedGeoSize: CGSize = .zero
 
     var body: some View {
-        // Outer reader with ignoresSafeArea so safeAreaInsets.top gives the real status-bar height
-        GeometryReader { outerGeo in
-        VStack(spacing: 0) {
+        ZStack(alignment: .top) {
 
-            // ── Top bar ──────────────────────────────────────────────────
-            HStack(spacing: 0) {
-                Button(action: { onCancel() }) {
-                    Text("Cancel")
-                        .foregroundColor(.white)
-                        .font(.system(size: 17))
-                }
-                .frame(minWidth: 80, alignment: .leading)
-
-                Spacer()
-
-                Text("Move and Scale")
-                    .foregroundColor(.white)
-                    .font(.system(size: 17, weight: .semibold))
-
-                Spacer()
-
-                Button(action: { onCrop(renderCrop()) }) {
-                    Text("Done")
-                        .foregroundColor(Color(red: 0.984, green: 0.749, blue: 0.141))
-                        .font(.system(size: 17, weight: .semibold))
-                }
-                .frame(minWidth: 80, alignment: .trailing)
-            }
-            .padding(.horizontal, 20)
-            .padding(.top, outerGeo.safeAreaInsets.top + 60)
-            .padding(.bottom, 18)
-            .background(Color.black)
-
-            // ── Crop interaction area ─────────────────────────────────────
+            // ── 裁剪交互区：全屏填充 ────────────────────────────────────────
             GeometryReader { geo in
                 let cd  = min(geo.size.width, geo.size.height) * 0.82
                 let asp = image.size.width / image.size.height
@@ -107,9 +75,6 @@ struct ImageCropView: View {
                         .frame(width: cd, height: cd)
                         .allowsHitTesting(false)
                 }
-                // ↓ Fixed frame: ZStack stays this size even when the Image inside is larger.
-                //   Without this, a zoomed Image expands the ZStack, shifting rect.midX/midY
-                //   and making the crop circle drift.
                 .frame(width: geo.size.width, height: geo.size.height)
                 .clipped()
                 .onAppear {
@@ -124,10 +89,37 @@ struct ImageCropView: View {
                           size: sz)
                 }
             }
+            .ignoresSafeArea()  // 裁剪区填满全屏
+
+            // ── 顶部按钮栏：ZStack 内不使用 ignoresSafeArea，自动停在状态栏下方 ──
+            HStack(spacing: 0) {
+                Button(action: { onCancel() }) {
+                    Text("Cancel")
+                        .foregroundColor(.white)
+                        .font(.system(size: 17))
+                }
+                .frame(minWidth: 80, alignment: .leading)
+
+                Spacer()
+
+                Text("Move and Scale")
+                    .foregroundColor(.white)
+                    .font(.system(size: 17, weight: .semibold))
+
+                Spacer()
+
+                Button(action: { onCrop(renderCrop()) }) {
+                    Text("Done")
+                        .foregroundColor(Color(red: 0.984, green: 0.749, blue: 0.141))
+                        .font(.system(size: 17, weight: .semibold))
+                }
+                .frame(minWidth: 80, alignment: .trailing)
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 80)
+            .padding(.bottom, 18)
+            .background(Color.black)
         }
-        .background(Color.black)
-        } // end outer GeometryReader
-        .ignoresSafeArea()          // ← lets outerGeo.safeAreaInsets report real values
         .background(Color.black.ignoresSafeArea())
     }
 

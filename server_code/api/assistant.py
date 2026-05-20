@@ -64,6 +64,7 @@ class AssistantChatRequest(BaseModel):
     skill_id: str
     message: str          # "__INIT__" 表示首次自动触发
     history: List[ChatHistoryItem] = []
+    image_base64_list: Optional[List[str]] = None  # 用户上传的图片列表（JPEG base64，最多3张），仅传给 Gemini 不落库
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -189,8 +190,9 @@ async def _fetch_klipy_gif(category: str) -> Optional[str]:
         return None
 
 
-async def _stream_gemini(prompt: str):
+async def _stream_gemini(prompt: str, image_base64_list: Optional[List[str]] = None):
     """在线程中运行 Gemini 流式生成，通过 asyncio.Queue 桥接到协程"""
+    import base64
     loop = asyncio.get_running_loop()
     queue: asyncio.Queue = asyncio.Queue()
 
@@ -198,7 +200,23 @@ async def _stream_gemini(prompt: str):
         try:
             genai.configure(api_key=GEMINI_API_KEY)
             model = genai.GenerativeModel(ASSISTANT_MODEL)
-            response = model.generate_content(prompt, stream=True)
+            if image_base64_list:
+                image_parts = [
+                    genai.protos.Part(
+                        inline_data=genai.protos.Blob(
+                            mime_type="image/jpeg",
+                            data=base64.b64decode(b64)
+                        )
+                    )
+                    for b64 in image_base64_list[:3]  # 最多3张
+                ]
+                count = len(image_parts)
+                hint = f"（用户同时发送了{count}张图片，请结合图片内容回应用户。）"
+                full_prompt = prompt + "\n\n" + hint
+                contents = image_parts + [full_prompt]
+            else:
+                contents = prompt
+            response = model.generate_content(contents, stream=True)
             for chunk in response:
                 text = getattr(chunk, "text", None)
                 if text:
@@ -329,7 +347,7 @@ async def assistant_chat(
         MARKER_START = "[SUGGESTIONS]"
         MARKER_END = "[/SUGGESTIONS]"
 
-        async for event_type, content in _stream_gemini(prompt):
+        async for event_type, content in _stream_gemini(prompt, image_base64_list=req.image_base64_list):
             if event_type == "error":
                 yield _sse({"type": "error", "content": content})
                 return

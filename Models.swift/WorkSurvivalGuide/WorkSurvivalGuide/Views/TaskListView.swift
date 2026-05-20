@@ -138,29 +138,19 @@ struct TaskListView: View {
                 
                 Spacer()
                 
-                Button(action: { showDeviceSheet = true }) {
+                Button(action: { showStylePicker = true }) {
                     HStack(spacing: 4) {
-                        Image(systemName: "antenna.radiowaves.left.and.right")
-                            .font(.system(size: 20, weight: .medium))
-                        Text("Device")
+                        Image(systemName: "paintpalette.fill")
+                            .font(.system(size: 16, weight: .medium))
+                        Text("Style")
                             .font(.system(size: 14, weight: .medium))
                     }
-                    .foregroundColor(deviceManager.isBluetoothConnected ? Color.blue : AppColors.headerText)
+                    .foregroundColor(AppColors.headerText)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)
                     .background(Color.white.opacity(0.15))
                     .clipShape(Capsule())
                     .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-
-                Button(action: { showStylePicker = true }) {
-                    Image(systemName: "paintpalette.fill")
-                        .font(.system(size: 18, weight: .medium))
-                        .foregroundColor(AppColors.headerText)
-                        .frame(width: 36, height: 36)
-                        .background(.ultraThinMaterial)
-                        .clipShape(Circle())
                 }
                 .buttonStyle(.plain)
             }
@@ -234,19 +224,132 @@ struct TaskListView: View {
     }
 }
 
-// 任务卡片行（用于简化复杂表达式）
+// 任务卡片行：左滑 200pt 漏出删除按钮，点击进入详情，互不冲突
+//
+// 关键设计：SwiftUI 的 .offset() 只移动视觉，不移动 hit-testing 区域。
+// 因此卡片偏移后，其原始 hit 区域仍覆盖右侧删除按钮，导致按钮不可点击。
+// 解决方案：卡片禁用 hit-testing，用 overlay 里动态宽度的 Color.clear 区域
+// 精确覆盖"可见卡片区域"，让按钮区域自然暴露给下层的 Button。
 struct TaskCardRow: View {
     let task: TaskItem
 
+    // dragOffset ∈ [-deleteWidth, 0]，负数 = 卡片向左偏移
+    @State private var dragOffset: CGFloat = 0
+    @State private var gestureStartOffset: CGFloat = 0
+    @State private var gestureStarted: Bool = false
+    @State private var isDeleting = false
+    @State private var navigateToDetail = false
+
+    private let deleteWidth: CGFloat = 200
+    private let snapThreshold: CGFloat = 120
+
     var body: some View {
-        // 始终使用 NavigationLink 保持视图结构稳定，避免 status 变化时 SwiftUI 重建视图树
-        // isReadyToView = archived + (有封面图 或 超过15分钟)
-        NavigationLink(destination: TaskDetailView(task: task)) {
-            TaskCardView(task: task)
-                .opacity(task.isReadyToView ? 1.0 : 0.9)
+        ZStack(alignment: .trailing) {
+
+            // ── 1. 删除按钮（底层，右侧固定）────────────────────────
+            Button(action: performDelete) {
+                VStack(spacing: 6) {
+                    if isDeleting {
+                        ProgressView()
+                            .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                    } else {
+                        Image(systemName: "trash")
+                            .font(.system(size: 20, weight: .medium))
+                        Text("删除")
+                            .font(.system(size: 14, weight: .medium))
+                    }
+                }
+                .foregroundColor(.white)
+                .frame(width: deleteWidth)
+                .frame(maxHeight: .infinity)
+                .background(Color.blue)
+                .cornerRadius(16)
+            }
+            .disabled(isDeleting)
+            .opacity(Double(min(1.0, -dragOffset / snapThreshold)))
+
+            // ── 2. 卡片视觉层（禁止 hit-testing，避免遮挡按钮）─────
+            ZStack {
+                NavigationLink(
+                    destination: TaskDetailView(task: task),
+                    isActive: $navigateToDetail
+                ) { EmptyView() }
+
+                TaskCardView(task: task)
+                    .opacity(task.isReadyToView ? 1.0 : 0.9)
+            }
+            .offset(x: dragOffset)
+            .allowsHitTesting(false) // ← 禁止，让下层按钮可点击
+
         }
-        .buttonStyle(PlainButtonStyle())
-        .disabled(!task.isReadyToView)
+        .clipped()
+        // ── 3. 手势层：overlay 动态覆盖"可见卡片区域"──────────────
+        // GeometryReader 在 overlay 内不影响父视图布局
+        .overlay(
+            GeometryReader { geo in
+                HStack(spacing: 0) {
+                    // 仅覆盖卡片可见区域（随左移缩短），暴露右侧按钮区域
+                    Color.clear
+                        .frame(width: max(0, geo.size.width + dragOffset))
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            guard !isDeleting else { return }
+                            if dragOffset != 0 {
+                                withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
+                                    dragOffset = 0
+                                }
+                            } else if task.isReadyToView {
+                                navigateToDetail = true
+                            }
+                        }
+                    Spacer(minLength: 0)
+                }
+            }
+        )
+        // ── 4. 横向拖拽手势（挂在最外层）────────────────────────────
+        .gesture(
+            DragGesture(minimumDistance: 20, coordinateSpace: .local)
+                .onChanged { value in
+                    guard !isDeleting else { return }
+                    let dx = value.translation.width
+                    let dy = value.translation.height
+                    if !gestureStarted {
+                        guard abs(dx) > abs(dy) else { return }
+                        gestureStarted = true
+                        gestureStartOffset = dragOffset
+                    }
+                    dragOffset = min(0, max(-deleteWidth, gestureStartOffset + dx))
+                }
+                .onEnded { value in
+                    gestureStarted = false
+                    guard !isDeleting else { return }
+                    let dx = value.translation.width
+                    let dy = value.translation.height
+                    guard abs(dx) > abs(dy) * 0.6 else {
+                        withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) { dragOffset = 0 }
+                        return
+                    }
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                        dragOffset = dragOffset < -snapThreshold ? -deleteWidth : 0
+                    }
+                }
+        )
+    }
+
+    private func performDelete() {
+        isDeleting = true
+        Task {
+            do {
+                try await NetworkManager.shared.deleteSession(task.id)
+                await TaskListViewModel.shared.deleteTask(taskId: task.id)
+            } catch {
+                print("❌ [TaskCardRow] 删除录音失败: \(error)")
+                await MainActor.run {
+                    isDeleting = false
+                    withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) { dragOffset = 0 }
+                }
+            }
+        }
     }
 }
 

@@ -7,6 +7,7 @@ import SwiftUI
 
 struct RecordingButtonView: View {
     @ObservedObject var viewModel: RecordingViewModel
+    @ObservedObject private var taskListVM = TaskListViewModel.shared
     var onUploadTap: () -> Void = {}
     var onTextInputTap: () -> Void = {}
 
@@ -15,6 +16,11 @@ struct RecordingButtonView: View {
     @State private var introTimer: Timer? = nil
     // 文字脉冲动画
     @State private var textPulse: Bool = false
+
+    /// 上一条录音仍在分析中（非录音过程中）
+    private var isLocked: Bool {
+        taskListVM.isProcessing && !viewModel.isRecording && !viewModel.isUploading
+    }
 
     private let circleSize: CGFloat = 64
     private let pillWidth: CGFloat = 272
@@ -41,18 +47,24 @@ struct RecordingButtonView: View {
 
                     // ── 内容区域 ────────────────────────────────────────
                     if isIntro {
-                        // 消息框文字
+                        // 消息框文字（分析中时显示 Analyzing...）
                         HStack(spacing: 10) {
-                            Image(systemName: "mic.fill")
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundStyle(.white.opacity(0.75))
+                            if isLocked {
+                                ProgressView()
+                                    .progressViewStyle(CircularProgressViewStyle(tint: .white.opacity(0.75)))
+                                    .scaleEffect(0.75)
+                            } else {
+                                Image(systemName: "mic.fill")
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundStyle(.white.opacity(0.75))
+                            }
 
-                            Text("Tell me what happened today")
+                            Text(isLocked ? "Analyzing..." : "Tell me what happened today")
                                 .font(.system(size: 14, weight: .medium, design: .rounded))
-                                .foregroundStyle(.white.opacity(textPulse ? 1.0 : 0.75))
+                                .foregroundStyle(.white.opacity(isLocked ? 0.5 : (textPulse ? 1.0 : 0.75)))
                                 .lineLimit(1)
                                 .animation(
-                                    .easeInOut(duration: 1.2).repeatForever(autoreverses: true),
+                                    isLocked ? .none : .easeInOut(duration: 1.2).repeatForever(autoreverses: true),
                                     value: textPulse
                                 )
                         }
@@ -64,6 +76,11 @@ struct RecordingButtonView: View {
                                 Image(systemName: "stop.fill")
                                     .font(.system(size: 22, weight: .bold))
                                     .foregroundStyle(.white)
+                            } else if isLocked {
+                                // 分析中：显示 spinner，禁止新录音
+                                ProgressView()
+                                    .progressViewStyle(CircularProgressViewStyle(tint: .white.opacity(0.6)))
+                                    .scaleEffect(0.9)
                             } else {
                                 Image(systemName: "mic.fill")
                                     .font(.system(size: 22, weight: .semibold))
@@ -75,7 +92,7 @@ struct RecordingButtonView: View {
                 }
             }
             .buttonStyle(.plain)
-            .disabled(viewModel.isUploading)
+            .disabled(viewModel.isUploading || isLocked)
         }
         .animation(.spring(response: 0.52, dampingFraction: 0.80), value: isIntro)
         .onAppear {
@@ -96,6 +113,9 @@ struct RecordingButtonView: View {
     // MARK: - Actions
 
     private func handleTap() {
+        // 上一条录音仍在分析中，禁止开始新录音（停止当前录音不受影响）
+        guard !isLocked else { return }
+
         if isIntro {
             // 5秒内点击：立即收起 → 进入录音
             dismissIntro()

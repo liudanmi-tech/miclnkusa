@@ -1382,7 +1382,7 @@ async def analyze_audio_from_path(temp_file_path: str, file_filename: str, sessi
 
 4. **summary**: (String) A first-person diary-style English summary (50-100 words) written from Speaker_1's perspective using "I". Describe who I talked with (use "someone" if the other person is unknown), what happened, the key tension or conflict, and how I felt. If Speaker_1 is not clearly identifiable in the audio, describe what happened between the people in third person. Write in English.
 
-5. **card_title**: (String) A first-person diary-style English title (max 20 words) written from Speaker_1's perspective. Start with "I" and capture who I talked with, what happened, and the emotional tone (e.g. "I pushed back on my boss's overtime demand and felt dismissed"). If Speaker_1 is not clearly identifiable, describe what happened between the people. Write in English.
+5. **card_title**: (String) A first-person diary-style English title (25-40 words) written from Speaker_1's perspective. Start with "I" and include: who I talked with (use their name or role, e.g. "my boss", "my partner Liu Dan"), what specifically happened, and how I felt or what the outcome was. Be descriptive and concrete — avoid vague summaries. Example: "I had lunch with Liu Dan at a noodle place near the office — we caught up on her new project and I felt genuinely happy spending time with her." If Speaker_1 is not clearly identifiable, describe what happened between the people in third person. Write in English.
 
 6. **transcript**: (Array) 按时间顺序包含所有对话，每个对话包含：
    - speaker: 说话人标识（如：Speaker_0, Speaker_1，其中Speaker_1为用户）
@@ -1400,7 +1400,7 @@ async def analyze_audio_from_path(temp_file_path: str, file_filename: str, sessi
   "sigh_count": 2,
   "laugh_count": 5,
   "summary": "I had a tense exchange with someone about a weekend deadline. I tried to hold my ground on personal time, but felt a familiar passive pressure building throughout the conversation.",
-  "card_title": "I pushed back on an overtime request but felt unheard",
+  "card_title": "I pushed back on my manager's overtime request during our one-on-one — I tried to hold my ground but left the conversation feeling dismissed and a bit anxious.",
   "transcript": [
     {
       "speaker": "Speaker_0",
@@ -1489,6 +1489,7 @@ transcript 中的 timestamp 必须使用相对于整段录音开始的全局时�
                     "laugh": analysis_data.get("laugh_count", 0)
                 },
                 summary=analysis_data.get("summary", ""),
+                card_title=analysis_data.get("card_title") or None,
                 transcript=transcript_list
             )
             
@@ -2578,6 +2579,95 @@ async def get_task_detail(
         logger.error(f"获取任务详情失败: {e}")
         logger.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"获取详情失败: {str(e)}")
+
+
+@app.delete("/api/v1/tasks/sessions/{session_id}")
+async def delete_session(
+    session_id: str,
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db)
+):
+    """删除录音及关联的 KG 记忆（仅能删除自己的录音）"""
+    from database.models import KgEvent, KgEventPerson, KgSkill, KgGoal, KgPerson
+    try:
+        # 1. 验证录音属于当前用户
+        result = await db.execute(
+            select(Session).where(
+                Session.id == uuid.UUID(session_id),
+                Session.user_id == uuid.UUID(user_id)
+            )
+        )
+        db_session = result.scalar_one_or_none()
+        if not db_session:
+            raise HTTPException(status_code=404, detail="录音不存在")
+
+        sid = uuid.UUID(session_id)
+        uid = uuid.UUID(user_id)
+
+        # 2. 删除该 session 的 kg_events（kg_event_persons 通过 CASCADE 自动删除）
+        events_result = await db.execute(
+            select(KgEvent).where(KgEvent.session_id == sid)
+        )
+        event_ids = [e.id for e in events_result.scalars().all()]
+        if event_ids:
+            await db.execute(
+                KgEvent.__table__.delete().where(KgEvent.session_id == sid)
+            )
+            logger.info(f"[删除录音] 清除 {len(event_ids)} 条 kg_events session_id={session_id}")
+
+        # 3. 删除该 session 的 kg_skills
+        skills_del = await db.execute(
+            select(KgSkill).where(KgSkill.user_id == uid, KgSkill.session_id == sid)
+        )
+        skill_count = len(skills_del.scalars().all())
+        await db.execute(
+            KgSkill.__table__.delete().where(
+                KgSkill.user_id == uid, KgSkill.session_id == sid
+            )
+        )
+        if skill_count:
+            logger.info(f"[删除录音] 清除 {skill_count} 条 kg_skills session_id={session_id}")
+
+        # 4. 删除该 session 的 kg_goals
+        await db.execute(
+            KgGoal.__table__.delete().where(
+                KgGoal.user_id == uid, KgGoal.session_id == sid
+            )
+        )
+
+        # 5. 清理孤立的 kg_persons（无任何 events，且未绑定 profile）
+        if event_ids:
+            # 找出与这些事件关联过的 persons
+            ep_result = await db.execute(
+                select(KgEventPerson.person_id).where(
+                    KgEventPerson.event_id.in_(event_ids)
+                )
+            )
+            affected_person_ids = list({row[0] for row in ep_result.all()})
+            for pid in affected_person_ids:
+                remaining = await db.execute(
+                    select(KgEventPerson).where(KgEventPerson.person_id == pid).limit(1)
+                )
+                if not remaining.scalar_one_or_none():
+                    person = await db.get(KgPerson, pid)
+                    if person and person.profile_id is None:
+                        await db.delete(person)
+                        logger.info(f"[删除录音] 清除孤立 kg_person name={person.name}")
+
+        # 6. 删除 session（analysis_results/strategy_analysis/skill_executions 通过 CASCADE 自动删除）
+        await db.delete(db_session)
+        await db.commit()
+
+        logger.info(f"[删除录音] session_id={session_id} user_id={user_id[:8]} 删除成功")
+        return {"code": 200, "message": "删除成功"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"删除录音失败: {e}")
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"删除失败: {str(e)}")
 
 
 @app.get("/api/v1/tasks/sessions/{session_id}/audio-file")

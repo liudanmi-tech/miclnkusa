@@ -5,6 +5,7 @@
 
 import Foundation
 import Combine
+import UIKit
 
 // MARK: - Chat Message Model
 
@@ -148,12 +149,16 @@ final class AIAssistantViewModel: ObservableObject {
         }
     }
 
-    /// 用户发送文字消息
-    func send(text: String) {
+    /// 用户发送文字消息（可附带图片，最多3张）
+    func send(text: String, images: [UIImage] = []) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, !isStreaming else { return }
-        messages.append(AssistantMessage(role: .user, content: trimmed))
-        streamRequest(message: trimmed)
+        guard !trimmed.isEmpty || !images.isEmpty, !isStreaming else { return }
+        let count = images.count
+        let displayText = trimmed.isEmpty
+            ? (count == 1 ? "（分享了一张图片）" : "（分享了\(count)张图片）")
+            : trimmed
+        messages.append(AssistantMessage(role: .user, content: displayText))
+        streamRequest(message: trimmed.isEmpty ? "（图片消息）" : trimmed, images: images)
     }
 
     /// 点击猜你想问
@@ -190,7 +195,7 @@ final class AIAssistantViewModel: ObservableObject {
         ChatHistoryStore.save(messages, sessionId: sessionId, skillId: skillCard.skillId)
     }
 
-    private func streamRequest(message: String) {
+    private func streamRequest(message: String, images: [UIImage] = []) {
         streamTask?.cancel()
         suggestions = []
         isStreaming = true
@@ -202,11 +207,22 @@ final class AIAssistantViewModel: ObservableObject {
              "content": msg.content]
         }
 
+        // 将图片压缩为 JPEG base64（最长边限制 1024px，减少 token 消耗）
+        let imageBase64List: [String] = images.prefix(3).compactMap { img in
+            let maxDim: CGFloat = 1024
+            let scale = min(1.0, maxDim / max(img.size.width, img.size.height))
+            let newSize = CGSize(width: img.size.width * scale, height: img.size.height * scale)
+            let renderer = UIGraphicsImageRenderer(size: newSize)
+            let resized = renderer.image { _ in img.draw(in: CGRect(origin: .zero, size: newSize)) }
+            return resized.jpegData(compressionQuality: 0.75)?.base64EncodedString()
+        }
+
         streamTask = NetworkManager.shared.streamAssistantChat(
             sessionId: sessionId,
             skillId: skillCard.skillId,
             message: message,
             history: history,
+            imageBase64List: imageBase64List,
             onMeta: { [weak self] skillName, memoryUsed in
                 Task { @MainActor [weak self] in
                     self?.skillName = skillName

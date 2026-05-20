@@ -314,6 +314,14 @@ private struct OnboardingSubSkillCard: View {
 struct OnboardingSubSkillDetailSheet: View {
     let skill: OnboardingSubSkill
     @Environment(\.dismiss) private var dismiss
+    @AppStorage("onboarding_subskills") private var savedSubSkills = ""
+
+    private func unsubscribe() {
+        var ids = savedSubSkills.split(separator: ",").map(String.init).filter { !$0.isEmpty }
+        ids.removeAll { $0 == skill.id }
+        savedSubSkills = ids.joined(separator: ",")
+        dismiss()
+    }
 
     private var tips: [String] {
         skillTips[skill.id] ?? [
@@ -385,6 +393,23 @@ struct OnboardingSubSkillDetailSheet: View {
                         Spacer(minLength: 32)
                     }
                     .padding(.horizontal, 20)
+                }
+                .safeAreaInset(edge: .bottom) {
+                    Button(action: unsubscribe) {
+                        Text("Unsubscribe")
+                            .font(.system(size: 16, weight: .semibold, design: .rounded))
+                            .foregroundColor(.white)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 50)
+                            .background(
+                                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                    .fill(Color(white: 0.22))
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 8)
+                    .background(Color.black)
                 }
             }
             .navigationTitle("")
