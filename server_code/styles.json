@@ -1,6 +1,6 @@
 {
-  "version": "1.1.0",
-  "updated_at": "2026-05-07",
+  "version": "1.2.0",
+  "updated_at": "2026-05-20",
   "styles": [
     {
       "id": "spider_verse",
@@ -162,7 +162,7 @@
       "prompt_keywords": "伦勃朗古典人像风格：单侧强光打脸、深邃眼神、暗部丰富细节、画布油彩质感。权威与智慧并存的戏剧性光影，类似17世纪荷兰黄金时代肖像画，背景深暗，人物面部发光。",
       "accent_color": "#8B6914",
       "sort_order": 18,
-      "enabled": true
+      "enabled": false
     },
     {
       "id": "constructivism",
@@ -171,7 +171,7 @@
       "prompt_keywords": "苏联先锋派构成主义海报风格：强烈对角线构图、红黑撞色、几何图形与人物剪影。类似Rodchenko的革命张力，充满力量感与对抗性，粗体字与图形完美融合。",
       "accent_color": "#CC2222",
       "sort_order": 19,
-      "enabled": true
+      "enabled": false
     },
     {
       "id": "jojo",
@@ -198,7 +198,7 @@
       "prompt_keywords": "CLAMP四人组漫画风格：极细长的人体比例、华丽繁复的服装细节、唯美命运感构图、精致的眼睛与发丝。类似《X战记》《圣传》的史诗唯美感，线条优雅，背景装饰性强。",
       "accent_color": "#BF7FBF",
       "sort_order": 22,
-      "enabled": true
+      "enabled": false
     },
     {
       "id": "line_art",
@@ -207,7 +207,7 @@
       "prompt_keywords": "极简黑白线稿风格：纯黑白、细线条勾勒、大量留白、极少阴影。类似漫画分镜或手绘草图。",
       "accent_color": "#333333",
       "sort_order": 23,
-      "enabled": true
+      "enabled": false
     },
     {
       "id": "steampunk",
@@ -270,7 +270,7 @@
       "prompt_keywords": "中国水墨画风格：墨分五色（焦浓重淡清）、宣纸晕染、大量留白、写意笔触。传统山水或人物水墨的淡雅诗意。",
       "accent_color": "#4A4A4A",
       "sort_order": 30,
-      "enabled": true
+      "enabled": false
     },
     {
       "id": "storybook",
@@ -279,7 +279,7 @@
       "prompt_keywords": "欧洲童话绘本风格：柔和水彩、复古装帧感、梦幻氛围。类似《小王子》插图的温馨与幻想。",
       "accent_color": "#DDA0DD",
       "sort_order": 31,
-      "enabled": true
+      "enabled": false
     }
   ]
 }

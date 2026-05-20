@@ -55,31 +55,41 @@ private struct StyleCard: View {
     let isSelected: Bool
     let onSelect: () -> Void
 
-    var body: some View {
-        Button(action: onSelect) {
-            VStack(alignment: .leading, spacing: 8) {
-                StyleThumbnailView(styleId: style.id, accentColor: style.accentColor)
-                    .aspectRatio(4/3, contentMode: .fit)
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 10)
-                            .stroke(isSelected ? Color.blue : Color.clear, lineWidth: 3)
-                    )
+    @GestureState private var isPressed = false
 
-                Text(style.nameEn)
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundColor(AppColors.primaryText)
-                    .lineLimit(1)
-            }
-            .padding(8)
-            .background(Color.white.opacity(0.05))
-            .clipShape(RoundedRectangle(cornerRadius: 12))
-            .overlay(
-                RoundedRectangle(cornerRadius: 12)
-                    .stroke(isSelected ? Color.blue.opacity(0.5) : Color.clear, lineWidth: 1)
-            )
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            StyleThumbnailView(styleId: style.id, accentColor: style.accentColor)
+                .aspectRatio(4/3, contentMode: .fit)
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(isSelected ? Color.blue : Color.clear, lineWidth: 3)
+                )
+
+            Text(style.nameEn)
+                .font(.system(size: 14, weight: .medium))
+                .foregroundColor(AppColors.primaryText)
+                .lineLimit(1)
         }
-        .buttonStyle(.plain)
+        .padding(8)
+        .background(Color.white.opacity(0.05))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(isSelected ? Color.blue.opacity(0.5) : Color.clear, lineWidth: 1)
+        )
+        .scaleEffect(isPressed ? 0.96 : 1.0)
+        .animation(.easeInOut(duration: 0.1), value: isPressed)
+        .contentShape(Rectangle())
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 0)
+                .updating($isPressed) { _, state, _ in state = true }
+                .onEnded { value in
+                    let distance = hypot(value.translation.width, value.translation.height)
+                    if distance < 10 { onSelect() }
+                }
+        )
     }
 }
 
@@ -93,7 +103,7 @@ private struct StyleThumbnailView: View {
     private var thumbnailURL: String {
         let base = NetworkManager.shared.getBaseURL()
         let apiBase = base.hasSuffix("/api/v1") ? String(base.dropLast(7)) : base
-        return "\(apiBase)/api/v1/style-thumbnails/\(styleId)"
+        return "\(apiBase)/api/v1/style-thumbnails/\(styleId)?v=2"
     }
 
     var body: some View {
