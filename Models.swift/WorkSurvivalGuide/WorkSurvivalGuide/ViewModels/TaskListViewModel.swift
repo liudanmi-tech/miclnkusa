@@ -330,6 +330,14 @@ class TaskListViewModel: ObservableObject {
             print("⚠️ [TaskListViewModel] 未找到要删除的录音 id=\(taskId)")
         }
     }
+
+    // 取消处理中的录音：解锁录音按钮 + 从列表移除
+    @MainActor
+    func cancelTask(taskId: String) {
+        clearProcessing(for: taskId)
+        deleteTask(taskId: taskId)
+        print("🚫 [TaskListViewModel] 录音已取消 id=\(taskId)")
+    }
     
     // 按天分组任务
     var groupedTasks: [String: [TaskItem]] {

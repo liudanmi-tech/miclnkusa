@@ -101,11 +101,35 @@ class RecordingViewModel: ObservableObject {
         let recordingDuration = Int(recordingTime)
         let startTime = Date().addingTimeInterval(-recordingTime)
         let endTime = Date()
-        
+
         print("⏱️ [RecordingViewModel] 录制时长: \(recordingDuration) 秒")
         print("⏱️ [RecordingViewModel] 开始时间: \(startTime)")
         print("⏱️ [RecordingViewModel] 结束时间: \(endTime)")
-        
+
+        // 录音时长 < 3 秒：不进入分析流程，删除占位卡片并通知列表页显示 toast
+        if recordingTime < 3.0 {
+            print("⚠️ [RecordingViewModel] 录音时长不足 3 秒（\(String(format: "%.1f", recordingTime))s），已丢弃")
+            isRecording = false
+            timer?.invalidate()
+            timer = nil
+            if let taskId = currentRecordingTaskId {
+                currentRecordingTaskId = nil
+                // 解除录音锁（setProcessing 在 addNewTask 时已设置），否则录音按钮保持 loading
+                TaskListViewModel.shared.clearProcessing(for: taskId)
+                Task { @MainActor in
+                    NotificationCenter.default.post(
+                        name: NSNotification.Name("TaskDeleted"),
+                        object: taskId
+                    )
+                    NotificationCenter.default.post(
+                        name: NSNotification.Name("RecordingTooShort"),
+                        object: nil
+                    )
+                }
+            }
+            return
+        }
+
         isRecording = false
         timer?.invalidate()
         timer = nil

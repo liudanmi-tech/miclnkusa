@@ -23,6 +23,7 @@ struct TaskListView: View {
     @State private var showStylePicker = false
     @AppStorage("image_style") private var selectedImageStyle: String = "ghibli"
     @State private var scrollOffset: CGFloat = 999
+    @State private var toastMessage: String? = nil
     
     /// 是否已上滑（卡片上边缘接触到顶部区域后再切换为毛玻璃）
     /// 内容顶部 global minY < 0 表示卡片已滑入 header 下方
@@ -130,6 +131,23 @@ struct TaskListView: View {
                 }
             }
             
+            // 底部 Toast（录音太短提示）
+            if let msg = toastMessage {
+                Text(msg)
+                    .font(.system(size: 14, weight: .medium, design: .rounded))
+                    .foregroundColor(.white)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 12)
+                    .background(Color.black.opacity(0.78))
+                    .cornerRadius(22)
+                    .padding(.horizontal, 32)
+                    .padding(.bottom, 120)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+                    .zIndex(99)
+            }
+
             // 顶部 Header 覆盖层（使用与 BottomNavView 相同参数的毛玻璃）
             HStack(alignment: .center, spacing: 0) {
                 Text("Moments")
@@ -215,6 +233,14 @@ struct TaskListView: View {
                 viewModel.updateTaskSummary(taskId: taskId, summary: summary)
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("RecordingTooShort"))) { _ in
+            withAnimation(.easeInOut(duration: 0.25)) {
+                toastMessage = "Recording too short — please record for at least 3 seconds."
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                withAnimation(.easeInOut(duration: 0.3)) { toastMessage = nil }
+            }
+        }
         .sheet(isPresented: $showDeviceSheet) {
             DeviceSelectionSheet()
         }
@@ -238,10 +264,17 @@ struct TaskCardRow: View {
     @State private var gestureStartOffset: CGFloat = 0
     @State private var gestureStarted: Bool = false
     @State private var isDeleting = false
+    @State private var isCancelling = false
     @State private var navigateToDetail = false
 
     private let deleteWidth: CGFloat = 200
     private let snapThreshold: CGFloat = 120
+
+    /// 卡片处于处理中状态：录音上传中 / 分析中 / archived 但封面图尚未生成
+    private var isProcessingCard: Bool {
+        task.status == .recording || task.status == .analyzing
+            || (task.status == .archived && task.coverImageUrl == nil)
+    }
 
     var body: some View {
         ZStack(alignment: .trailing) {
@@ -283,26 +316,52 @@ struct TaskCardRow: View {
 
         }
         .clipped()
-        // ── 3. 手势层：overlay 动态覆盖"可见卡片区域"──────────────
+        // ── 3. 手势层：overlay 动态覆盖"可见卡片区域"，并叠加取消按钮──
         // GeometryReader 在 overlay 内不影响父视图布局
         .overlay(
             GeometryReader { geo in
-                HStack(spacing: 0) {
-                    // 仅覆盖卡片可见区域（随左移缩短），暴露右侧按钮区域
-                    Color.clear
-                        .frame(width: max(0, geo.size.width + dragOffset))
-                        .contentShape(Rectangle())
-                        .onTapGesture {
-                            guard !isDeleting else { return }
-                            if dragOffset != 0 {
-                                withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
-                                    dragOffset = 0
+                ZStack(alignment: .topTrailing) {
+                    HStack(spacing: 0) {
+                        // 仅覆盖卡片可见区域（随左移缩短），暴露右侧按钮区域
+                        Color.clear
+                            .frame(width: max(0, geo.size.width + dragOffset))
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                guard !isDeleting else { return }
+                                if dragOffset != 0 {
+                                    withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
+                                        dragOffset = 0
+                                    }
+                                } else if task.isReadyToView {
+                                    navigateToDetail = true
                                 }
-                            } else if task.isReadyToView {
-                                navigateToDetail = true
+                            }
+                        Spacer(minLength: 0)
+                    }
+
+                    // 取消按钮：仅在处理中且未左滑时显示
+                    if isProcessingCard && dragOffset == 0 {
+                        Button(action: performCancel) {
+                            ZStack {
+                                Circle()
+                                    .fill(Color.black.opacity(0.5))
+                                    .frame(width: 30, height: 30)
+                                if isCancelling {
+                                    ProgressView()
+                                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                        .scaleEffect(0.65)
+                                } else {
+                                    Image(systemName: "xmark")
+                                        .font(.system(size: 11, weight: .bold))
+                                        .foregroundColor(.white)
+                                }
                             }
                         }
-                    Spacer(minLength: 0)
+                        .buttonStyle(.plain)
+                        .disabled(isCancelling)
+                        .padding(.top, 10)
+                        .padding(.trailing, 10)
+                    }
                 }
             }
         )
@@ -348,6 +407,20 @@ struct TaskCardRow: View {
                     isDeleting = false
                     withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) { dragOffset = 0 }
                 }
+            }
+        }
+    }
+
+    private func performCancel() {
+        guard !isCancelling else { return }
+        isCancelling = true
+        Task {
+            do {
+                try await NetworkManager.shared.deleteSession(task.id)
+                await TaskListViewModel.shared.cancelTask(taskId: task.id)
+            } catch {
+                print("❌ [TaskCardRow] 取消录音失败: \(error)")
+                await MainActor.run { isCancelling = false }
             }
         }
     }
