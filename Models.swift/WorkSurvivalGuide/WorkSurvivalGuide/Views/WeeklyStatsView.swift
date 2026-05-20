@@ -752,12 +752,6 @@ private struct MoodDetailChart: View {
                                              ? Color(hex: "#FB923C")
                                              : Color.white.opacity(0.75))
                             .symbolSize(p.session_id == highlightedSessionId ? 90 : 36)
-                            .annotation(position: .top, alignment: .center, spacing: 3) {
-                                if emojiSet.contains(i) {
-                                    Text(scoreMoodEmoji(score))
-                                        .font(.system(size: 12))
-                                }
-                            }
                     }
                 }
                 RuleMark(y: .value("Neutral", 50))
@@ -790,29 +784,45 @@ private struct MoodDetailChart: View {
             }
             .chartYScale(domain: 0...100)
             .chartBackground { _ in Color.clear }
-            // 点击图表节点
+            // emoji 浮层 + 点击节点高亮（合并到一个 chartOverlay，避免 annotation 引发布局循环）
             .chartOverlay { proxy in
                 GeometryReader { geo in
-                    Rectangle().fill(.clear).contentShape(Rectangle())
-                        .gesture(
-                            DragGesture(minimumDistance: 0)
-                                .onEnded { val in
-                                    let plotOrigin = geo[proxy.plotAreaFrame].origin
-                                    let xInPlot = val.location.x - plotOrigin.x
-                                    guard xInPlot >= 0 else { return }
-                                    guard let rawIndex: Int = proxy.value(atX: xInPlot) else { return }
-                                    // 找最近的有数据节点
-                                    let validPoints = points
-                                        .enumerated()
-                                        .filter { $0.element.score != nil && $0.element.session_id != nil }
-                                    guard let closest = validPoints.min(by: {
-                                        abs($0.offset - rawIndex) < abs($1.offset - rawIndex)
-                                    }) else { return }
-                                    withAnimation(.spring(response: 0.3)) {
-                                        highlightedSessionId = closest.element.session_id
+                    let origin = geo[proxy.plotAreaFrame].origin
+                    ZStack {
+                        // emoji 标注：使用 proxy 坐标转换，不影响 Chart 布局
+                        ForEach(0..<points.count, id: \.self) { idx in
+                            if emojiSet.contains(idx),
+                               let score = points[idx].score,
+                               let xPos = proxy.position(forX: idx),
+                               let yPos = proxy.position(forY: score) {
+                                Text(scoreMoodEmoji(score))
+                                    .font(.system(size: 12))
+                                    .allowsHitTesting(false)
+                                    .position(x: origin.x + xPos, y: origin.y + yPos - 18)
+                            }
+                        }
+                        // 点击检测层（覆盖全区域）
+                        Rectangle().fill(.clear).contentShape(Rectangle())
+                            .gesture(
+                                DragGesture(minimumDistance: 0)
+                                    .onEnded { val in
+                                        let plotOrigin = geo[proxy.plotAreaFrame].origin
+                                        let xInPlot = val.location.x - plotOrigin.x
+                                        guard xInPlot >= 0 else { return }
+                                        guard let rawIndex: Int = proxy.value(atX: xInPlot) else { return }
+                                        // 找最近的有数据节点
+                                        let validPoints = points
+                                            .enumerated()
+                                            .filter { $0.element.score != nil && $0.element.session_id != nil }
+                                        guard let closest = validPoints.min(by: {
+                                            abs($0.offset - rawIndex) < abs($1.offset - rawIndex)
+                                        }) else { return }
+                                        withAnimation(.spring(response: 0.3)) {
+                                            highlightedSessionId = closest.element.session_id
+                                        }
                                     }
-                                }
-                        )
+                            )
+                    }
                 }
             }
         }
