@@ -1405,7 +1405,8 @@ class NetworkManager {
             "audio_segment_id": profile.audioSegmentId as Any,
             "audio_start_time": profile.audioStartTime as Any,
             "audio_end_time": profile.audioEndTime as Any,
-            "audio_url": profile.audioUrl as Any
+            "audio_url": profile.audioUrl as Any,
+            "emoji_type": profile.emojiType
         ]
         
         let response = try await AF.request(
@@ -1499,7 +1500,8 @@ class NetworkManager {
         if let audioUrl = profile.audioUrl {
             parameters["audio_url"] = audioUrl
         }
-        
+        parameters["emoji_type"] = profile.emojiType
+
         // 检查token是否为空
         guard hasValidToken() else {
             throw NSError(
@@ -1575,6 +1577,26 @@ class NetworkManager {
         return updatedProfile
     }
     
+    // 获取当前用户全部情绪头像预签名 URL（dict: slot → presigned URL or nil）
+    func fetchEmotionAvatarUrls() async throws -> [String: String?] {
+        let response = try await AF.request(
+            "\(baseURLForRead)/profiles/emotion-avatars/urls",
+            method: .get,
+            headers: [
+                "Authorization": "Bearer \(getAuthToken())"
+            ],
+            requestModifier: { $0.timeoutInterval = 15 }
+        )
+        .serializingData()
+        .response
+
+        guard let data = response.data else {
+            return [:]
+        }
+        let raw = try JSONDecoder().decode([String: String?].self, from: data)
+        return raw
+    }
+
     // 删除档案
     func deleteProfile(_ profileId: String) async throws {
         // 如果使用 Mock 数据

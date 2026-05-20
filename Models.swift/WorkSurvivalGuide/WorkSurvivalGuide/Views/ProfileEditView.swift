@@ -141,6 +141,8 @@ struct ProfileEditView: View {
     @State private var showSelfLimitToast = false
     @State private var showProLimitToast = false
     @State private var showSubscriptionView = false
+    @State private var showEmojiTypePicker = false
+    @State private var selectedEmojiType: String = "self"
     @ObservedObject private var subscriptionManager = SubscriptionManager.shared
     
     enum Field {
@@ -363,6 +365,29 @@ struct ProfileEditView: View {
                     .padding(.horizontal, 24)
                     } // end if !taskListVM.tasks.isEmpty
 
+                    // Emoji 风格选择（始终可见）
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Emoji Style")
+                            .font(.system(size: 16, weight: .bold, design: .rounded))
+                            .foregroundColor(AppColors.headerText)
+                        Button(action: { showEmojiTypePicker = true }) {
+                            HStack {
+                                Text(emojiTypeDisplayLabel)
+                                    .font(.system(size: 14, design: .rounded))
+                                    .foregroundColor(AppColors.primaryText)
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 14))
+                                    .foregroundColor(AppColors.secondaryText)
+                            }
+                            .padding()
+                            .background(Color.gray.opacity(0.1))
+                            .cornerRadius(8)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(.horizontal, 24)
+
                     // 保存按钮
                     Button(action: {
                         print("💾 [ProfileEditView] 点击保存按钮")
@@ -496,6 +521,7 @@ struct ProfileEditView: View {
                     viewModel.loadFromProfile(profile)
                     nameText = viewModel.name
                     notesText = viewModel.notes
+                    selectedEmojiType = profile.emojiType
                     print("📝 [ProfileEditView] 数据已加载: name=\(viewModel.name), relationship=\(viewModel.relationship)")
                     print("📝 [ProfileEditView] viewModel.photoUrl: \(viewModel.photoUrl ?? "nil")")
                     if let photoUrl = viewModel.photoUrl {
@@ -531,6 +557,9 @@ struct ProfileEditView: View {
             .sheet(isPresented: $showSubscriptionView) {
                 SubscriptionView()
             }
+            .sheet(isPresented: $showEmojiTypePicker) {
+                EmojiTypePickerSheet(selectedEmojiType: $selectedEmojiType)
+            }
             .sheet(isPresented: $showingAudioSelection) {
                 AudioSelectionView(
                     selectedSessionId: $viewModel.audioSessionId,
@@ -560,6 +589,14 @@ struct ProfileEditView: View {
             .background(Color.black.opacity(0.82))
             .cornerRadius(10)
             .transition(.move(edge: .top).combined(with: .opacity))
+    }
+
+    private var emojiTypeDisplayLabel: String {
+        switch selectedEmojiType {
+        case "dog": return "🐶  Dog"
+        case "cat": return "🐱  Cat"
+        default:    return "🪞  Self Portrait"
+        }
     }
 
     private var canSave: Bool {
@@ -625,7 +662,8 @@ struct ProfileEditView: View {
                     updatedProfile.audioStartTime = viewModel.audioStartTime
                     updatedProfile.audioEndTime = viewModel.audioEndTime
                     updatedProfile.audioUrl = viewModel.audioUrl
-                    
+                    updatedProfile.emojiType = selectedEmojiType
+
                     try await ProfileViewModel.shared.updateProfile(updatedProfile)
                     print("✅ [ProfileEditView] 档案更新成功")
                 } else {
@@ -642,6 +680,7 @@ struct ProfileEditView: View {
                         audioStartTime: viewModel.audioStartTime,
                         audioEndTime: viewModel.audioEndTime,
                         audioUrl: viewModel.audioUrl,
+                        emojiType: selectedEmojiType,
                         createdAt: Date(),
                         updatedAt: Date()
                     )

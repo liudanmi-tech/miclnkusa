@@ -98,6 +98,7 @@ struct SkillCardEmotionContent: Codable {
     let moodState: String
     let moodEmoji: String
     let moodEmojiUrl: String?   // 千人千面：用户专属情绪头像 URL，nil 时降级 unicode emoji
+    let moodEmojiSlot: String?  // 情绪槽名: very_happy | happy | neutral | slightly_sad | sad
     let charCount: Int
 
     enum CodingKeys: String, CodingKey {
@@ -106,6 +107,7 @@ struct SkillCardEmotionContent: Codable {
         case moodState = "mood_state"
         case moodEmoji = "mood_emoji"
         case moodEmojiUrl = "mood_emoji_url"
+        case moodEmojiSlot = "mood_emoji_slot"
         case charCount = "char_count"
     }
 }
@@ -179,6 +181,7 @@ struct SkillCardContent: Codable {
     let moodState: String?
     let moodEmoji: String?
     let moodEmojiUrl: String?
+    let moodEmojiSlot: String?  // 情绪槽名: very_happy | happy | neutral | slightly_sad | sad
     let charCount: Int?
     let visual: [VisualData]?
     let strategies: [StrategyItem]?
@@ -196,6 +199,7 @@ struct SkillCardContent: Codable {
         case moodState = "mood_state"
         case moodEmoji = "mood_emoji"
         case moodEmojiUrl = "mood_emoji_url"
+        case moodEmojiSlot = "mood_emoji_slot"
         case charCount = "char_count"
         case visual
         case strategies
@@ -231,6 +235,7 @@ struct SkillCardContent: Codable {
             moodState: moodState ?? "Calm",
             moodEmoji: moodEmoji ?? "😐",
             moodEmojiUrl: moodEmojiUrl,
+            moodEmojiSlot: moodEmojiSlot,
             charCount: charCount ?? 0
         )
     }

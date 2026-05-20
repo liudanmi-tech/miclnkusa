@@ -19,9 +19,10 @@ struct Profile: Codable, Identifiable {
     var audioStartTime: Double?   // 音频片段开始时间（秒）
     var audioEndTime: Double?     // 音频片段结束时间（秒）
     var audioUrl: String?         // 音频片段URL
+    var emojiType: String         // emoji 风格: "self" | "dog" | "cat"
     var createdAt: Date
     var updatedAt: Date
-    
+
     enum CodingKeys: String, CodingKey {
         case id
         case name
@@ -33,10 +34,11 @@ struct Profile: Codable, Identifiable {
         case audioStartTime = "audio_start_time"
         case audioEndTime = "audio_end_time"
         case audioUrl = "audio_url"
+        case emojiType = "emoji_type"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
     }
-    
+
     // 自定义日期解码器
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -50,7 +52,8 @@ struct Profile: Codable, Identifiable {
         audioStartTime = try? container.decode(Double.self, forKey: .audioStartTime)
         audioEndTime = try? container.decode(Double.self, forKey: .audioEndTime)
         audioUrl = try? container.decode(String.self, forKey: .audioUrl)
-        
+        emojiType = (try? container.decode(String.self, forKey: .emojiType)) ?? "self"
+
         let createdAtString = try container.decode(String.self, forKey: .createdAt)
         let updatedAtString = try container.decode(String.self, forKey: .updatedAt)
         let dateFormatter = ISO8601DateFormatter()
@@ -58,7 +61,7 @@ struct Profile: Codable, Identifiable {
         createdAt = dateFormatter.date(from: createdAtString) ?? Date()
         updatedAt = dateFormatter.date(from: updatedAtString) ?? Date()
     }
-    
+
     // 编码器
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
@@ -72,13 +75,14 @@ struct Profile: Codable, Identifiable {
         try container.encodeIfPresent(audioStartTime, forKey: .audioStartTime)
         try container.encodeIfPresent(audioEndTime, forKey: .audioEndTime)
         try container.encodeIfPresent(audioUrl, forKey: .audioUrl)
-        
+        try container.encode(emojiType, forKey: .emojiType)
+
         let dateFormatter = ISO8601DateFormatter()
         dateFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         try container.encode(dateFormatter.string(from: createdAt), forKey: .createdAt)
         try container.encode(dateFormatter.string(from: updatedAt), forKey: .updatedAt)
     }
-    
+
     // 便利初始化器
     init(
         id: String,
@@ -91,6 +95,7 @@ struct Profile: Codable, Identifiable {
         audioStartTime: Double? = nil,
         audioEndTime: Double? = nil,
         audioUrl: String? = nil,
+        emojiType: String = "self",
         createdAt: Date = Date(),
         updatedAt: Date = Date()
     ) {
@@ -104,6 +109,7 @@ struct Profile: Codable, Identifiable {
         self.audioStartTime = audioStartTime
         self.audioEndTime = audioEndTime
         self.audioUrl = audioUrl
+        self.emojiType = emojiType
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }

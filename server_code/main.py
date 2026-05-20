@@ -3386,6 +3386,7 @@ async def _generate_strategies_core(
                         "mood_state": _mood_state_val,
                         "mood_emoji": emotion_insight.get("mood_emoji", "😐"),
                         "mood_emoji_url": _mood_emoji_url,
+                        "mood_emoji_slot": _emotion_slot,
                         "char_count": emotion_insight.get("char_count", 0),
                     }
                 })
@@ -3781,6 +3782,7 @@ async def generate_strategies(
                             logger.error(f"[节点4-emoji] ❌ presign 失败: {_ex2}")
                             _presigned = None
                         _content["mood_emoji_url"] = _presigned
+                        _content["mood_emoji_slot"] = _slot
                         _c = dict(_c)
                         _c["content"] = _content
                     _refreshed.append(_c)
@@ -4228,6 +4230,41 @@ async def get_style_thumbnail(style_key: str):
             raise HTTPException(status_code=404, detail="Thumbnail not found")
         logger.error(f"[风格缩略图] 获取失败 {style_key}: {e}")
         raise HTTPException(status_code=500, detail="Failed to fetch thumbnail")
+
+
+@app.get("/api/v1/emoji-presets/{emoji_type}/{slot}")
+async def get_emoji_preset(emoji_type: str, slot: str):
+    """返回预设 emoji 图片（无需 JWT，公开缓存）。
+    emoji_type: dog | cat
+    slot: very_happy | happy | neutral | slightly_sad | sad
+    存储路径: emoji_presets/{emoji_type}/{slot}.png
+    """
+    import re as _re
+    if not _re.match(r'^[a-z]+$', emoji_type):
+        raise HTTPException(status_code=400, detail="Invalid emoji_type")
+    if not _re.match(r'^[a-z_]+$', slot):
+        raise HTTPException(status_code=400, detail="Invalid slot")
+    if emoji_type not in ("dog", "cat"):
+        raise HTTPException(status_code=400, detail="emoji_type must be 'dog' or 'cat'")
+    valid_slots = {"very_happy", "happy", "neutral", "slightly_sad", "sad"}
+    if slot not in valid_slots:
+        raise HTTPException(status_code=400, detail=f"slot must be one of {valid_slots}")
+    if not USE_OSS or s3_client is None:
+        raise HTTPException(status_code=503, detail="Image service unavailable")
+    try:
+        oss_key = f"emoji_presets/{emoji_type}/{slot}.png"
+        image_object = s3_client.get_object(Bucket=OSS_BUCKET_NAME, Key=oss_key)
+        image_data = image_object['Body'].read()
+        return Response(
+            content=image_data,
+            media_type="image/png",
+            headers={"Cache-Control": "public, max-age=604800"},  # 缓存7天
+        )
+    except Exception as e:
+        if "NoSuchKey" in str(e) or "404" in str(e):
+            raise HTTPException(status_code=404, detail="Emoji preset not found")
+        logger.error(f"[emoji预设] 获取失败 {emoji_type}/{slot}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch emoji preset")
 
 
 def cleanup_old_images(days: int = 7):

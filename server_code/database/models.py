@@ -168,6 +168,7 @@ class Profile(Base):
     audio_start_time = Column(Integer)  # 音频片段开始时间（秒）
     audio_end_time = Column(Integer)  # 音频片段结束时间（秒）
     audio_url = Column(String(500))  # 音频片段URL
+    emoji_type = Column(String(50), server_default='self')  # 情绪 emoji 风格: self | dog | cat
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

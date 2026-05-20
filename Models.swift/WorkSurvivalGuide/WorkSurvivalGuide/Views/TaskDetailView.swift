@@ -182,10 +182,30 @@ struct TaskDetailView: View {
             .content?.moodState
     }
 
-    private var moodEmojiUrl: String? {
+    private var moodEmojiSlot: String? {
         strategyAnalysis?.skillCards?
             .first(where: { $0.contentType == "emotion" })?
-            .content?.moodEmojiUrl
+            .content?.moodEmojiSlot
+    }
+
+    private var selfEmojiType: String {
+        ProfileViewModel.shared.profiles
+            .first(where: { $0.relationship.lowercased() == "self" })?
+            .emojiType ?? "self"
+    }
+
+    private var moodEmojiUrl: String? {
+        let emojiType = selfEmojiType
+        if emojiType == "self" {
+            return strategyAnalysis?.skillCards?
+                .first(where: { $0.contentType == "emotion" })?
+                .content?.moodEmojiUrl
+        } else {
+            guard let slot = moodEmojiSlot, !slot.isEmpty else { return nil }
+            let base = NetworkManager.shared.getBaseURL()
+            let apiBase = base.hasSuffix("/api/v1") ? String(base.dropLast(7)) : base
+            return "\(apiBase)/api/v1/emoji-presets/\(emojiType)/\(slot)"
+        }
     }
 
     /// Strategy + scene skill cards (exclude emotion/mental_health always-run cards)

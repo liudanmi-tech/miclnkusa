@@ -28,19 +28,30 @@ logger = logging.getLogger(__name__)
 # 服务端口：GET /api/v1/profiles/emotion-avatar/{emotion}
 # ──────────────────────────────────────────────────────────────────────────────
 
-EMOTION_SLOTS = ["happy", "excited", "sad", "calm"]
+EMOTION_SLOTS = ["very_happy", "happy", "neutral", "slightly_sad", "sad"]
+
+# 旧4槽档案向下兼容回退映射（新槽 → 旧R2文件名）
+EMOTION_SLOT_FALLBACK = {
+    "very_happy":   "excited",
+    "happy":        "happy",
+    "neutral":      "calm",
+    "slightly_sad": "sad",
+    "sad":          "sad",
+}
 
 def _mood_state_to_emotion(mood_state: str) -> str:
-    """将 LLM 返回的 mood_state 映射到 4 个情绪槽之一。"""
+    """将 LLM 返回的 mood_state 映射到 5 个情绪槽之一。"""
     m = (mood_state or "").lower()
-    if any(k in m for k in ["excit", "energ", "elat", "亢奋", "兴奋", "激动"]):
-        return "excited"
-    if any(k in m for k in ["sad", "depress", "griev", "悲", "难过", "痛苦", "沮丧",
-                              "anxious", "worry", "nervou", "焦虑", "担心", "紧张"]):
-        return "sad"
+    if any(k in m for k in ["excit", "energ", "elat", "ecstat", "亢奋", "兴奋", "激动"]):
+        return "very_happy"
     if any(k in m for k in ["happy", "joy", "glad", "高兴", "开心", "快乐", "愉快"]):
         return "happy"
-    return "calm"
+    if any(k in m for k in ["anxious", "worry", "nervou", "stress", "焦虑", "担心", "紧张"]):
+        return "slightly_sad"
+    if any(k in m for k in ["sad", "depress", "griev", "distress", "upset",
+                              "悲", "难过", "痛苦", "沮丧"]):
+        return "sad"
+    return "neutral"  # default（原 calm）
 
 
 async def _generate_emotion_avatars_task(user_id: str, photo_bytes: bytes, photo_mime: str):
@@ -62,18 +73,18 @@ async def _generate_emotion_avatars_task(user_id: str, photo_bytes: bytes, photo
     logger.info(f"[情绪头像] 开始生成 user_id={user_id} photo_size={len(photo_bytes)}")
 
     grid_prompt = (
-        "Generate a perfectly SQUARE image laid out as a 2x2 grid, "
-        "showing the same person in 4 emotional states.\n\n"
+        "Generate a WIDE HORIZONTAL STRIP image (5:1 aspect ratio, much wider than tall), "
+        "showing the same person in 5 emotional states side by side.\n\n"
         "STRICT RULES:\n"
-        "- Image MUST be square (1:1 ratio, equal width and height)\n"
-        "- Divided into EXACTLY 4 equal quadrants by thin white separator lines "
-        "  at the precise horizontal and vertical center\n"
-        "- Top-left:     HAPPY   – warm smile, bright joyful eyes\n"
-        "- Top-right:    EXCITED – energetic, enthusiastic, wide open eyes\n"
-        "- Bottom-left:  SAD     – downcast, melancholy, droopy expression\n"
-        "- Bottom-right: CALM    – relaxed, peaceful, gentle neutral expression\n"
-        "- Each quadrant is exactly 25 % of total image area\n"
-        "- Same character appearance in all 4 panels (consistent hair, clothing)\n"
+        "- Image MUST be 5:1 wide landscape (width = 5x height)\n"
+        "- Divided into EXACTLY 5 equal vertical panels by thin white separator lines\n"
+        "- Panel 1 (leftmost):  VERY HAPPY  – huge joyful laugh, sparkling eyes, big open smile\n"
+        "- Panel 2:             HAPPY       – warm genuine smile, positive bright expression\n"
+        "- Panel 3:             NEUTRAL     – calm, peaceful, relaxed gentle expression\n"
+        "- Panel 4:             SLIGHTLY SAD – mild disappointment, slightly droopy expression\n"
+        "- Panel 5 (rightmost): SAD         – downcast, melancholy, clearly sad expression\n"
+        "- Each panel is exactly 20% of total image width\n"
+        "- Same character appearance in all 5 panels (consistent hair, clothing, features)\n"
         "- Portrait headshot, upper body only, simple clean background per panel\n"
         "- Studio Ghibli illustration style"
     )
@@ -106,25 +117,19 @@ async def _generate_emotion_avatars_task(user_id: str, photo_bytes: bytes, photo
         logger.error("[情绪头像] ❌ 生成失败，无图片数据")
         return
 
-    # ── PIL 加载 + 强制正方形 ──
+    # ── PIL 加载 + 裁剪 5 竖条（横向 1×5 排列）──
     try:
         img = _PIL.open(io.BytesIO(image_bytes))
         w, h = img.size
         logger.info(f"[情绪头像] 生成尺寸 {w}×{h}")
 
-        if abs(w - h) > max(w, h) * 0.05:   # 偏差 >5% 才居中裁剪
-            side = min(w, h)
-            left, top = (w - side) // 2, (h - side) // 2
-            img = img.crop((left, top, left + side, top + side))
-            w, h = img.size
-            logger.info(f"[情绪头像] 强制正方 → {w}×{h}")
-
-        # ── 裁剪 4 象限 ──
+        # ── 裁剪 5 竖条 ──
         panels = {
-            "happy":   img.crop((0,    0,    w // 2, h // 2)),
-            "excited": img.crop((w//2, 0,    w,      h // 2)),
-            "sad":     img.crop((0,    h//2, w // 2, h     )),
-            "calm":    img.crop((w//2, h//2, w,      h     )),
+            "very_happy":   img.crop((0,          0, w // 5,     h)),
+            "happy":        img.crop((w // 5,     0, 2 * w // 5, h)),
+            "neutral":      img.crop((2 * w // 5, 0, 3 * w // 5, h)),
+            "slightly_sad": img.crop((3 * w // 5, 0, 4 * w // 5, h)),
+            "sad":          img.crop((4 * w // 5, 0, w,          h)),
         }
 
         for emotion, panel in panels.items():
@@ -186,6 +191,7 @@ class ProfileCreate(BaseModel):
     audio_start_time: Optional[float] = None
     audio_end_time: Optional[float] = None
     audio_url: Optional[str] = None
+    emoji_type: Optional[str] = "self"
 
 
 class ProfileUpdate(BaseModel):
@@ -198,6 +204,7 @@ class ProfileUpdate(BaseModel):
     audio_start_time: Optional[float] = None
     audio_end_time: Optional[float] = None
     audio_url: Optional[str] = None
+    emoji_type: Optional[str] = None
 
 
 class ProfileResponse(BaseModel):
@@ -211,6 +218,7 @@ class ProfileResponse(BaseModel):
     audio_start_time: Optional[float] = None
     audio_end_time: Optional[float] = None
     audio_url: Optional[str] = None
+    emoji_type: str = "self"
     created_at: str
     updated_at: str
 
@@ -230,6 +238,7 @@ def _profile_to_response(p: Profile) -> ProfileResponse:
         audio_start_time=float(p.audio_start_time) if p.audio_start_time else None,
         audio_end_time=float(p.audio_end_time) if p.audio_end_time else None,
         audio_url=p.audio_url,
+        emoji_type=getattr(p, "emoji_type", None) or "self",
         created_at=p.created_at.isoformat(),
         updated_at=p.updated_at.isoformat(),
     )
@@ -285,7 +294,8 @@ async def create_profile(
         audio_segment_id=profile_data.audio_segment_id,
         audio_start_time=int(profile_data.audio_start_time) if profile_data.audio_start_time else None,
         audio_end_time=int(profile_data.audio_end_time) if profile_data.audio_end_time else None,
-        audio_url=profile_data.audio_url
+        audio_url=profile_data.audio_url,
+        emoji_type=profile_data.emoji_type or "self",
     )
     
     db.add(profile)
@@ -305,6 +315,7 @@ async def create_profile(
         audio_start_time=float(profile.audio_start_time) if profile.audio_start_time else None,
         audio_end_time=float(profile.audio_end_time) if profile.audio_end_time else None,
         audio_url=profile.audio_url,
+        emoji_type=getattr(profile, "emoji_type", None) or "self",
         created_at=profile.created_at.isoformat(),
         updated_at=profile.updated_at.isoformat()
     )
@@ -350,6 +361,8 @@ async def update_profile(
         profile.audio_end_time = int(profile_data.audio_end_time)
     if profile_data.audio_url is not None:
         profile.audio_url = profile_data.audio_url
+    if profile_data.emoji_type is not None:
+        profile.emoji_type = profile_data.emoji_type
 
     # 强制更新 updated_at，确保 iOS 端 cacheBuster URL 变化、图片缓存失效
     profile.updated_at = datetime.now(timezone.utc)
@@ -371,6 +384,7 @@ async def update_profile(
         audio_start_time=float(profile.audio_start_time) if profile.audio_start_time else None,
         audio_end_time=float(profile.audio_end_time) if profile.audio_end_time else None,
         audio_url=profile.audio_url,
+        emoji_type=getattr(profile, "emoji_type", None) or "self",
         created_at=profile.created_at.isoformat(),
         updated_at=profile.updated_at.isoformat()
     )
@@ -657,8 +671,8 @@ async def get_emotion_avatar(
 ):
     """
     返回当前用户对应情绪的头像 PNG（由档案照片生成，存于 R2）。
-    emotion: happy | excited | sad | calm
-    若尚未生成则返回 404。
+    emotion: very_happy | happy | neutral | slightly_sad | sad
+    若新槽文件不存在，自动回退到旧槽文件名（backward compat）。
     """
     from fastapi.responses import Response
     try:
@@ -672,29 +686,63 @@ async def get_emotion_avatar(
     if not USE_OSS or s3_client is None:
         raise HTTPException(status_code=503, detail="Storage service unavailable")
 
-    oss_key = f"emotion_avatars/{user_id}/{emotion}.png"
-    try:
-        obj = await asyncio.to_thread(
-            s3_client.get_object, Bucket=OSS_BUCKET_NAME, Key=oss_key
-        )
-        image_data = obj["Body"].read()
-        return Response(content=image_data, media_type="image/png",
-                        headers={"Cache-Control": "public, max-age=86400"})
-    except Exception:
-        raise HTTPException(status_code=404, detail="Emotion avatar not generated yet")
+    # 优先尝试新槽文件，失败则回退到旧文件名（向下兼容旧档案）
+    keys_to_try = [f"emotion_avatars/{user_id}/{emotion}.png"]
+    fallback = EMOTION_SLOT_FALLBACK.get(emotion)
+    if fallback and fallback != emotion:
+        keys_to_try.append(f"emotion_avatars/{user_id}/{fallback}.png")
+
+    for oss_key in keys_to_try:
+        try:
+            obj = await asyncio.to_thread(
+                s3_client.get_object, Bucket=OSS_BUCKET_NAME, Key=oss_key
+            )
+            image_data = obj["Body"].read()
+            return Response(content=image_data, media_type="image/png",
+                            headers={"Cache-Control": "public, max-age=86400"})
+        except Exception:
+            continue
+
+    raise HTTPException(status_code=404, detail="Emotion avatar not generated yet")
 
 
-@router.get("/emotion-avatars/urls", summary="获取当前用户全部情绪头像 URL")
+@router.get("/emotion-avatars/urls", summary="获取当前用户全部情绪头像预签名 URL")
 async def get_emotion_avatar_urls(
     user_id: str = Depends(get_current_user_id),
 ):
     """
-    返回 4 个情绪头像的 API URL（由客户端携带 JWT 请求）。
-    格式: { "happy": "...", "excited": "...", "sad": "...", "calm": "..." }
+    返回 5 个情绪头像的 R2 预签名 URL（有效期 1 小时），iOS 端可直接用 AsyncImage 加载。
+    格式: { "very_happy": "...", "happy": "...", "neutral": "...", "slightly_sad": "...", "sad": "..." }
+    若文件不存在则对应值为 null。
     """
-    api_base = os.getenv("API_PUBLIC_URL", "http://47.79.254.213")
-    base = api_base.rstrip("/")
-    return {
-        emotion: f"{base}/api/v1/profiles/emotion-avatar/{emotion}"
-        for emotion in EMOTION_SLOTS
-    }
+    try:
+        from main import USE_OSS, s3_client, OSS_BUCKET_NAME
+    except ImportError as e:
+        raise HTTPException(status_code=503, detail=f"Storage unavailable: {e}")
+
+    if not USE_OSS or s3_client is None:
+        raise HTTPException(status_code=503, detail="Storage service unavailable")
+
+    result = {}
+    for emotion in EMOTION_SLOTS:
+        # 优先新槽，回退旧槽
+        keys_to_try = [f"emotion_avatars/{user_id}/{emotion}.png"]
+        fallback = EMOTION_SLOT_FALLBACK.get(emotion)
+        if fallback and fallback != emotion:
+            keys_to_try.append(f"emotion_avatars/{user_id}/{fallback}.png")
+
+        url = None
+        for oss_key in keys_to_try:
+            try:
+                url = await asyncio.to_thread(
+                    s3_client.generate_presigned_url,
+                    "get_object",
+                    Params={"Bucket": OSS_BUCKET_NAME, "Key": oss_key},
+                    ExpiresIn=3600,
+                )
+                break
+            except Exception:
+                continue
+        result[emotion] = url
+
+    return result
