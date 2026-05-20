@@ -158,9 +158,7 @@ struct ProfileListView: View {
 
                 // Emoji Style
                 Button(action: {
-                    selfEmojiType = ProfileViewModel.shared.profiles
-                        .first(where: { $0.relationship.lowercased() == "self" })?
-                        .emojiType ?? "self"
+                    selfEmojiType = ProfileViewModel.shared.selfEmojiType
                     // 先关闭 Settings sheet，再打开 emoji picker（SwiftUI 不支持叠加两个 sheet）
                     showSettingsSheet = false
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
@@ -168,13 +166,13 @@ struct ProfileListView: View {
                     }
                 }) {
                     HStack(spacing: 10) {
-                        Text(selfEmojiType == "dog" ? "🐶" : selfEmojiType == "cat" ? "🐱" : "🪞")
+                        Text(viewModel.selfEmojiType == "dog" ? "🐶" : viewModel.selfEmojiType == "cat" ? "🐱" : "🪞")
                             .font(.system(size: 18))
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Emoji Style")
                                 .font(AppFonts.cardTitle)
                                 .foregroundColor(AppColors.primaryText)
-                            Text(selfEmojiType == "dog" ? "Dog" : selfEmojiType == "cat" ? "Cat" : "Self Portrait")
+                            Text(viewModel.selfEmojiType == "dog" ? "Dog" : viewModel.selfEmojiType == "cat" ? "Cat" : "Self Portrait")
                                 .font(.system(size: 11, design: .rounded))
                                 .foregroundColor(AppColors.secondaryText)
                         }
@@ -252,7 +250,9 @@ struct ProfileListView: View {
             SubscriptionView()
         }
         .sheet(isPresented: $showEmojiTypePicker, onDismiss: {
-            // 保存 emoji_type 到 Self 档案
+            // 立即写入本地（UserDefaults），不依赖 profiles 是否已加载
+            ProfileViewModel.shared.setSelfEmojiType(selfEmojiType)
+            // 再同步到服务端 Self 档案
             guard let selfProfile = ProfileViewModel.shared.profiles
                 .first(where: { $0.relationship.lowercased() == "self" }),
                 selfProfile.emojiType != selfEmojiType else { return }

@@ -10,17 +10,32 @@ import Combine
 
 class ProfileViewModel: ObservableObject {
     static let shared = ProfileViewModel()
-    
+
     @Published var profiles: [Profile] = []
     @Published var isLoading = false
     @Published var errorMessage: String?
-    
+    /// 用户选择的 emoji 风格，UserDefaults 持久化，立即可用无需等待 profiles 加载
+    @Published var selfEmojiType: String = UserDefaults.standard.string(forKey: "selectedEmojiStyle") ?? "self"
+
     private let networkManager = NetworkManager.shared
     private var hasLoaded = false
     private var loadingTask: Task<Void, Never>?
-    
-    private init() {
-        // 私有初始化器，确保单例模式
+
+    private init() {}
+
+    /// 立即将 emoji 类型写入内存 + UserDefaults（用于 picker 选择后同步）
+    func setSelfEmojiType(_ type: String) {
+        selfEmojiType = type
+        UserDefaults.standard.set(type, forKey: "selectedEmojiStyle")
+    }
+
+    /// 从已加载的 profiles 同步 selfEmojiType（server 优先）
+    private func syncEmojiTypeFromProfiles(_ profiles: [Profile]) {
+        guard let selfProfile = profiles.first(where: { $0.relationship.lowercased() == "self" }) else { return }
+        if selfProfile.emojiType != selfEmojiType {
+            selfEmojiType = selfProfile.emojiType
+            UserDefaults.standard.set(selfProfile.emojiType, forKey: "selectedEmojiStyle")
+        }
     }
     
     // 加载档案列表
@@ -53,6 +68,7 @@ class ProfileViewModel: ObservableObject {
                     self.profiles = response.profiles
                     self.isLoading = false
                     self.hasLoaded = true
+                    self.syncEmojiTypeFromProfiles(response.profiles)
                     print("✅ [ProfileViewModel] 成功加载 \(response.profiles.count) 个档案")
                 }
             } catch {

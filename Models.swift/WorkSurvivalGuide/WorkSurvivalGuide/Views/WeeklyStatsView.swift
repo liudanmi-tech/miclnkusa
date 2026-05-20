@@ -12,8 +12,11 @@ import Charts
 
 struct WeeklyStatsCarouselView: View {
     @StateObject private var vm = WeeklyStatsViewModel.shared
+    @ObservedObject private var profileVM = ProfileViewModel.shared
     @State private var activeCard = 0
     @State private var detailCard: CardType? = nil
+
+    private var selfEmojiType: String { profileVM.selfEmojiType }
 
     enum CardType: Int, Identifiable {
         case mood = 0, radar = 1, social = 2
@@ -30,7 +33,7 @@ struct WeeklyStatsCarouselView: View {
     var body: some View {
         VStack(spacing: 8) {
             TabView(selection: $activeCard) {
-                MoodCurveCard(stats: vm.stats, isLoading: vm.isLoading)
+                MoodCurveCard(stats: vm.stats, isLoading: vm.isLoading, emojiType: selfEmojiType)
                     .tag(0)
                     .onTapGesture { detailCard = .mood }
 
@@ -145,11 +148,55 @@ private func scoreMoodEmoji(_ score: Double) -> String {
     }
 }
 
+private func scoreToSlot(_ score: Double) -> String {
+    switch score {
+    case 80...: return "very_happy"
+    case 65..<80: return "happy"
+    case 45..<65: return "neutral"
+    case 30..<45: return "slightly_sad"
+    default:      return "sad"
+    }
+}
+
+// score → emoji (unicode or AsyncImage depending on emojiType)
+private struct MoodEmojiView: View {
+    let score: Double
+    let emojiType: String
+    let size: CGFloat
+
+    private var presetURL: URL? {
+        guard emojiType == "dog" || emojiType == "cat" else { return nil }
+        let slot = scoreToSlot(score)
+        let base = NetworkManager.shared.getBaseURL()
+        let apiBase = base.hasSuffix("/api/v1") ? String(base.dropLast(7)) : base
+        return URL(string: "\(apiBase)/api/v1/emoji-presets/\(emojiType)/\(slot)")
+    }
+
+    var body: some View {
+        if let url = presetURL {
+            AsyncImage(url: url) { phase in
+                switch phase {
+                case .success(let img):
+                    img.resizable().scaledToFill()
+                        .frame(width: size, height: size)
+                        .clipShape(Circle())
+                default:
+                    Text(scoreMoodEmoji(score)).font(.system(size: size))
+                }
+            }
+            .frame(width: size, height: size)
+        } else {
+            Text(scoreMoodEmoji(score)).font(.system(size: size))
+        }
+    }
+}
+
 // MARK: - Card 1: Mood Curve
 
 private struct MoodCurveCard: View {
     let stats: WeeklyStats?
     let isLoading: Bool
+    let emojiType: String
 
     private var filledPoints: [(day: String, score: Double, polarity: String?)] {
         (stats?.mood_series ?? []).compactMap { p in
@@ -168,11 +215,11 @@ private struct MoodCurveCard: View {
                 case 0:
                     MoodEmptyView()
                 case 1:
-                    MoodSingleDayView(point: filledPoints[0])
+                    MoodSingleDayView(point: filledPoints[0], emojiType: emojiType)
                 case 2:
-                    MoodTwoDayView(points: filledPoints)
+                    MoodTwoDayView(points: filledPoints, emojiType: emojiType)
                 default:
-                    MoodCartoonChart(points: filledPoints)
+                    MoodCartoonChart(points: filledPoints, emojiType: emojiType)
                         .frame(height: 162)
                         .padding(.horizontal, 10)
                         .padding(.bottom, 10)
@@ -199,10 +246,11 @@ private struct MoodEmptyView: View {
 // 1 recording — big emoji card
 private struct MoodSingleDayView: View {
     let point: (day: String, score: Double, polarity: String?)
+    let emojiType: String
 
     var body: some View {
         VStack(spacing: 8) {
-            Text(scoreMoodEmoji(point.score)).font(.system(size: 44))
+            MoodEmojiView(score: point.score, emojiType: emojiType, size: 44)
             Text(moodLabel(point.polarity))
                 .font(.system(size: 13, weight: .medium, design: .rounded))
                 .foregroundColor(.white.opacity(0.65))
@@ -225,6 +273,7 @@ private struct MoodSingleDayView: View {
 // 2 recordings — side-by-side comparison
 private struct MoodTwoDayView: View {
     let points: [(day: String, score: Double, polarity: String?)]
+    let emojiType: String
 
     private var delta: Double { (points.last?.score ?? 0) - (points.first?.score ?? 0) }
 
@@ -242,7 +291,7 @@ private struct MoodTwoDayView: View {
     @ViewBuilder
     private func moodCard(_ pt: (day: String, score: Double, polarity: String?)) -> some View {
         VStack(spacing: 6) {
-            Text(scoreMoodEmoji(pt.score)).font(.system(size: 32))
+            MoodEmojiView(score: pt.score, emojiType: emojiType, size: 32)
             Text(shortDay(pt.day))
                 .font(.system(size: 10, design: .rounded))
                 .foregroundColor(.white.opacity(0.4))
@@ -277,6 +326,7 @@ private struct MoodTwoDayView: View {
 // ≥3 recordings — black-and-white cartoon line chart
 private struct MoodCartoonChart: View {
     let points: [(day: String, score: Double, polarity: String?)]
+    let emojiType: String
 
     var body: some View {
         GeometryReader { geo in
@@ -333,8 +383,7 @@ private struct MoodCartoonChart: View {
 
                 // Emoji above selected nodes
                 ForEach(Array(emojiSet), id: \.self) { i in
-                    Text(scoreMoodEmoji(points[i].score))
-                        .font(.system(size: 14))
+                    MoodEmojiView(score: points[i].score, emojiType: emojiType, size: 14)
                         .frame(width: 24, height: 20, alignment: .center)
                         .position(x: xs[i], y: ys[i] - 18)
                 }
@@ -551,6 +600,9 @@ struct WeeklyStatsDetailSheet: View {
     @State private var selectedCard: WeeklyStatsCarouselView.CardType
     @State private var highlightedSessionId: String? = nil   // 来自图表点击
     @Environment(\.dismiss) private var dismiss
+    @ObservedObject private var profileVM = ProfileViewModel.shared
+
+    private var selfEmojiType: String { profileVM.selfEmojiType }
 
     init(vm: WeeklyStatsViewModel, initialCard: WeeklyStatsCarouselView.CardType) {
         self.vm = vm
@@ -603,7 +655,7 @@ struct WeeklyStatsDetailSheet: View {
                         Group {
                             switch selectedCard {
                             case .mood:
-                                MoodDetailChart(vm: vm, highlightedSessionId: $highlightedSessionId)
+                                MoodDetailChart(vm: vm, highlightedSessionId: $highlightedSessionId, emojiType: selfEmojiType)
                             case .social:
                                 SocialDetailChart(vm: vm)
                             case .radar:
@@ -711,6 +763,7 @@ struct WeeklyStatsDetailSheet: View {
 private struct MoodDetailChart: View {
     @ObservedObject var vm: WeeklyStatsViewModel
     @Binding var highlightedSessionId: String?
+    let emojiType: String
 
     var body: some View {
         let points = vm.stats?.mood_series ?? []
@@ -795,8 +848,7 @@ private struct MoodDetailChart: View {
                                let score = points[idx].score,
                                let xPos = proxy.position(forX: idx),
                                let yPos = proxy.position(forY: score) {
-                                Text(scoreMoodEmoji(score))
-                                    .font(.system(size: 12))
+                                MoodEmojiView(score: score, emojiType: emojiType, size: 16)
                                     .allowsHitTesting(false)
                                     .position(x: origin.x + xPos, y: origin.y + yPos - 18)
                             }

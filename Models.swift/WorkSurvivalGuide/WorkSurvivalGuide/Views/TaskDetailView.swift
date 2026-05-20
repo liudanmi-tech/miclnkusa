@@ -9,6 +9,7 @@ import SwiftUI
 
 struct TaskDetailView: View {
     let task: TaskItem
+    @ObservedObject private var profileVM = ProfileViewModel.shared
     @State private var detail: TaskDetailResponse?
     @State private var strategyAnalysis: StrategyAnalysisResponse?
     @State private var isLoading = false
@@ -188,11 +189,7 @@ struct TaskDetailView: View {
             .content?.moodEmojiSlot
     }
 
-    private var selfEmojiType: String {
-        ProfileViewModel.shared.profiles
-            .first(where: { $0.relationship.lowercased() == "self" })?
-            .emojiType ?? "self"
-    }
+    private var selfEmojiType: String { profileVM.selfEmojiType }
 
     private var moodEmojiUrl: String? {
         let emojiType = selfEmojiType
@@ -201,10 +198,33 @@ struct TaskDetailView: View {
                 .first(where: { $0.contentType == "emotion" })?
                 .content?.moodEmojiUrl
         } else {
-            guard let slot = moodEmojiSlot, !slot.isEmpty else { return nil }
+            // Use moodEmojiSlot if available; fall back to moodState mapping for old sessions
+            let slot: String
+            if let s = moodEmojiSlot, !s.isEmpty {
+                slot = s
+            } else if let state = moodState, !state.isEmpty {
+                slot = Self.slotFromMoodState(state)
+            } else {
+                slot = "neutral"
+            }
             let base = NetworkManager.shared.getBaseURL()
             let apiBase = base.hasSuffix("/api/v1") ? String(base.dropLast(7)) : base
             return "\(apiBase)/api/v1/emoji-presets/\(emojiType)/\(slot)"
+        }
+    }
+
+    private static func slotFromMoodState(_ state: String) -> String {
+        let s = state.lowercased()
+        if s.contains("very") || s.contains("excit") || s.contains("极度") || s.contains("非常开心") {
+            return "very_happy"
+        } else if s.contains("neutral") || s.contains("calm") || s.contains("normal") || s.contains("平静") || s.contains("一般") {
+            return "neutral"
+        } else if s.contains("slight") || s.contains("mild") || s.contains("轻微") || s.contains("略感") || s.contains("有点") {
+            return "slightly_sad"
+        } else if s.contains("sad") || s.contains("depress") || s.contains("unhappy") || s.contains("悲") || s.contains("难过") || s.contains("压力") || s.contains("stressed") {
+            return "sad"
+        } else {
+            return "happy"
         }
     }
 
