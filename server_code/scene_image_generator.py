@@ -403,10 +403,11 @@ async def generate_scene_images(
                         )
                         logger.info(f"[场景2] 档案照片获取完成: {person_name} 耗时={time.time()-t_ph:.2f}s 有图={photo is not None}")
 
+                    _is_pet = getattr(profile, "relationship_type", "") == "Pet"
                     if photo:
                         profile_key = profile.name
-                        people_refs[profile_key] = {"photo": photo, "appearance": None}
-                        logger.info(f"[场景2] 档案照片加载成功: {person_name} → {profile_key} ({profile.id})")
+                        people_refs[profile_key] = {"photo": photo, "appearance": None, "is_pet": _is_pet}
+                        logger.info(f"[场景2] 档案照片加载成功: {person_name} → {profile_key} ({profile.id}) is_pet={_is_pet}")
                     else:
                         # 降级：推断外貌
                         t_inf = time.time()
@@ -414,7 +415,7 @@ async def generate_scene_images(
                         appearance = await _infer_person_appearance(
                             person_name, _narration_text, gemini_flash_model
                         )
-                        people_refs[person_name] = {"photo": None, "appearance": appearance}
+                        people_refs[person_name] = {"photo": None, "appearance": appearance, "is_pet": _is_pet}
                         logger.info(f"[场景2] 外貌推断完成: {person_name} 耗时={time.time()-t_inf:.2f}s → {appearance}")
 
                 # 加载用户自己的档案照片（作为"左侧人物"参考）
@@ -466,20 +467,23 @@ async def generate_scene_images(
 
             async def gen_one(i, scene):
                 if is_narration_mode:
-                    # 场景2：逐场景动态拼装参考图和一致性描述
+                    # 场景2：逐场景动态拼装参考图、标签和一致性描述
                     ref_images = []
+                    ref_labels = []   # 与 ref_images 严格等长，每项 {"name": str, "is_pet": bool}
                     desc_parts = []
 
-                    # 左侧：用户自己的档案照片（如有）
+                    # 第1张：用户自己的档案照片（如有）
                     if user_photo:
                         ref_images.append(user_photo)
+                        ref_labels.append({"name": "用户", "is_pet": False})
 
-                    # 右侧：所有匹配到的人物（不做 per-scene 过滤，避免中文名无法在英文 scene 中命中）
+                    # 后续：所有匹配到的人物（保持 people_refs 插入顺序）
                     for person_name, ref_data in people_refs.items():
                         if ref_data["photo"]:
                             ref_images.append(ref_data["photo"])
+                            ref_labels.append({"name": person_name, "is_pet": ref_data.get("is_pet", False)})
                         elif ref_data["appearance"]:
-                            # 无照片时注入外貌描述保持一致性
+                            # 无照片时注入外貌描述保持一致性（不占参考图位置）
                             desc_parts.append(f"对方为{ref_data['appearance']}")
 
                     # 将降级外貌描述拼接到场景文本最前
@@ -488,18 +492,24 @@ async def generate_scene_images(
                     else:
                         scene_with_profile = scene
 
-                    ref = ref_images if ref_images else None
+                    ref    = ref_images if ref_images else None
+                    labels = ref_labels if ref_labels else None
+                    logger.info(
+                        f"[场景2] gen_one i={i} ref_count={len(ref_images)} "
+                        f"labels={[l['name'] + ('(pet)' if l['is_pet'] else '') for l in ref_labels]}"
+                    )
 
                 else:
-                    # 场景1：统一参考图 + 一致性头部（无照片时降级）
+                    # 场景1：统一参考图 + 一致性头部（无照片时降级）；标签沿用通用左/右逻辑
                     if not profile_refs and consistency_header:
                         scene_with_profile = f"{consistency_header}{scene}"
                     else:
                         scene_with_profile = scene
-                    ref = profile_refs if profile_refs else None
+                    ref    = profile_refs if profile_refs else None
+                    labels = None  # 场景1不传 ref_labels，generate_image_from_prompt 内部用通用左/右标签
 
                 # generate_image_fn 是同步函数，通过 asyncio.to_thread 调用
-                # 每张图最多等 120 秒，超时返回 None（视为失败）
+                # 每张图最多等 180 秒，超时返回 None（视为失败）
                 t_img = time.time()
                 logger.info(f"[场景生图] 图{i} 生成开始 ref_images={len(ref) if ref else 0} scene={scene[:60]}")
                 try:
@@ -508,7 +518,7 @@ async def generate_scene_images(
                             generate_image_fn,
                             scene_with_profile,
                             user_id, session_id, 1000 + i,  # index 1000+ 避免与技能图片冲突
-                            ref, 1, style_key  # 并行模式：不重试，失败直接跳过
+                            ref, 1, style_key, labels       # 并行模式：不重试，失败直接跳过
                         ),
                         timeout=180.0,  # 并行模式：单张超时 180s，总体最坏 180s（原串行 ~400s）
                     )

@@ -980,6 +980,7 @@ def generate_image_from_prompt(
     reference_images: Optional[List[Tuple[bytes, str]]] = None,
     max_retries: int = 3,
     style_key: Optional[str] = None,
+    ref_labels: Optional[list] = None,  # 与 reference_images 等长：[{"name": str, "is_pet": bool}, ...]
 ) -> Optional[str]:
     """
     使用 Gemini Nano Banana 生成图片并上传到 OSS。
@@ -1028,37 +1029,77 @@ def generate_image_from_prompt(
 
     # 构建人物参考图说明（动态适配1-5人）
     n_refs = len(reference_images) if reference_images else 0
-    _ref_labels = ["用户本人", "同伴一", "同伴二", "同伴三", "同伴四"]
 
     if n_refs >= 3:
-        # 多人场景（3人及以上）：不固定左右，强调人数齐全
+        # ── 多人场景（3人及以上）：不固定左右，用真实档案名绑定动作 ──────────
+        _has_pet = any(lbl.get("is_pet", False) for lbl in (ref_labels or []))
         position_rule = (
             f"【重要】画面中必须出现 {n_refs} 个不同角色，每个角色都有独立的外形和动作，"
             f"不得将任何两个角色合并或省略任何一个。按照场景描述忠实还原每个角色各自的动作和神情。\n\n"
         )
         ref_desc = (
-            f"【角色一致性要求】以下 {n_refs} 张参考照片分别对应场景中的 {n_refs} 个角色，"
-            f"绘制时必须严格还原每张照片中的真实外貌——照片里是什么形象就画什么形象（人物画人、动物画动物，不得擅自更改）：\n"
+            f"【角色一致性要求】以下 {n_refs} 张参考照片分别对应场景中出现的 {n_refs} 个角色，"
+            f"绘制时必须严格还原每张照片中的真实外貌（照片里是什么形象就画什么形象，人物画人、动物画动物，不得擅自更改）：\n"
         )
         for idx in range(n_refs):
-            label = _ref_labels[idx] if idx < len(_ref_labels) else f"同伴{idx}"
-            ref_desc += f"- 第{idx+1}张参考图：{label}，必须完整还原照片中的外貌特征、体型、整体形象。\n"
+            if ref_labels and idx < len(ref_labels):
+                lbl  = ref_labels[idx]
+                name = lbl.get("name", f"角色{idx+1}")
+                if lbl.get("is_pet", False):
+                    ref_desc += (
+                        f"- 第{idx+1}张参考图：{name}【宠物/动物角色】"
+                        f"——照片中是动物，绘制时必须保持其动物原形（猫保持猫、狗保持狗），"
+                        f"严禁拟人化、严禁变为人形；场景描述中凡提及【{name}】的动作均以动物姿态呈现。\n"
+                    )
+                else:
+                    ref_desc += (
+                        f"- 第{idx+1}张参考图：{name}"
+                        f"——场景描述中凡提及【{name}】的人物均以此照片为外貌参考，"
+                        f"必须完整还原其外貌特征、体型、整体形象。\n"
+                    )
+            else:
+                _fallback = ["用户本人", "同伴一", "同伴二", "同伴三", "同伴四"]
+                label = _fallback[idx] if idx < len(_fallback) else f"角色{idx+1}"
+                ref_desc += f"- 第{idx+1}张参考图：{label}，必须完整还原照片中的外貌特征、体型、整体形象。\n"
         ref_desc += (
             "重要：即使是插画/动画风格，每个角色的外貌也必须与对应参考照片高度一致，"
-            "让认识他们的人能一眼认出。不得随意更改、拟人化或混淆任何角色的形象。\n\n"
+            "让认识他们的人能一眼认出。不得随意更改、混淆任何角色的形象。\n\n"
         )
         full_prompt = style_prefix + position_rule + ref_desc + prompt_body
         full_prompt += (
             f"\n\n【再次强调】画面中必须同时出现 {n_refs} 个独立角色（一个都不能少），"
             f"每个角色的外貌必须与对应参考照片保持高度一致（包括是人还是动物），这是最高优先级要求。"
         )
+        if _has_pet:
+            _pet_names = [lbl.get("name", "") for lbl in (ref_labels or []) if lbl.get("is_pet", False)]
+            _pet_str = "、".join(_pet_names)
+            full_prompt += (
+                f"\n【动物角色最高优先级】{_pet_str} 在画面中必须是真实动物形态，"
+                f"即使其他角色是人类也绝不得将其变为人形，此规则优先于一切风格要求。"
+            )
     elif n_refs >= 1:
-        # 两人场景（原有逻辑不变）
+        # ── 1-2人场景：用真实档案名绑定动作，宠物追加专属约束 ───────────────
         position_rule = "【重要】画面中左侧人物固定为用户，右侧人物固定为对方。必须严格按照场景描述中的动作主体来绘制：谁做动作就画谁在做，不能颠倒角色。\n\n"
         ref_desc = "【人物一致性要求】以下参考照片是真实形象，绘制时必须严格还原照片中的外貌特征（照片里是什么形象就画什么形象）：\n"
-        ref_desc += "- 第一张参考图：左侧人物（用户）的真实照片，必须完整还原其外貌特征、体型、整体形象。\n"
-        if n_refs >= 2:
-            ref_desc += "- 第二张参考图：右侧人物（对方）的真实照片，同样必须完整还原其外貌特征、体型、整体形象。\n"
+        for idx in range(n_refs):
+            if ref_labels and idx < len(ref_labels):
+                lbl  = ref_labels[idx]
+                name = lbl.get("name", "用户" if idx == 0 else "对方")
+                if lbl.get("is_pet", False):
+                    ref_desc += (
+                        f"- 第{idx+1}张参考图：{name}【宠物/动物角色】"
+                        f"——照片中是动物，绘制时必须保持动物原形，严禁变为人形。\n"
+                    )
+                else:
+                    ref_desc += (
+                        f"- 第{idx+1}张参考图：{name}的真实照片，"
+                        f"必须完整还原其外貌特征、体型、整体形象。\n"
+                    )
+            else:
+                if idx == 0:
+                    ref_desc += "- 第一张参考图：左侧人物（用户）的真实照片，必须完整还原其外貌特征、体型、整体形象。\n"
+                else:
+                    ref_desc += "- 第二张参考图：右侧人物（对方）的真实照片，同样必须完整还原其外貌特征、体型、整体形象。\n"
         ref_desc += "重要：即使是插画/动画风格，每个角色的外貌也必须与参考照片高度一致，让认识他们的人能一眼认出。不得随意更改或拟人化角色外貌。\n\n"
         full_prompt = style_prefix + position_rule + ref_desc + prompt_body
         full_prompt += "\n\n【再次强调】所有人物外貌必须与提供的参考照片保持高度一致，这是最高优先级要求。"
@@ -1080,9 +1121,9 @@ def generate_image_from_prompt(
         except Exception as _e:
             logger.warning(f"[图片生成] 风格参考图加载失败 {_style_ref_path}: {_e}")
 
-    # ── 人物档案参考图（最多2张，置于风格参考图之后）──────────────────────────
+    # ── 人物档案参考图（全部传入，不截断）────────────────────────────────────
     if reference_images:
-        for img_bytes, mime_type in reference_images[:2]:
+        for img_bytes, mime_type in reference_images:
             contents_list.append({"mime_type": mime_type, "data": img_bytes})
         logger.info(f"[图片生成] 使用 {len(reference_images)} 张档案照片作为人物参考图")
     # 追加 4:5 竖版尺寸要求（使用 512×640 小尺寸，加快生成速度，客户端可放大）
