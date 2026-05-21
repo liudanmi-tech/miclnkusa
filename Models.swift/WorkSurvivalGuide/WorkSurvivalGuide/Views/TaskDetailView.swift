@@ -150,6 +150,11 @@ struct TaskDetailView: View {
             .navigationBarHidden(true)
             .onDisappear { audioPlayer.stop() }
             .onAppear { loadAll() }
+            .task {
+                if profileVM.selfEmojiType == "self" {
+                    await SelfEmojiURLCache.shared.load()
+                }
+            }
             .sheet(isPresented: $showSummarySheet) {
                 SummarySheet(
                     summary: detail?.summary ?? task.summary,
@@ -194,11 +199,23 @@ struct TaskDetailView: View {
     private var moodEmojiUrl: String? {
         let emojiType = selfEmojiType
         if emojiType == "self" {
+            // Prefer fresh cached presigned URL (avoids expired stored URL)
+            let slot: String
+            if let s = moodEmojiSlot, !s.isEmpty {
+                slot = s
+            } else if let state = moodState, !state.isEmpty {
+                slot = Self.slotFromMoodState(state)
+            } else {
+                slot = "neutral"
+            }
+            if let cachedUrl = SelfEmojiURLCache.shared.url(for: slot) {
+                return cachedUrl
+            }
+            // Fallback: stored presigned URL from session data
             return strategyAnalysis?.skillCards?
                 .first(where: { $0.contentType == "emotion" })?
                 .content?.moodEmojiUrl
         } else {
-            // Use moodEmojiSlot if available; fall back to moodState mapping for old sessions
             let slot: String
             if let s = moodEmojiSlot, !s.isEmpty {
                 slot = s
@@ -409,24 +426,12 @@ private struct MomentInfoCard: View {
                 if let state = moodState {
                     HStack(spacing: 6) {
                         // 优先加载专属头像，降级 unicode emoji
-                        if let urlStr = moodEmojiUrl, let url = URL(string: urlStr) {
-                            AsyncImage(url: url) { phase in
-                                switch phase {
-                                case .success(let img):
-                                    img.resizable().scaledToFill()
-                                        .frame(width: 56, height: 56)
-                                        .clipShape(Circle())
-                                case .failure(let err):
-                                    let _ = print("❌ [MomentInfoCard] AsyncImage 失败: \(err.localizedDescription)")
-                                    Text(moodEmoji ?? "😐").font(.system(size: 40))
-                                default:
-                                    Text(moodEmoji ?? "😐").font(.system(size: 40))
-                                }
-                            }
-                            .onAppear { print("🖼️ [MomentInfoCard] AsyncImage url=\(urlStr.prefix(100))") }
+                        if let urlStr = moodEmojiUrl {
+                            ImageLoaderView(imageUrl: urlStr, imageBase64: nil, contentMode: .fill)
+                                .frame(width: 56, height: 56)
+                                .clipShape(Circle())
                         } else {
                             Text(moodEmoji ?? "😐").font(.system(size: 40))
-                                .onAppear { print("⚠️ [MomentInfoCard] moodEmojiUrl=nil，使用通用 emoji") }
                         }
                         Text(state)
                             .font(.system(size: 13, weight: .semibold))

@@ -120,3 +120,31 @@ class ProfileViewModel: ObservableObject {
         errorMessage = nil
     }
 }
+
+// MARK: - Self Emoji URL Cache
+// Shared cache for user's 5 self-portrait emotion avatars (slot → presigned URL).
+// Call load() once; result is reused across MoodTrend, DetailPage, EmojiPicker.
+
+@MainActor
+class SelfEmojiURLCache: ObservableObject {
+    static let shared = SelfEmojiURLCache()
+    @Published var urls: [String: String] = [:]   // slot → presigned URL (non-nil only)
+    private var loaded = false
+
+    private init() {}
+
+    func load() async {
+        guard !loaded else { return }
+        loaded = true
+        if let fetched = try? await NetworkManager.shared.fetchEmotionAvatarUrls() {
+            urls = fetched.compactMapValues { $0 }
+        }
+    }
+
+    func url(for slot: String) -> String? { urls[slot] }
+
+    func reset() {
+        urls = [:]
+        loaded = false
+    }
+}

@@ -172,17 +172,14 @@ private struct EmotionSlotPreview: View {
     let emojiType: String
     let selfUrl: String?
 
-    @State private var loadedImage: UIImage?
-
-    private var remoteURL: URL? {
+    private var imageUrlString: String? {
         switch emojiType {
         case "self":
-            guard let urlStr = selfUrl else { return nil }
-            return URL(string: urlStr)
+            return selfUrl
         default:
             let base = NetworkManager.shared.getBaseURL()
             let apiBase = base.hasSuffix("/api/v1") ? String(base.dropLast(7)) : base
-            return URL(string: "\(apiBase)/api/v1/emoji-presets/\(emojiType)/\(slot)")
+            return "\(apiBase)/api/v1/emoji-presets/\(emojiType)/\(slot)"
         }
     }
 
@@ -192,10 +189,8 @@ private struct EmotionSlotPreview: View {
                 Circle()
                     .fill(slotColors[slot] ?? Color.gray.opacity(0.4))
                     .frame(width: 48, height: 48)
-                if let img = loadedImage {
-                    Image(uiImage: img)
-                        .resizable()
-                        .scaledToFill()
+                if let urlStr = imageUrlString {
+                    ImageLoaderView(imageUrl: urlStr, imageBase64: nil, contentMode: .fill)
                         .frame(width: 48, height: 48)
                         .clipShape(Circle())
                 }
@@ -206,26 +201,5 @@ private struct EmotionSlotPreview: View {
                 .lineLimit(1)
         }
         .frame(maxWidth: .infinity)
-        .onAppear { loadImage(force: false) }
-        .onChange(of: selfUrl) { _ in loadImage(force: true) }
-    }
-
-    private func loadImage(force: Bool = false) {
-        guard let url = remoteURL else { return }
-        // force=true 时允许覆盖（self 类型 URL 延迟到达）
-        if !force && loadedImage != nil { return }
-        let urlStr = url.absoluteString
-        if let cached = ImageCacheManager.shared.image(for: urlStr) {
-            loadedImage = cached
-            return
-        }
-        URLSession.shared.dataTask(with: url) { data, response, _ in
-            // 非 200 时不缓存（避免缓存 404 响应）
-            guard let data = data,
-                  (response as? HTTPURLResponse)?.statusCode == 200,
-                  let img = UIImage(data: data) else { return }
-            ImageCacheManager.shared.cache(img, for: urlStr)
-            DispatchQueue.main.async { loadedImage = img }
-        }.resume()
     }
 }

@@ -158,33 +158,32 @@ private func scoreToSlot(_ score: Double) -> String {
     }
 }
 
-// score → emoji (unicode or AsyncImage depending on emojiType)
+// score → emoji (ImageLoaderView for self/dog/cat, unicode fallback)
 private struct MoodEmojiView: View {
     let score: Double
     let emojiType: String
     let size: CGFloat
+    @ObservedObject private var selfCache = SelfEmojiURLCache.shared
 
-    private var presetURL: URL? {
-        guard emojiType == "dog" || emojiType == "cat" else { return nil }
+    private var imageUrlString: String? {
         let slot = scoreToSlot(score)
-        let base = NetworkManager.shared.getBaseURL()
-        let apiBase = base.hasSuffix("/api/v1") ? String(base.dropLast(7)) : base
-        return URL(string: "\(apiBase)/api/v1/emoji-presets/\(emojiType)/\(slot)")
+        switch emojiType {
+        case "self":
+            return selfCache.url(for: slot)
+        case "dog", "cat":
+            let base = NetworkManager.shared.getBaseURL()
+            let apiBase = base.hasSuffix("/api/v1") ? String(base.dropLast(7)) : base
+            return "\(apiBase)/api/v1/emoji-presets/\(emojiType)/\(slot)"
+        default:
+            return nil
+        }
     }
 
     var body: some View {
-        if let url = presetURL {
-            AsyncImage(url: url) { phase in
-                switch phase {
-                case .success(let img):
-                    img.resizable().scaledToFill()
-                        .frame(width: size, height: size)
-                        .clipShape(Circle())
-                default:
-                    Text(scoreMoodEmoji(score)).font(.system(size: size))
-                }
-            }
-            .frame(width: size, height: size)
+        if let urlStr = imageUrlString {
+            ImageLoaderView(imageUrl: urlStr, imageBase64: nil, contentMode: .fill)
+                .frame(width: size, height: size)
+                .clipShape(Circle())
         } else {
             Text(scoreMoodEmoji(score)).font(.system(size: size))
         }
@@ -224,6 +223,11 @@ private struct MoodCurveCard: View {
                         .padding(.horizontal, 10)
                         .padding(.bottom, 10)
                 }
+            }
+        }
+        .task {
+            if emojiType == "self" {
+                await SelfEmojiURLCache.shared.load()
             }
         }
     }
