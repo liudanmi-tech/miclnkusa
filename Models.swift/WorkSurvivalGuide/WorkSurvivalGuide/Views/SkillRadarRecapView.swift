@@ -14,7 +14,6 @@ struct SkillRadarRecapView: View {
     let periodLabel: String
 
     @Environment(\.dismiss) private var dismiss
-    @StateObject private var radarVM = SkillsRadarViewModel.shared
     @State private var currentPage = 0
     @State private var appeared = false
     @State private var bgColor = Color(hex: "#080C14")
@@ -203,15 +202,19 @@ struct SkillRadarRecapView: View {
         selectedRange = newRange
         isLoadingRange = true
         Task {
-            radarVM.reset()
-            await radarVM.load(startDate: newRange.dateRange.start, endDate: newRange.dateRange.end)
-            await MainActor.run {
-                if let newRecap = radarVM.recap {
-                    withAnimation(.easeInOut(duration: 0.35)) {
-                        displayRecap = newRecap
-                    }
+            // Direct API call — do NOT touch SkillsRadarViewModel.shared.recap,
+            // otherwise the parent WeeklyStatsDetailSheet would immediately
+            // switch away from this view when recap becomes nil.
+            let range = newRange.dateRange
+            if let data = try? await NetworkManager.shared.getSkillsRadar(
+                startDate: range.start, endDate: range.end
+            ), let newRecap = data.recap {
+                await MainActor.run {
+                    withAnimation(.easeInOut(duration: 0.35)) { displayRecap = newRecap }
+                    isLoadingRange = false
                 }
-                isLoadingRange = false
+            } else {
+                await MainActor.run { isLoadingRange = false }
             }
         }
     }
