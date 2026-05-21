@@ -20,6 +20,7 @@ struct SkillRadarRecapView: View {
     @State private var selectedRange: RadarTimeRange = .thisWeek
     @State private var isLoadingRange = false
     @State private var displayRecap: RecapData
+    @State private var noPeriodData = false
 
     init(recap: RecapData, periodLabel: String) {
         self.recap = recap
@@ -45,6 +46,25 @@ struct SkillRadarRecapView: View {
 
             // Page content
             Group {
+                if noPeriodData && currentPage == 0 {
+                    // Empty period placeholder
+                    VStack(spacing: 20) {
+                        Image(systemName: "calendar.badge.minus")
+                            .font(.system(size: 52))
+                            .foregroundColor(.white.opacity(0.3))
+                        Text(selectedRange.rawValue)
+                            .font(.system(size: 22, weight: .bold, design: .rounded))
+                            .foregroundColor(.white.opacity(0.7))
+                        Text("该时段暂无录音记录")
+                            .font(.system(size: 16, design: .rounded))
+                            .foregroundColor(.white.opacity(0.4))
+                        Text("← 切换其他时间段")
+                            .font(.system(size: 13, design: .rounded))
+                            .foregroundColor(.white.opacity(0.25))
+                            .padding(.top, 4)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
                 switch currentPage {
                 case 0:
                     RecapPage1View(page1: displayRecap.page1, periodLabel: selectedRange.rawValue, appeared: appeared)
@@ -75,6 +95,7 @@ struct SkillRadarRecapView: View {
                 default:
                     EmptyView()
                 }
+                }   // end else (noPeriodData)
             }
             .transition(.opacity)
             .animation(.easeInOut(duration: 0.3), value: currentPage)
@@ -201,6 +222,7 @@ struct SkillRadarRecapView: View {
         let newRange = cases[newIdx]
         selectedRange = newRange
         isLoadingRange = true
+        noPeriodData = false
         Task {
             // Direct API call — do NOT touch SkillsRadarViewModel.shared.recap,
             // otherwise the parent WeeklyStatsDetailSheet would immediately
@@ -218,7 +240,11 @@ struct SkillRadarRecapView: View {
                     }
                 }
             } else {
-                await MainActor.run { isLoadingRange = false }
+                // No sessions in this period — show placeholder instead of stale data
+                await MainActor.run {
+                    noPeriodData = true
+                    isLoadingRange = false
+                }
             }
         }
     }
