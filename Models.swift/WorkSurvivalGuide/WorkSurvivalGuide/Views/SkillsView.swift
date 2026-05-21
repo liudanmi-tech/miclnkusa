@@ -660,40 +660,19 @@ struct SkillsHeaderView: View {
 
             // Add skills button
             Button(action: { onAddTap?() }) {
-                Image(systemName: "plus")
-                    .font(.system(size: 14, weight: .bold))
-                    .foregroundColor(.white)
-                    .frame(width: 30, height: 30)
-                    .background(
-                        Circle()
-                            .fill(Color.white.opacity(0.12))
-                    )
-            }
-            .buttonStyle(.plain)
-
-            Button(action: {
-                withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                    viewModel.toggleMode()
-                }
-            }) {
-                HStack(spacing: 6) {
-                    Image(systemName: viewModel.isManualMode ? "hand.tap" : "sparkles")
-                        .font(.system(size: 13, weight: .medium))
+                HStack(spacing: 5) {
+                    Image(systemName: "plus")
+                        .font(.system(size: 13, weight: .semibold))
                         .foregroundColor(.white)
-                    Text(viewModel.isManualMode ? "Manual" : "Auto")
+                    Text("Add Skill")
                         .font(.system(size: 12, weight: .bold, design: .rounded))
                         .foregroundColor(.white)
                 }
                 .padding(.horizontal, 12)
                 .frame(height: 30)
-                .background(
-                    Capsule()
-                        .fill(viewModel.isManualMode
-                              ? Color(hex: "#C07A28")
-                              : Color(hex: "#5E7C8B"))
-                )
+                .background(Capsule().fill(Color(hex: "#5E7C8B")))
             }
-            .animation(.easeInOut(duration: 0.2), value: viewModel.isManualMode)
+            .buttonStyle(.plain)
         }
         .padding(.horizontal, 24)
         .frame(height: 60)

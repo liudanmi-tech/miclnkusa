@@ -14,17 +14,26 @@ struct SkillRadarRecapView: View {
     let periodLabel: String
 
     @Environment(\.dismiss) private var dismiss
+    @StateObject private var radarVM = SkillsRadarViewModel.shared
     @State private var currentPage = 0
     @State private var appeared = false
     @State private var bgColor = Color(hex: "#080C14")
+    @State private var selectedRange: RadarTimeRange = .thisWeek
+    @State private var isLoadingRange = false
+    @State private var displayRecap: RecapData
+
+    init(recap: RecapData, periodLabel: String) {
+        self.recap = recap
+        self.periodLabel = periodLabel
+        self._displayRecap = State(initialValue: recap)
+    }
 
     private let pageColors: [String] = [
         "#080C14", "#120A03", "#041A0F", "#040F0C", "#0D0820"
     ]
 
     private func colorForPage(_ page: Int) -> Color {
-        // Page 3 color depends on mood
-        if page == 2, let p3 = recap.page3 {
+        if page == 2, let p3 = displayRecap.page3 {
             return recapPage3BG(mood: p3.dominantMood)
         }
         return Color(hex: pageColors[min(page, pageColors.count - 1)])
@@ -39,27 +48,27 @@ struct SkillRadarRecapView: View {
             Group {
                 switch currentPage {
                 case 0:
-                    RecapPage1View(page1: recap.page1, periodLabel: periodLabel, appeared: appeared)
+                    RecapPage1View(page1: displayRecap.page1, periodLabel: selectedRange.rawValue, appeared: appeared)
                 case 1:
-                    if let p2 = recap.page2 {
+                    if let p2 = displayRecap.page2 {
                         RecapPage2View(page2: p2, appeared: appeared)
                     } else {
                         placeholderPage(text: "最好的时刻", icon: "star.fill")
                     }
                 case 2:
-                    if let p3 = recap.page3 {
+                    if let p3 = displayRecap.page3 {
                         RecapPage3View(page3: p3, appeared: appeared)
                     } else {
                         placeholderPage(text: "你的感受", icon: "heart.fill")
                     }
                 case 3:
-                    if let p4 = recap.page4 {
-                        RecapPage4View(page4: p4, coverImageUrl: recap.page2?.coverImageUrl, appeared: appeared)
+                    if let p4 = displayRecap.page4 {
+                        RecapPage4View(page4: p4, coverImageUrl: displayRecap.page2?.coverImageUrl, appeared: appeared)
                     } else {
                         placeholderPage(text: "技能说了什么", icon: "chart.bar.fill")
                     }
                 case 4:
-                    if let p5 = recap.page5 {
+                    if let p5 = displayRecap.page5 {
                         RecapPage5View(page5: p5, appeared: appeared, onDismiss: { dismiss() })
                     } else {
                         placeholderPage(text: "接下来", icon: "arrow.right.circle.fill")
@@ -71,15 +80,13 @@ struct SkillRadarRecapView: View {
             .transition(.opacity)
             .animation(.easeInOut(duration: 0.3), value: currentPage)
 
-            // Progress dots
+            // Progress dots + close button
             VStack {
                 HStack {
                     RecapProgressDots(currentPage: currentPage, total: 5)
                         .padding(.leading, 20)
                     Spacer()
-                    Button {
-                        dismiss()
-                    } label: {
+                    Button { dismiss() } label: {
                         Image(systemName: "xmark")
                             .font(.system(size: 14, weight: .medium))
                             .foregroundColor(.white.opacity(0.5))
@@ -92,9 +99,74 @@ struct SkillRadarRecapView: View {
                 .padding(.top, 60)
                 Spacer()
             }
+
+            // Time range selector — page 1 only
+            if currentPage == 0 {
+                VStack {
+                    Spacer()
+                    VStack(spacing: 8) {
+                        HStack(spacing: 24) {
+                            // Left arrow
+                            Button {
+                                navigateRange(-1)
+                            } label: {
+                                Image(systemName: "chevron.left.circle.fill")
+                                    .font(.system(size: 36))
+                                    .foregroundColor(
+                                        selectedRange == RadarTimeRange.allCases.first
+                                        ? .white.opacity(0.15)
+                                        : .white.opacity(0.55)
+                                    )
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(selectedRange == RadarTimeRange.allCases.first || isLoadingRange)
+
+                            // Period label / loading
+                            ZStack {
+                                if isLoadingRange {
+                                    ProgressView()
+                                        .tint(.white.opacity(0.6))
+                                        .scaleEffect(0.9)
+                                } else {
+                                    Text(selectedRange.rawValue)
+                                        .font(.system(size: 15, weight: .semibold, design: .rounded))
+                                        .foregroundColor(.white.opacity(0.85))
+                                        .transition(.opacity)
+                                        .id(selectedRange)
+                                }
+                            }
+                            .frame(width: 120, height: 24)
+                            .animation(.easeInOut(duration: 0.2), value: isLoadingRange)
+
+                            // Right arrow
+                            Button {
+                                navigateRange(1)
+                            } label: {
+                                Image(systemName: "chevron.right.circle.fill")
+                                    .font(.system(size: 36))
+                                    .foregroundColor(
+                                        selectedRange == RadarTimeRange.allCases.last
+                                        ? .white.opacity(0.15)
+                                        : .white.opacity(0.55)
+                                    )
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(selectedRange == RadarTimeRange.allCases.last || isLoadingRange)
+                        }
+
+                        Text("← swipe to change period, tap to continue →")
+                            .font(.system(size: 11, design: .rounded))
+                            .foregroundColor(.white.opacity(0.28))
+                    }
+                    .padding(.bottom, 52)
+                }
+                .transition(.opacity)
+                .animation(.easeInOut(duration: 0.25), value: currentPage)
+            }
         }
         .contentShape(Rectangle())
         .onTapGesture {
+            guard !isLoadingRange else { return }
             if currentPage < 4 {
                 withAnimation(.easeInOut(duration: 0.35)) {
                     bgColor = colorForPage(currentPage + 1)
@@ -118,6 +190,28 @@ struct SkillRadarRecapView: View {
             appeared = false
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
                 appeared = true
+            }
+        }
+    }
+
+    private func navigateRange(_ direction: Int) {
+        let cases = RadarTimeRange.allCases
+        guard let idx = cases.firstIndex(of: selectedRange) else { return }
+        let newIdx = idx + direction
+        guard newIdx >= 0 && newIdx < cases.count else { return }
+        let newRange = cases[newIdx]
+        selectedRange = newRange
+        isLoadingRange = true
+        Task {
+            radarVM.reset()
+            await radarVM.load(startDate: newRange.dateRange.start, endDate: newRange.dateRange.end)
+            await MainActor.run {
+                if let newRecap = radarVM.recap {
+                    withAnimation(.easeInOut(duration: 0.35)) {
+                        displayRecap = newRecap
+                    }
+                }
+                isLoadingRange = false
             }
         }
     }

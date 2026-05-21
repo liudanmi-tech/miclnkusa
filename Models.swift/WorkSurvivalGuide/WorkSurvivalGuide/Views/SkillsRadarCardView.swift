@@ -129,7 +129,6 @@ struct SkillsRadarCardView: View {
                 .padding(.bottom, 14)
             }
         }
-        .frame(height: 240)
         .padding(.horizontal, 20)
         .task {
             await vm.load(startDate: startDate, endDate: endDate)
@@ -150,6 +149,72 @@ struct SkillsRadarCardView: View {
     }
 }
 
+// MARK: - Radar Time Range
+
+enum RadarTimeRange: String, CaseIterable {
+    case thisWeek  = "This Week"
+    case lastWeek  = "Last Week"
+    case past30    = "Past 30 Days"
+
+    private static let fmt: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"; return f
+    }()
+
+    var dateRange: (start: String, end: String) {
+        let cal = Calendar.current
+        let today = Date()
+        switch self {
+        case .thisWeek:
+            let monday = cal.date(from: cal.dateComponents([.yearForWeekOfYear, .weekOfYear], from: today))!
+            return (RadarTimeRange.fmt.string(from: monday), RadarTimeRange.fmt.string(from: today))
+        case .lastWeek:
+            let monday = cal.date(from: cal.dateComponents([.yearForWeekOfYear, .weekOfYear], from: today))!
+            let lastMon = cal.date(byAdding: .day, value: -7, to: monday)!
+            let lastSun = cal.date(byAdding: .day, value: -1, to: monday)!
+            return (RadarTimeRange.fmt.string(from: lastMon), RadarTimeRange.fmt.string(from: lastSun))
+        case .past30:
+            let start = cal.date(byAdding: .day, value: -29, to: today)!
+            return (RadarTimeRange.fmt.string(from: start), RadarTimeRange.fmt.string(from: today))
+        }
+    }
+}
+
+// MARK: - Radar Pill Tab Bar
+
+struct RadarPillTabs: View {
+    @Binding var selected: RadarTimeRange
+
+    var body: some View {
+        HStack(spacing: 6) {
+            ForEach(RadarTimeRange.allCases, id: \.self) { range in
+                let isSelected = selected == range
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) { selected = range }
+                } label: {
+                    Text(range.rawValue)
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        .foregroundColor(isSelected ? Color(hex: "#45B7D1") : .white.opacity(0.4))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(
+                            Capsule()
+                                .fill(isSelected ? Color(hex: "#45B7D1").opacity(0.15) : Color.clear)
+                                .overlay(
+                                    Capsule().stroke(
+                                        isSelected ? Color(hex: "#45B7D1").opacity(0.4) : Color.clear,
+                                        lineWidth: 0.8
+                                    )
+                                )
+                        )
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 4)
+    }
+}
+
 // MARK: - Detail Page (opened from sheet — radar + highlights + insight)
 
 struct SkillsRadarDetailPage: View {
@@ -159,6 +224,12 @@ struct SkillsRadarDetailPage: View {
     let endDate: String
     let periodLabel: String
 
+    @State private var selectedRange: RadarTimeRange = .thisWeek
+    @State private var showRecap = false
+
+    private var activeStart: String { selectedRange.dateRange.start }
+    private var activeEnd:   String { selectedRange.dateRange.end }
+
     private var totalSessions: Int {
         vm.scenes.reduce(0) { $0 + $1.session_count }
     }
@@ -166,13 +237,44 @@ struct SkillsRadarDetailPage: View {
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
-            if vm.isLoading {
-                ProgressView().tint(.white.opacity(0.5))
-            } else if vm.scenes.isEmpty {
-                Text("No skill data this period")
-                    .font(.system(size: 14, design: .rounded))
-                    .foregroundColor(.white.opacity(0.35))
-            } else {
+            VStack(spacing: 0) {
+                // ── Time range pill tabs + Story button ────────────────
+                HStack(spacing: 0) {
+                    RadarPillTabs(selected: $selectedRange)
+                    if vm.recap != nil {
+                        Button { showRecap = true } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: "play.fill")
+                                    .font(.system(size: 10, weight: .semibold))
+                                Text("Story")
+                                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                            }
+                            .foregroundColor(Color(hex: "#B8A4FF"))
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(
+                                Capsule()
+                                    .fill(Color(hex: "#B8A4FF").opacity(0.12))
+                                    .overlay(Capsule().stroke(Color(hex: "#B8A4FF").opacity(0.4), lineWidth: 0.8))
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.trailing, 20)
+                    }
+                }
+                .padding(.bottom, 8)
+
+                if vm.isLoading {
+                    Spacer()
+                    ProgressView().tint(.white.opacity(0.5))
+                    Spacer()
+                } else if vm.scenes.isEmpty {
+                    Spacer()
+                    Text("No skill data this period")
+                        .font(.system(size: 14, design: .rounded))
+                        .foregroundColor(.white.opacity(0.35))
+                    Spacer()
+                } else {
                 ScrollViewReader { proxy in
                     ScrollView(.vertical, showsIndicators: false) {
                         VStack(alignment: .leading, spacing: 24) {
@@ -201,8 +303,8 @@ struct SkillsRadarDetailPage: View {
                                         }
                                         if insightVM.state == .idle {
                                             insightVM.generate(
-                                                startDate: startDate,
-                                                endDate: endDate,
+                                                startDate: activeStart,
+                                                endDate: activeEnd,
                                                 totalSessions: totalSessions
                                             )
                                         }
@@ -288,14 +390,21 @@ struct SkillsRadarDetailPage: View {
                         .padding(.bottom, 48)
                     }
                 }
+                }  // else (has data)
+            }  // VStack(spacing: 0)
+        }
+        .fullScreenCover(isPresented: $showRecap) {
+            if let recap = vm.recap {
+                SkillRadarRecapView(recap: recap, periodLabel: selectedRange.rawValue)
             }
         }
-        .task(id: startDate + endDate) {
-            insightVM.resetAndCheckCache(startDate: startDate, endDate: endDate, totalSessions: 0)
-            await vm.load(startDate: startDate, endDate: endDate)
+        .task(id: activeStart + activeEnd) {
+            insightVM.resetAndCheckCache(startDate: activeStart, endDate: activeEnd, totalSessions: 0)
+            vm.reset()
+            await vm.load(startDate: activeStart, endDate: activeEnd)
             insightVM.resetAndCheckCache(
-                startDate: startDate,
-                endDate: endDate,
+                startDate: activeStart,
+                endDate: activeEnd,
                 totalSessions: totalSessions
             )
         }

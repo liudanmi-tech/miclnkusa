@@ -420,16 +420,17 @@ private struct MoodCartoonChart: View {
     }
 
     private func shouldShowDay(i: Int, n: Int) -> Bool {
-        if n <= 7 { return true }
-        if n <= 14 { return i % 2 == 0 || i == n - 1 }
-        return i == 0 || i == n - 1 || i % 5 == 0
+        if n <= 3 { return true }
+        // At least every 3 data points; at most 10 visible labels
+        let step = max(3, Int(ceil(Double(n - 1) / 9.0)))
+        return i % step == 0 || i == n - 1
     }
 
     private func shortDay(_ dateStr: String) -> String {
-        let days = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"]
         let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"
         guard let d = f.date(from: dateStr) else { return "" }
-        return days[(Calendar.current.component(.weekday, from: d) + 5) % 7]
+        let cal = Calendar.current
+        return "\(cal.component(.month, from: d))/\(cal.component(.day, from: d))"
     }
 }
 
@@ -622,7 +623,7 @@ struct WeeklyStatsDetailSheet: View {
     private var radarEndDate: String   { dateFormatter.string(from: vm.dateRange.1) }
 
     var body: some View {
-        // When radar recap data is available, show the immersive full-screen experience directly
+        // When radar recap data is available, go directly to immersive story
         if selectedCard == .radar, let recap = radarVM.recap {
             SkillRadarRecapView(recap: recap, periodLabel: vm.periodLabel)
         } else {
@@ -630,8 +631,8 @@ struct WeeklyStatsDetailSheet: View {
                 ZStack {
                     Color.black.ignoresSafeArea()
                     VStack(spacing: 0) {
-                        // Range + card picker
-                        VStack(spacing: 10) {
+                        // Range picker (mood / social only; radar has its own pill tabs)
+                        if selectedCard != .radar {
                             Picker("", selection: Binding(
                                 get: { vm.selectedRange },
                                 set: { vm.switchRange($0) }
@@ -641,17 +642,10 @@ struct WeeklyStatsDetailSheet: View {
                                 }
                             }
                             .pickerStyle(.segmented)
-
-                            Picker("", selection: $selectedCard) {
-                                Text("Mood").tag(WeeklyStatsCarouselView.CardType.mood)
-                                Text("Radar").tag(WeeklyStatsCarouselView.CardType.radar)
-                                Text("Social").tag(WeeklyStatsCarouselView.CardType.social)
-                            }
-                            .pickerStyle(.segmented)
+                            .padding(.horizontal, 16)
+                            .padding(.top, 4)
+                            .padding(.bottom, 12)
                         }
-                        .padding(.horizontal, 16)
-                        .padding(.top, 4)
-                        .padding(.bottom, 12)
 
                         if selectedCard == .radar {
                             SkillsRadarDetailPage(
@@ -682,9 +676,8 @@ struct WeeklyStatsDetailSheet: View {
                     }
                 }
                 .navigationTitle(
-                    selectedCard == .mood   ? "Mood Details"   :
-                    selectedCard == .radar  ? "Skills Radar"   :
-                                              "Social Details"
+                    selectedCard == .mood  ? "Mood Details" :
+                    selectedCard == .radar ? "Skills Radar" : "Social Details"
                 )
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbarColorScheme(.dark, for: .navigationBar)
@@ -779,8 +772,10 @@ private struct MoodDetailChart: View {
     let emojiType: String
 
     var body: some View {
-        let points = vm.stats?.mood_series ?? []
-        let hasData = points.contains { $0.score != nil }
+        let allPoints = vm.stats?.mood_series ?? []
+        let hasData = allPoints.contains { $0.score != nil }
+        // Only keep days with actual data — sequential x indices, no empty-day gaps
+        let points = allPoints.filter { $0.score != nil }
 
         if vm.isLoading {
             HStack {
@@ -805,6 +800,8 @@ private struct MoodDetailChart: View {
             .frame(height: 180)
         } else if #available(iOS 16.0, *) {
             let emojiSet = detailEmojiIndices(points: points)
+            // Step: at least 3 days apart, at most 10 labels total
+            let labelStep = max(3, Int(ceil(Double(max(points.count - 1, 1)) / 9.0)))
             Chart {
                 ForEach(Array(points.enumerated()), id: \.offset) { i, p in
                     if let score = p.score {
@@ -828,7 +825,9 @@ private struct MoodDetailChart: View {
                     }
             }
             .chartXAxis {
-                AxisMarks(values: .stride(by: 1)) { val in
+                let tickValues = Array(stride(from: 0, to: points.count, by: labelStep))
+                    + (points.count > 1 && (points.count - 1) % labelStep != 0 ? [points.count - 1] : [])
+                AxisMarks(values: tickValues) { val in
                     if let i = val.as(Int.self), i < points.count {
                         AxisValueLabel {
                             Text(shortDay(from: points[i].date))
@@ -912,12 +911,10 @@ private struct MoodDetailChart: View {
     }
 
     private func shortDay(from dateStr: String) -> String {
-        let days = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"]
         let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"
         guard let d = f.date(from: dateStr) else { return "" }
-        let w = Calendar.current.component(.weekday, from: d)
-        let idx = (w + 5) % 7
-        return days[min(idx, 6)]
+        let cal = Calendar.current
+        return "\(cal.component(.month, from: d))/\(cal.component(.day, from: d))"
     }
 }
 
