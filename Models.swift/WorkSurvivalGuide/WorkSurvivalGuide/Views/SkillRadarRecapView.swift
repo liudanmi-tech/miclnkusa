@@ -210,8 +210,12 @@ struct SkillRadarRecapView: View {
                 startDate: range.start, endDate: range.end
             ), let newRecap = data.recap {
                 await MainActor.run {
-                    withAnimation(.easeInOut(duration: 0.35)) { displayRecap = newRecap }
+                    appeared = false
+                    withAnimation(.easeInOut(duration: 0.25)) { displayRecap = newRecap }
                     isLoadingRange = false
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        appeared = true   // re-triggers CountingText + stagger animations
+                    }
                 }
             } else {
                 await MainActor.run { isLoadingRange = false }
