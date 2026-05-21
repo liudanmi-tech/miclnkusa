@@ -18,13 +18,40 @@ struct SkillsRadarCardView: View {
 
     var body: some View {
         ZStack {
+            // Background: deep blue-black gradient
             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(Color(white: 0.1))
+                .fill(
+                    LinearGradient(
+                        colors: [Color(hex: "#080C14"), Color(hex: "#0D0820")],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
                 .overlay(
                     RoundedRectangle(cornerRadius: 18, style: .continuous)
                         .stroke(Color.white.opacity(0.07), lineWidth: 0.5)
                 )
 
+            // Blurred Gemini image bg (when recap cover available)
+            if let urlStr = vm.recap?.page1.coverUrls.first {
+                ImageLoaderView(imageUrl: urlStr, imageBase64: nil, contentMode: .fill)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .blur(radius: 8)
+                    .opacity(0.55)
+                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            }
+
+            // Vignette overlay
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [Color.black.opacity(0.45), Color.black.opacity(0.65)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+
+            // Content
             VStack(alignment: .leading, spacing: 0) {
                 // Header
                 HStack {
@@ -43,57 +70,83 @@ struct SkillsRadarCardView: View {
                 }
                 .padding(.horizontal, 14)
                 .padding(.top, 14)
-                .padding(.bottom, 8)
+                .padding(.bottom, 10)
 
-                // Body
+                Spacer()
+
                 if vm.isLoading {
                     HStack { Spacer(); ProgressView().tint(.white.opacity(0.4)); Spacer() }
-                        .frame(height: 216)
-                } else if vm.scenes.isEmpty {
-                    HStack { Spacer()
-                        Text("No skill data this period")
-                            .font(.system(size: 12, design: .rounded))
-                            .foregroundColor(.white.opacity(0.3))
-                        Spacer() }
-                    .frame(height: 216)
-                } else {
-                    VStack(spacing: 8) {
-                        RadarChartView(
-                            axes: vm.scenes.map {
-                                RadarAxis(
-                                    id: $0.scene_id,
-                                    label: $0.scene_emoji + "\n" + $0.scene_label,
-                                    value: $0.normalizedValue,
-                                    dotColor: Color(hex: "#45B7D1")
-                                )
-                            },
-                            fillColor: Color(hex: "#45B7D1"),
-                            onTapAxisIndex: nil
-                        )
-                        .frame(height: 170)
+                } else if let p1 = vm.recap?.page1 {
+                    // Core stats row
+                    HStack(spacing: 0) {
+                        cardStat(value: "\(p1.totalSessions)", label: "时刻")
+                        Rectangle()
+                            .fill(Color.white.opacity(0.12))
+                            .frame(width: 0.5, height: 32)
+                        cardStat(value: "\(p1.totalScenes)", label: "场景")
+                        Rectangle()
+                            .fill(Color.white.opacity(0.12))
+                            .frame(width: 0.5, height: 32)
+                        cardStat(value: "\(p1.totalSkillsHit)", label: "技能")
+                    }
+                    .padding(.horizontal, 14)
 
-                        // Legend row
-                        HStack(spacing: 0) {
-                            ForEach(vm.scenes.prefix(5)) { scene in
-                                VStack(spacing: 2) {
-                                    Text(scene.scene_emoji).font(.system(size: 13))
-                                    Text("\(scene.session_count)x")
-                                        .font(.system(size: 9, weight: .semibold, design: .rounded))
-                                        .foregroundColor(.white.opacity(0.5))
-                                }
-                                .frame(maxWidth: .infinity)
-                            }
+                    // Scene pills
+                    HStack(spacing: 6) {
+                        ForEach(vm.scenes.prefix(3)) { scene in
+                            Text(scene.scene_emoji + " " + scene.scene_label)
+                                .font(.system(size: 10, weight: .medium, design: .rounded))
+                                .foregroundColor(.white.opacity(0.75))
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(Color.white.opacity(0.1))
+                                .clipShape(Capsule())
                         }
+                        Spacer()
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.top, 8)
+                } else {
+                    Text("记录技能，解锁故事")
+                        .font(.system(size: 12, design: .rounded))
+                        .foregroundColor(.white.opacity(0.3))
                         .padding(.horizontal, 14)
-                        .padding(.bottom, 12)
+                }
+
+                Spacer()
+
+                // 5 chapter dots
+                HStack(spacing: 5) {
+                    ForEach(0..<5, id: \.self) { i in
+                        Circle()
+                            .fill(vm.recap != nil
+                                  ? (i == 0 ? Color(hex: "#B8A4FF") : Color.white.opacity(0.2))
+                                  : Color.white.opacity(0.08))
+                            .frame(width: 5, height: 5)
                     }
                 }
+                .padding(.horizontal, 14)
+                .padding(.bottom, 14)
             }
         }
+        .frame(height: 240)
         .padding(.horizontal, 20)
         .task {
             await vm.load(startDate: startDate, endDate: endDate)
         }
+    }
+
+    @ViewBuilder
+    private func cardStat(value: String, label: String) -> some View {
+        VStack(spacing: 2) {
+            Text(value)
+                .font(.system(size: 28, weight: .bold, design: .rounded))
+                .foregroundColor(.white)
+            Text(label)
+                .font(.system(size: 10, design: .rounded))
+                .foregroundColor(.white.opacity(0.45))
+        }
+        .frame(maxWidth: .infinity)
     }
 }
 

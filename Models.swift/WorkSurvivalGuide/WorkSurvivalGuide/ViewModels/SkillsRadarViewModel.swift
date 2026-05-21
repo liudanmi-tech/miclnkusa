@@ -14,6 +14,7 @@ class SkillsRadarViewModel: ObservableObject {
 
     @Published var scenes: [RadarScene] = []
     @Published var highlights: [RadarHighlight] = []
+    @Published var recap: RecapData? = nil
     @Published var isLoading = false
     @Published var errorMessage: String? = nil
 
@@ -23,7 +24,7 @@ class SkillsRadarViewModel: ObservableObject {
 
     func load(startDate: String, endDate: String) async {
         let key = "\(startDate)_\(endDate)"
-        if loadedKey == key && !scenes.isEmpty { return }
+        if loadedKey == key && !scenes.isEmpty && recap != nil { return }
         isLoading = true
         errorMessage = nil
         do {
@@ -38,6 +39,7 @@ class SkillsRadarViewModel: ObservableObject {
             }
             scenes = normalized
             highlights = data.highlights
+            recap = data.recap
             if !normalized.isEmpty {
                 loadedKey = key
             }
@@ -65,6 +67,7 @@ class SkillsRadarViewModel: ObservableObject {
     func reset() {
         scenes = []
         highlights = []
+        recap = nil
         loadedKey = nil
         isLoading = false
         errorMessage = nil

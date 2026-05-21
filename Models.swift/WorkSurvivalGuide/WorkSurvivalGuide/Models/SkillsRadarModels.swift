@@ -53,6 +53,7 @@ struct SkillsRadarResponse: Codable {
 struct SkillsRadarData: Codable {
     let scenes: [RadarScene]
     let highlights: [RadarHighlight]
+    let recap: RecapData?
 }
 
 struct RadarScene: Codable, Identifiable {
@@ -149,5 +150,149 @@ struct RadarSkill: Codable, Identifiable {
         case "watch":     return "可关注"
         default:          return "稳定"
         }
+    }
+}
+
+// MARK: - Recap Models
+
+struct RecapData: Codable {
+    let page1: RecapPage1
+    let page2: RecapPage2?
+    let page3: RecapPage3?
+    let page4: RecapPage4?
+    let page5: RecapPage5?
+}
+
+struct RecapPage1: Codable {
+    let totalSessions: Int
+    let totalScenes: Int
+    let totalSkillsHit: Int
+    let topSceneEmoji: String
+    let topSceneLabel: String
+    let coverUrls: [String]
+    enum CodingKeys: String, CodingKey {
+        case totalSessions = "total_sessions"
+        case totalScenes = "total_scenes"
+        case totalSkillsHit = "total_skills_hit"
+        case topSceneEmoji = "top_scene_emoji"
+        case topSceneLabel = "top_scene_label"
+        case coverUrls = "cover_urls"
+    }
+}
+
+struct RecapPage2: Codable {
+    let sessionId: String
+    let sessionTitle: String
+    let sessionDate: String
+    let sceneLabel: String
+    let sceneEmoji: String
+    let coverImageUrl: String?
+    let skillLabels: [String]
+    enum CodingKeys: String, CodingKey {
+        case sessionId = "session_id"
+        case sessionTitle = "session_title"
+        case sessionDate = "session_date"
+        case sceneLabel = "scene_label"
+        case sceneEmoji = "scene_emoji"
+        case coverImageUrl = "cover_image_url"
+        case skillLabels = "skill_labels"
+    }
+}
+
+struct RecapMoodItem: Codable {
+    let date: String
+    let moodState: String
+    let moodEmoji: String
+    enum CodingKeys: String, CodingKey {
+        case date
+        case moodState = "mood_state"
+        case moodEmoji = "mood_emoji"
+    }
+}
+
+struct RecapPage3: Codable {
+    let dominantMood: String
+    let dominantMoodEmoji: String
+    let dominantMoodEmojiUrl: String?
+    let sighTotal: Int
+    let hahaTotal: Int
+    let moodJourney: [RecapMoodItem]
+    enum CodingKeys: String, CodingKey {
+        case dominantMood = "dominant_mood"
+        case dominantMoodEmoji = "dominant_mood_emoji"
+        case dominantMoodEmojiUrl = "dominant_mood_emoji_url"
+        case sighTotal = "sigh_total"
+        case hahaTotal = "haha_total"
+        case moodJourney = "mood_journey"
+    }
+}
+
+struct RecapTopSkill: Codable, Identifiable {
+    let skillId: String
+    let skillLabel: String
+    let hitCount: Int
+    let level: String?
+    let trend: String?
+    var id: String { skillId }
+    var trendSymbol: String {
+        trend == "improving" ? "↑" : trend == "watch" ? "↓" : "→"
+    }
+    enum CodingKeys: String, CodingKey {
+        case skillId = "skill_id"
+        case skillLabel = "skill_label"
+        case hitCount = "hit_count"
+        case level, trend
+    }
+}
+
+struct RecapStrategyQuote: Codable {
+    let text: String
+    let sessionDate: String
+    let sceneLabel: String
+    enum CodingKeys: String, CodingKey {
+        case text
+        case sessionDate = "session_date"
+        case sceneLabel = "scene_label"
+    }
+}
+
+struct RecapPage4: Codable {
+    let topSkills: [RecapTopSkill]
+    let strategyQuote: RecapStrategyQuote?
+    enum CodingKeys: String, CodingKey {
+        case topSkills = "top_skills"
+        case strategyQuote = "strategy_quote"
+    }
+}
+
+struct RecapSkillRef: Codable {
+    let skillId: String
+    let skillLabel: String
+    enum CodingKeys: String, CodingKey {
+        case skillId = "skill_id"
+        case skillLabel = "skill_label"
+    }
+}
+
+struct RecapRecommendation: Codable, Identifiable {
+    let skillId: String
+    let skillLabel: String
+    let reason: String
+    var id: String { skillId }
+    enum CodingKeys: String, CodingKey {
+        case skillId = "skill_id"
+        case skillLabel = "skill_label"
+        case reason
+    }
+}
+
+struct RecapPage5: Codable {
+    let improvingSkill: RecapSkillRef?
+    let watchSkill: RecapSkillRef?
+    let recommendations: [RecapRecommendation]
+    enum CodingKeys: String, CodingKey {
+        case improvingSkill = "improving_skill"
+        case watchSkill = "watch_skill"
+        case recommendations
     }
 }

@@ -601,6 +601,7 @@ struct WeeklyStatsDetailSheet: View {
     @State private var highlightedSessionId: String? = nil   // 来自图表点击
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var profileVM = ProfileViewModel.shared
+    @ObservedObject private var radarVM = SkillsRadarViewModel.shared
 
     private var selfEmojiType: String { profileVM.selfEmojiType }
 
@@ -617,75 +618,83 @@ struct WeeklyStatsDetailSheet: View {
     private var radarEndDate: String   { dateFormatter.string(from: vm.dateRange.1) }
 
     var body: some View {
-        NavigationStack {
-            ZStack {
-                Color.black.ignoresSafeArea()
-                VStack(spacing: 0) {
-                    // Range + card picker
-                    VStack(spacing: 10) {
-                        Picker("", selection: Binding(
-                            get: { vm.selectedRange },
-                            set: { vm.switchRange($0) }
-                        )) {
-                            ForEach(WeeklyStatsViewModel.TimeRange.allCases, id: \.self) { r in
-                                Text(r.rawValue).tag(r)
+        // When radar recap data is available, show the immersive full-screen experience directly
+        if selectedCard == .radar, let recap = radarVM.recap {
+            SkillRadarRecapView(recap: recap, periodLabel: vm.periodLabel)
+        } else {
+            NavigationStack {
+                ZStack {
+                    Color.black.ignoresSafeArea()
+                    VStack(spacing: 0) {
+                        // Range + card picker
+                        VStack(spacing: 10) {
+                            Picker("", selection: Binding(
+                                get: { vm.selectedRange },
+                                set: { vm.switchRange($0) }
+                            )) {
+                                ForEach(WeeklyStatsViewModel.TimeRange.allCases, id: \.self) { r in
+                                    Text(r.rawValue).tag(r)
+                                }
                             }
-                        }
-                        .pickerStyle(.segmented)
+                            .pickerStyle(.segmented)
 
-                        Picker("", selection: $selectedCard) {
-                            Text("Mood").tag(WeeklyStatsCarouselView.CardType.mood)
-                            Text("Radar").tag(WeeklyStatsCarouselView.CardType.radar)
-                            Text("Social").tag(WeeklyStatsCarouselView.CardType.social)
-                        }
-                        .pickerStyle(.segmented)
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.top, 4)
-                    .padding(.bottom, 12)
-
-                    if selectedCard == .radar {
-                        SkillsRadarDetailPage(
-                            startDate: radarStartDate,
-                            endDate: radarEndDate,
-                            periodLabel: vm.periodLabel
-                        )
-                    } else {
-                        // Chart area (fixed 180pt)
-                        Group {
-                            switch selectedCard {
-                            case .mood:
-                                MoodDetailChart(vm: vm, highlightedSessionId: $highlightedSessionId, emojiType: selfEmojiType)
-                            case .social:
-                                SocialDetailChart(vm: vm)
-                            case .radar:
-                                EmptyView()
+                            Picker("", selection: $selectedCard) {
+                                Text("Mood").tag(WeeklyStatsCarouselView.CardType.mood)
+                                Text("Radar").tag(WeeklyStatsCarouselView.CardType.radar)
+                                Text("Social").tag(WeeklyStatsCarouselView.CardType.social)
                             }
+                            .pickerStyle(.segmented)
                         }
-                        .frame(height: 180)
                         .padding(.horizontal, 16)
+                        .padding(.top, 4)
+                        .padding(.bottom, 12)
 
-                        Divider().background(Color.white.opacity(0.1)).padding(.top, 8)
+                        if selectedCard == .radar {
+                            SkillsRadarDetailPage(
+                                startDate: radarStartDate,
+                                endDate: radarEndDate,
+                                periodLabel: vm.periodLabel
+                            )
+                        } else {
+                            // Chart area (fixed 180pt)
+                            Group {
+                                switch selectedCard {
+                                case .mood:
+                                    MoodDetailChart(vm: vm, highlightedSessionId: $highlightedSessionId, emojiType: selfEmojiType)
+                                case .social:
+                                    SocialDetailChart(vm: vm)
+                                case .radar:
+                                    EmptyView()
+                                }
+                            }
+                            .frame(height: 180)
+                            .padding(.horizontal, 16)
 
-                        // Session list with scroll reader
-                        sessionList
+                            Divider().background(Color.white.opacity(0.1)).padding(.top, 8)
+
+                            // Session list with scroll reader
+                            sessionList
+                        }
+                    }
+                }
+                .navigationTitle(
+                    selectedCard == .mood   ? "Mood Details"   :
+                    selectedCard == .radar  ? "Skills Radar"   :
+                                              "Social Details"
+                )
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbarColorScheme(.dark, for: .navigationBar)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Close") { dismiss() }.foregroundColor(.white.opacity(0.7))
                     }
                 }
             }
-            .navigationTitle(
-                selectedCard == .mood   ? "Mood Details"   :
-                selectedCard == .radar  ? "Skills Radar"   :
-                                          "Social Details"
-            )
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbarColorScheme(.dark, for: .navigationBar)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Close") { dismiss() }.foregroundColor(.white.opacity(0.7))
-                }
+            .presentationDetents([.large])
+            .task(id: radarStartDate + radarEndDate) {
+                await radarVM.load(startDate: radarStartDate, endDate: radarEndDate)
             }
         }
-        .presentationDetents([.large])
     }
 
     // MARK: Session list

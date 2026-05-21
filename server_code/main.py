@@ -4931,16 +4931,22 @@ def _stats_thumbnail(sa, sid, api_base):
     if isinstance(vd, list) and vd:
         fv = vd[0] if isinstance(vd[0], dict) else {}
         iu = fv.get("image_url") if isinstance(fv, dict) else None
-        if iu and ("oss" in iu or "geminipicture" in iu.lower()):
-            return f"{api_base}/api/v1/images/{sid}/0"
+        if iu:
+            if "oss" in iu or "geminipicture" in iu.lower():
+                return f"{api_base}/api/v1/images/{sid}/0"
+            elif iu.startswith("http"):
+                return iu  # R2 或其他公共 URL 直接返回
     imgs = sa.scene_images
     if isinstance(imgs, list) and imgs:
         for si in imgs:
             su = (si if isinstance(si, dict) else {}).get("image_url")
-            if su and ("oss" in su or "geminipicture" in su.lower()):
-                m = re.search(r'/([0-9]+)\.png', su)
-                if m:
-                    return f"{api_base}/api/v1/images/{sid}/{m.group(1)}"
+            if su:
+                if "oss" in su or "geminipicture" in su.lower():
+                    m = re.search(r'/([0-9]+)\.png', su)
+                    if m:
+                        return f"{api_base}/api/v1/images/{sid}/{m.group(1)}"
+                elif su.startswith("http"):
+                    return su  # R2 或其他公共 URL 直接返回
     return None
 
 
@@ -5268,10 +5274,117 @@ async def get_skills_radar(
             if len(highlights_out) >= 5:
                 break
 
+        # ── Recap 聚合 ──────────────────────────────────────────────────────────────
+        _all_skills_flat = []  # 全局技能列表（跨所有场景）
+        _improving_skill = None
+        _watch_skill = None
+        _all_recs = []
+
+        for sc in scenes_out:
+            for sk in sc["skills"]:
+                _all_skills_flat.append(sk)
+                if sk["trend"] == "improving" and _improving_skill is None:
+                    _improving_skill = {"skill_id": sk["skill_id"], "skill_label": sk["skill_label"]}
+                if sk["trend"] == "watch" and _watch_skill is None:
+                    _watch_skill = {"skill_id": sk["skill_id"], "skill_label": sk["skill_label"]}
+            for r in sc["recommendations"]:
+                if not any(x["skill_id"] == r["skill_id"] for x in _all_recs):
+                    _all_recs.append(r)
+
+        _all_skills_flat.sort(key=lambda x: -x["hit_count"])
+        _top3_skills = _all_skills_flat[:3]
+
+        # Page 3: emotion aggregation from skill_cards
+        _mood_freq = {}
+        _sigh_total = 0
+        _haha_total = 0
+        _mood_journey = []
+        _dominant_emoji_url = None
+        _dominant_emoji_char = "😐"
+
+        for _, s, sa, ar in [item for entries in scene_sessions.values() for item in entries]:
+            if sa and isinstance(sa.skill_cards, list):
+                for card in sa.skill_cards:
+                    if isinstance(card, dict) and card.get("content_type") == "emotion":
+                        c = card.get("content", {})
+                        mood = c.get("mood_state", "平常心")
+                        _mood_freq[mood] = _mood_freq.get(mood, 0) + 1
+                        _sigh_total += c.get("sigh_count", 0)
+                        _haha_total += c.get("haha_count", 0)
+                        _mood_journey.append({
+                            "date": s.created_at.strftime("%b %d") if s.created_at else "",
+                            "mood_state": mood,
+                            "mood_emoji": c.get("mood_emoji", "😐"),
+                        })
+                        if c.get("mood_emoji_url"):
+                            _dominant_emoji_url = c["mood_emoji_url"]
+                            _dominant_emoji_char = c.get("mood_emoji", "😐")
+                        break
+
+        _dominant_mood = max(_mood_freq, key=_mood_freq.get) if _mood_freq else "平常心"
+
+        # Page 4: strategy quote — find longest strategy content
+        _strategy_quote = None
+        for _, s, sa, ar in [item for entries in scene_sessions.values() for item in entries]:
+            if sa and isinstance(sa.skill_cards, list):
+                for card in sa.skill_cards:
+                    if isinstance(card, dict) and card.get("content_type") == "strategy":
+                        strats = (card.get("content") or {}).get("strategies", [])
+                        for st in strats:
+                            txt = (st.get("content") or "").strip()
+                            if len(txt) > 40:
+                                cat = (sa.scene_category or "")
+                                _scene_lbl = _SCENE_META.get(cat, ("", cat))[1]
+                                _strategy_quote = {
+                                    "text": txt[:300],
+                                    "session_date": s.created_at.strftime("%b %d") if s.created_at else "",
+                                    "scene_label": _scene_lbl,
+                                }
+                                break
+                    if _strategy_quote:
+                        break
+            if _strategy_quote:
+                break
+
+        # cover_urls for page 1 mosaic (first 3 non-None thumbnails)
+        _cover_urls = [x[5] for x in highlight_candidates if x[5] is not None][:3]
+
+        # top_scene
+        _top_scene = scenes_out[0] if scenes_out else {}
+
+        recap = {
+            "page1": {
+                "total_sessions": len(session_rows),
+                "total_scenes": len(scenes_out),
+                "total_skills_hit": sum(len(session_skill_map.get(str(s.id), set())) for s, _, _ in session_rows),
+                "top_scene_emoji": _top_scene.get("scene_emoji", "💬"),
+                "top_scene_label": _top_scene.get("scene_label", ""),
+                "cover_urls": _cover_urls,
+            },
+            "page2": highlights_out[0] if highlights_out else None,
+            "page3": {
+                "dominant_mood": _dominant_mood,
+                "dominant_mood_emoji": _dominant_emoji_char,
+                "dominant_mood_emoji_url": _dominant_emoji_url,
+                "sigh_total": _sigh_total,
+                "haha_total": _haha_total,
+                "mood_journey": _mood_journey[-7:],
+            } if _mood_freq else None,
+            "page4": {
+                "top_skills": _top3_skills,
+                "strategy_quote": _strategy_quote,
+            } if _top3_skills else None,
+            "page5": {
+                "improving_skill": _improving_skill,
+                "watch_skill": _watch_skill,
+                "recommendations": _all_recs[:2],
+            },
+        }
+
         return APIResponse(
             code=200,
             message="success",
-            data={"scenes": scenes_out, "highlights": highlights_out},
+            data={"scenes": scenes_out, "highlights": highlights_out, "recap": recap},
             timestamp=datetime.now().isoformat()
         )
     except Exception as e:
