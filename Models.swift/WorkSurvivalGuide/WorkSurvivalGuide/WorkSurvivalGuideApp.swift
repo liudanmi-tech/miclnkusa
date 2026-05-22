@@ -76,7 +76,7 @@ struct TermsAgreementView: View {
     @State private var agreed = false
     @State private var pressed = false
 
-    private let termsURL = URL(string: "https://docs.qq.com/doc/DZHpOekhFY3RXdndw")!
+    private let termsURL = URL(string: "https://yohomie.art/terms.html")!
 
     private let prohibitions: [(String, String)] = [
         ("nosign",          "No sexually explicit or adult content"),
@@ -114,7 +114,7 @@ struct TermsAgreementView: View {
                         .foregroundColor(.white)
                         .padding(.horizontal, 24)
 
-                    Text("MicInk uses AI to analyze conversations and generate content. Please confirm you agree to the following:")
+                    Text("Chattoon uses AI to analyze conversations and generate content. Please confirm you agree to the following:")
                         .font(.system(size: 14, design: .rounded))
                         .foregroundColor(.white.opacity(0.6))
                         .lineSpacing(4)
@@ -177,7 +177,7 @@ struct TermsAgreementView: View {
                                         .foregroundColor(Color(hex: "#34D399"))
                                 }
                             }
-                            Text("I have read and agree to the MicInk AI Terms of Use, and will not use this app to generate prohibited content.")
+                            Text("I have read and agree to the Chattoon AI Terms of Use, and will not use this app to generate prohibited content.")
                                 .font(.system(size: 13, design: .rounded))
                                 .foregroundColor(.white.opacity(0.8))
                                 .fixedSize(horizontal: false, vertical: true)

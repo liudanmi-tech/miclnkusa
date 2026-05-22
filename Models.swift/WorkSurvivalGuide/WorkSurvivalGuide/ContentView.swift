@@ -15,6 +15,7 @@ struct ContentView: View {
     @State private var showFilePicker = false
     @State private var showTextInput = false
     @AppStorage("onboarding_completed") private var onboardingCompleted = false
+
     var body: some View {
         Group {
             if authManager.isLoggedIn {
@@ -70,6 +71,10 @@ struct ContentView: View {
                             BottomNavView(selectedTab: $selectedTab)
                         }
 
+                        // 新手引导聚光灯层
+                        TourOverlayView()
+                            .zIndex(9998)
+
                         // Debug 悬浮面板（DEBUG 或 INTERNALTEST 构建可见）
                         #if DEBUG || INTERNALTEST
                         DebugPanelView()
@@ -83,12 +88,36 @@ struct ContentView: View {
                 .fullScreenCover(isPresented: .constant(!onboardingCompleted)) {
                     OnboardingView()
                 }
+                .onChange(of: onboardingCompleted) { completed in
+                    if completed {
+                        selectedTab = .profile
+                        TourManager.shared.startMainTour()
+                    }
+                }
+                .onChange(of: selectedTab) { tab in
+                    if tab == .fragments && TourManager.shared.currentStep == .momentsTab {
+                        TourManager.shared.advance()
+                    }
+                }
             } else {
                 LoginView()
             }
         }
         .onAppear {
             authManager.checkLoginStatus()
+            // AuthManager.init() 已在启动时同步设置 isLoggedIn，onChange 不会触发
+            // 所以在 onAppear 里直接判断
+            if authManager.isLoggedIn && !TourManager.shared.mainTourCompleted {
+                selectedTab = .profile
+                TourManager.shared.startMainTour()
+            }
+        }
+        .onChange(of: authManager.isLoggedIn) { isLoggedIn in
+            // 处理从 LoginView 刚登录完成的情况
+            if isLoggedIn && !TourManager.shared.mainTourCompleted {
+                selectedTab = .profile
+                TourManager.shared.startMainTour()
+            }
         }
         .fileImporter(
             isPresented: $showFilePicker,
@@ -107,8 +136,10 @@ struct ContentView: View {
         .sheet(isPresented: $showTextInput) {
             TextInputView()
         }
-        .sheet(isPresented: $recordingViewModel.showPaywall) {
-            SubscriptionView()
+        .alert("Monthly Limit Reached", isPresented: $recordingViewModel.showPaywall) {
+            Button("OK", role: .cancel) { recordingViewModel.showPaywall = false }
+        } message: {
+            Text("You've used all your recordings for this month. Your quota resets on the 1st of next month.")
         }
         .alert("Upload Failed", isPresented: Binding(
             get: { recordingViewModel.uploadError != nil },

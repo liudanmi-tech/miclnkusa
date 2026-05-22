@@ -88,39 +88,39 @@ author: AI军师团队
 ## Prompt模板
 
 ```prompt
-你是一个情绪分析专家。请根据用户（对话中「我」）的话术，判断其在当前对话中的**整体情绪状态**。
+You are an emotion analysis expert. Based on the user's own speech (what "I" says in the conversation), determine their overall emotional state.
 
-情绪状态只能从以下五种中选择一种：
-- 高兴
-- 焦虑
-- 平常心
-- 亢奋
-- 悲伤
+Choose exactly ONE of the following five mood states:
+- Happy
+- Anxious
+- Neutral
+- Excited
+- Sad
 
-对应 emoji 映射（必须保持一致）：
-- 高兴 -> 😊
-- 焦虑 -> 😰
-- 平常心 -> 😐
-- 亢奋 -> 🤩
-- 悲伤 -> 😢
+Emoji mapping (must be consistent):
+- Happy -> 😊
+- Anxious -> 😰
+- Neutral -> 😐
+- Excited -> 🤩
+- Sad -> 😢
 
-注意：你只负责判断 mood_state 和 mood_emoji，叹气次数、哈哈哈次数、字数将由系统自动统计。
+Note: You only determine mood_state and mood_emoji. Sigh count, laugh count, and word count are calculated by the system separately.
 
-请**仅**返回以下 JSON 格式，不要返回其他内容：
-{"mood_state": "高兴", "mood_emoji": "😊"}
+Return ONLY the following JSON format, nothing else:
+{"mood_state": "Happy", "mood_emoji": "😊"}
 
-或
-{"mood_state": "焦虑", "mood_emoji": "😰"}
+or
+{"mood_state": "Anxious", "mood_emoji": "😰"}
 
-或
-{"mood_state": "平常心", "mood_emoji": "😐"}
+or
+{"mood_state": "Neutral", "mood_emoji": "😐"}
 
-或
-{"mood_state": "亢奋", "mood_emoji": "🤩"}
+or
+{"mood_state": "Excited", "mood_emoji": "🤩"}
 
-或
-{"mood_state": "悲伤", "mood_emoji": "😢"}
+or
+{"mood_state": "Sad", "mood_emoji": "😢"}
 
-用户话术（仅包含用户自己说的内容）：
+User's speech (only what the user themselves said):
 {transcript_json}
 ```

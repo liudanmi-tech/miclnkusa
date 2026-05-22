@@ -156,7 +156,12 @@ struct TaskListView: View {
                 
                 Spacer()
                 
-                Button(action: { showStylePicker = true }) {
+                Button(action: {
+                    showStylePicker = true
+                    if TourManager.shared.currentStep == .styleButton {
+                        TourManager.shared.dismissExtraTip()
+                    }
+                }) {
                     HStack(spacing: 4) {
                         Image(systemName: "paintpalette.fill")
                             .font(.system(size: 16, weight: .medium))
@@ -171,6 +176,7 @@ struct TaskListView: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .tourHighlight(.styleButton)
             }
             .padding(.horizontal, 24)
             .padding(.vertical, 8)  // 顶部高度约 52pt（8+36+8，不含状态栏）
@@ -192,6 +198,13 @@ struct TaskListView: View {
             // hasLoaded=true 时跳过（server 已成功响应过，数据是最新的）
             if !viewModel.hasLoaded && !viewModel.isLoading {
                 viewModel.loadTasks()
+            }
+            // 从 Detail 返回后触发 Style 提示
+            if TourManager.shared.hasVisitedDetail {
+                TourManager.shared.hasVisitedDetail = false
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    TourManager.shared.tryShowStyleTip()
+                }
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("TaskUploaded"))) { _ in

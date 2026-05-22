@@ -409,8 +409,11 @@ struct ProfileEditView: View {
                                     return
                                 }
                             } else {
-                                if count >= 2 {
-                                    showSubscriptionView = true
+                                if count >= 30 {
+                                    showProLimitToast = true
+                                    DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+                                        showProLimitToast = false
+                                    }
                                     return
                                 }
                             }

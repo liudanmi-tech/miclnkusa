@@ -120,4 +120,16 @@ final class ImageCacheManager {
               let data = image.pngData() else { return }
         try? data.write(to: path)
     }
+
+    // MARK: - 清除缩略图缓存
+
+    /// 清除所有风格缩略图的磁盘和内存缓存（用于强制刷新）
+    func clearThumbnailCache() {
+        guard let dir = diskCacheDir else { return }
+        memoryCache.removeAllObjects()
+        let files = (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? []
+        for file in files {
+            try? FileManager.default.removeItem(at: file)
+        }
+    }
 }

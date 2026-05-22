@@ -51,10 +51,10 @@ class AppConfig {
     }
     
     /// GCP 美区节点（读写统一）
-    var readBaseURL: String { "http://34.74.150.225/api/v1" }
+    var readBaseURL: String { "https://api.yohomie.art/api/v1" }
 
     /// GCP 美区节点（读写统一）
-    var writeBaseURL: String { "http://34.74.150.225/api/v1" }
+    var writeBaseURL: String { "https://api.yohomie.art/api/v1" }
     
     private init() {}
     

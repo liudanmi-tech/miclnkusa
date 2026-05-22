@@ -1,6 +1,6 @@
 # Terms of Service
 
-**MicLnk**
+**Chattoon**
 **Effective Date: May 5, 2025**
 **Last Updated: May 5, 2025**
 
@@ -8,15 +8,15 @@
 
 ## 1. Acceptance of Terms
 
-By downloading, installing, or using MicLnk (the "App"), you agree to be bound by these Terms of Service ("Terms"). If you do not agree to these Terms, do not use the App.
+By downloading, installing, or using Chattoon (the "App"), you agree to be bound by these Terms of Service ("Terms"). If you do not agree to these Terms, do not use the App.
 
-These Terms constitute a legally binding agreement between you and MicLnk ("we," "our," or "us"). We reserve the right to update these Terms at any time. Your continued use of the App following any changes constitutes acceptance of the revised Terms.
+These Terms constitute a legally binding agreement between you and Chattoon ("we," "our," or "us"). We reserve the right to update these Terms at any time. Your continued use of the App following any changes constitutes acceptance of the revised Terms.
 
 ---
 
 ## 2. Description of Service
 
-MicLnk is a personal reflection and self-development app that allows you to:
+Chattoon is a personal reflection and self-development app that allows you to:
 
 - Record your voice to capture daily experiences, workplace situations, and personal moments
 - Receive AI-generated scene images inspired by your recordings
@@ -30,7 +30,7 @@ The App uses artificial intelligence, including Google's Gemini models, to analy
 
 ## 3. Eligibility
 
-You must be at least **13 years old** to use MicLnk. By using the App, you represent and warrant that you meet this age requirement.
+You must be at least **13 years old** to use Chattoon. By using the App, you represent and warrant that you meet this age requirement.
 
 If you are between 13 and 17 years of age, you represent that your parent or legal guardian has reviewed and agreed to these Terms on your behalf.
 
@@ -41,7 +41,7 @@ We reserve the right to terminate accounts of users who we discover are under 13
 ## 4. User Accounts
 
 ### 4.1 Account Creation
-You must create an account to use MicLnk. You agree to provide accurate and complete information when creating your account.
+You must create an account to use Chattoon. You agree to provide accurate and complete information when creating your account.
 
 ### 4.2 Account Security
 You are responsible for maintaining the confidentiality of your account credentials and for all activities that occur under your account. Notify us immediately if you suspect unauthorized access.
@@ -53,7 +53,7 @@ Each user may maintain only one account. Creating multiple accounts to circumven
 
 ## 5. Acceptable Use
 
-You agree to use MicLnk only for lawful purposes and in accordance with these Terms. You agree **not** to:
+You agree to use Chattoon only for lawful purposes and in accordance with these Terms. You agree **not** to:
 
 - Record others without their knowledge or consent, in violation of applicable law
 - Use the App for any illegal purpose or in violation of any local, state, national, or international law
@@ -65,14 +65,14 @@ You agree to use MicLnk only for lawful purposes and in accordance with these Te
 - Interfere with or disrupt the integrity or performance of the App or its servers
 
 ### Important Note on Recording Consent
-Many U.S. states and other jurisdictions have laws requiring the consent of all parties to a conversation before it may be recorded. **You are solely responsible for ensuring that your use of MicLnk complies with all applicable recording consent laws in your jurisdiction.** MicLnk is designed as a personal reflection tool — we encourage you to use it to record your own thoughts and experiences rather than the conversations of others.
+Many U.S. states and other jurisdictions have laws requiring the consent of all parties to a conversation before it may be recorded. **You are solely responsible for ensuring that your use of Chattoon complies with all applicable recording consent laws in your jurisdiction.** Chattoon is designed as a personal reflection tool — we encourage you to use it to record your own thoughts and experiences rather than the conversations of others.
 
 ---
 
 ## 6. AI-Generated Content
 
 ### 6.1 Nature of AI Content
-MicLnk uses artificial intelligence to generate images and analysis based on your recordings. AI-generated content is created algorithmically and may not always be accurate, appropriate, or reflect real events.
+Chattoon uses artificial intelligence to generate images and analysis based on your recordings. AI-generated content is created algorithmically and may not always be accurate, appropriate, or reflect real events.
 
 ### 6.2 Content Ownership
 Subject to your compliance with these Terms, you retain ownership of the original recordings you create. AI-generated content produced from your recordings is provided to you for personal use.
@@ -88,7 +88,7 @@ You are responsible for how you use and interpret AI-generated content. We are n
 ## 7. Intellectual Property
 
 ### 7.1 Our Rights
-The App, its design, features, functionality, and underlying technology are owned by MicLnk and are protected by copyright, trademark, and other intellectual property laws. You may not copy, modify, distribute, or create derivative works based on the App without our prior written consent.
+The App, its design, features, functionality, and underlying technology are owned by Chattoon and are protected by copyright, trademark, and other intellectual property laws. You may not copy, modify, distribute, or create derivative works based on the App without our prior written consent.
 
 ### 7.2 Your Content
 You retain ownership of recordings and other content you create. By using the App, you grant us a limited, non-exclusive, royalty-free license to process, store, and use your content solely to provide the services described in these Terms and our Privacy Policy.
@@ -100,13 +100,13 @@ If you provide us with feedback or suggestions about the App, we may use that fe
 
 ## 8. Third-Party Services
 
-MicLnk integrates with third-party services, including Google's Gemini API and Google Cloud. Your use of these services through MicLnk is subject to their respective terms of service and privacy policies. We are not responsible for the practices of third-party service providers.
+Chattoon integrates with third-party services, including Google's Gemini API and Google Cloud. Your use of these services through Chattoon is subject to their respective terms of service and privacy policies. We are not responsible for the practices of third-party service providers.
 
 ---
 
 ## 9. Privacy
 
-Your use of MicLnk is also governed by our [Privacy Policy](http://47.79.254.213/privacy), which is incorporated into these Terms by reference. Please review our Privacy Policy to understand our data practices.
+Your use of Chattoon is also governed by our [Privacy Policy](http://47.79.254.213/privacy), which is incorporated into these Terms by reference. Please review our Privacy Policy to understand our data practices.
 
 ---
 
@@ -124,7 +124,7 @@ We do not warrant that:
 
 ## 11. Limitation of Liability
 
-TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, MICLNK AND ITS OFFICERS, DIRECTORS, EMPLOYEES, AND AGENTS SHALL NOT BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, OR PUNITIVE DAMAGES, INCLUDING BUT NOT LIMITED TO LOSS OF PROFITS, DATA, GOODWILL, OR OTHER INTANGIBLE LOSSES, ARISING OUT OF OR RELATED TO YOUR USE OF OR INABILITY TO USE THE APP.
+TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, CHATTOON AND ITS OFFICERS, DIRECTORS, EMPLOYEES, AND AGENTS SHALL NOT BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, OR PUNITIVE DAMAGES, INCLUDING BUT NOT LIMITED TO LOSS OF PROFITS, DATA, GOODWILL, OR OTHER INTANGIBLE LOSSES, ARISING OUT OF OR RELATED TO YOUR USE OF OR INABILITY TO USE THE APP.
 
 IN NO EVENT WILL OUR TOTAL LIABILITY TO YOU EXCEED THE GREATER OF (A) THE AMOUNT YOU PAID FOR THE APP IN THE 12 MONTHS PRECEDING THE CLAIM OR (B) $100 USD.
 
@@ -134,7 +134,7 @@ SOME JURISDICTIONS DO NOT ALLOW THE EXCLUSION OF CERTAIN WARRANTIES OR THE LIMIT
 
 ## 12. Indemnification
 
-You agree to indemnify, defend, and hold harmless MicLnk and its officers, directors, employees, and agents from and against any claims, liabilities, damages, losses, and expenses, including reasonable attorneys' fees, arising out of or in any way connected with: (a) your access to or use of the App; (b) your violation of these Terms; (c) your violation of any third-party rights, including privacy or intellectual property rights; or (d) your violation of any applicable law.
+You agree to indemnify, defend, and hold harmless Chattoon and its officers, directors, employees, and agents from and against any claims, liabilities, damages, losses, and expenses, including reasonable attorneys' fees, arising out of or in any way connected with: (a) your access to or use of the App; (b) your violation of these Terms; (c) your violation of any third-party rights, including privacy or intellectual property rights; or (d) your violation of any applicable law.
 
 ---
 
@@ -163,13 +163,13 @@ Any dispute arising from or relating to these Terms or the App that cannot be re
 
 ## 15. Apple App Store Additional Terms
 
-If you downloaded MicLnk from the Apple App Store, the following additional terms apply:
+If you downloaded Chattoon from the Apple App Store, the following additional terms apply:
 
-- These Terms are between you and MicLnk, not Apple. Apple is not responsible for the App or its content.
+- These Terms are between you and Chattoon, not Apple. Apple is not responsible for the App or its content.
 - Apple has no obligation to provide maintenance or support for the App.
 - In the event of any failure of the App to conform to applicable warranties, you may notify Apple, and Apple will refund the purchase price (if any). To the maximum extent permitted by law, Apple has no other warranty obligation.
 - Apple is not responsible for addressing any claims by you or any third party relating to the App.
-- If a third party claims the App infringes intellectual property rights, MicLnk (not Apple) will be responsible for investigating and defending against such claims.
+- If a third party claims the App infringes intellectual property rights, Chattoon (not Apple) will be responsible for investigating and defending against such claims.
 - Apple and its subsidiaries are third-party beneficiaries of these Terms and may enforce them against you.
 
 ---
@@ -184,8 +184,8 @@ We may modify these Terms at any time. We will provide notice of material change
 
 If you have questions about these Terms of Service, please contact us at:
 
-**Email:** legal@miclnk.com
-**App:** MicLnk — available on the Apple App Store
+**Email:** legal@chattoon.com
+**App:** Chattoon — available on the Apple App Store
 
 ---
 

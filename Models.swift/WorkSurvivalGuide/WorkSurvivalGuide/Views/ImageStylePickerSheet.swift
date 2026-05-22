@@ -65,59 +65,50 @@ private struct StyleCard: View {
     let isConfirming: Bool
     let onSelect: () -> Void
 
-    @GestureState private var isPressed = false
-
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            StyleThumbnailView(styleId: style.id, accentColor: style.accentColor)
-                .aspectRatio(4/3, contentMode: .fit)
-                .clipShape(RoundedRectangle(cornerRadius: 10))
-                .overlay(
-                    // 选中确认蒙层：深色底 + 白色 ✓
-                    Group {
-                        if isConfirming {
-                            ZStack {
-                                RoundedRectangle(cornerRadius: 10)
-                                    .fill(Color.black.opacity(0.45))
-                                Image(systemName: "checkmark.circle.fill")
-                                    .font(.system(size: 38, weight: .semibold))
-                                    .foregroundColor(.white)
-                                    .shadow(color: .black.opacity(0.3), radius: 6, x: 0, y: 2)
+        Button(action: onSelect) {
+            VStack(alignment: .leading, spacing: 8) {
+                StyleThumbnailView(styleId: style.id, accentColor: style.accentColor)
+                    .aspectRatio(4/3, contentMode: .fit)
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .overlay(
+                        Group {
+                            if isConfirming {
+                                ZStack {
+                                    RoundedRectangle(cornerRadius: 10)
+                                        .fill(Color.black.opacity(0.45))
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .font(.system(size: 38, weight: .semibold))
+                                        .foregroundColor(.white)
+                                        .shadow(color: .black.opacity(0.3), radius: 6, x: 0, y: 2)
+                                }
+                                .transition(.opacity.combined(with: .scale(scale: 0.75)))
                             }
-                            .transition(.opacity.combined(with: .scale(scale: 0.75)))
                         }
-                    }
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 10)
-                        .stroke(isConfirming ? Color.blue : (isSelected ? Color.blue : Color.clear),
-                                lineWidth: isConfirming ? 3 : 3)
-                )
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10)
+                            .stroke(isConfirming || isSelected ? Color.blue : Color.clear, lineWidth: 3)
+                    )
 
-            Text(style.nameEn)
-                .font(.system(size: 14, weight: .medium))
-                .foregroundColor(AppColors.primaryText)
-                .lineLimit(1)
+                Text(style.nameEn)
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundColor(AppColors.primaryText)
+                    .lineLimit(1)
+            }
+            .padding(8)
+            .background(Color.white.opacity(0.05))
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(isConfirming ? Color.blue : (isSelected ? Color.blue.opacity(0.5) : Color.clear),
+                            lineWidth: isConfirming ? 2 : 1)
+            )
+            .scaleEffect(isConfirming ? 1.06 : 1.0)
+            .animation(.spring(response: 0.3, dampingFraction: 0.6), value: isConfirming)
+            .contentShape(Rectangle())
         }
-        .padding(8)
-        .background(Color.white.opacity(0.05))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(isConfirming ? Color.blue : (isSelected ? Color.blue.opacity(0.5) : Color.clear),
-                        lineWidth: isConfirming ? 2 : 1)
-        )
-        .scaleEffect(isConfirming ? 1.06 : (isPressed ? 0.96 : 1.0))
-        .animation(.easeInOut(duration: 0.1), value: isPressed)
-        .contentShape(Rectangle())
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 0)
-                .updating($isPressed) { _, state, _ in state = true }
-                .onEnded { value in
-                    let distance = hypot(value.translation.width, value.translation.height)
-                    if distance < 10 { onSelect() }
-                }
-        )
+        .buttonStyle(.plain)
     }
 }
 
@@ -131,7 +122,7 @@ private struct StyleThumbnailView: View {
     private var thumbnailURL: String {
         let base = NetworkManager.shared.getBaseURL()
         let apiBase = base.hasSuffix("/api/v1") ? String(base.dropLast(7)) : base
-        return "\(apiBase)/api/v1/style-thumbnails/\(styleId)?v=2"
+        return "\(apiBase)/api/v1/style-thumbnails/\(styleId)?v=3"
     }
 
     var body: some View {

@@ -65,6 +65,7 @@ struct BottomNavView: View {
                         }
                     )
                     .frame(maxWidth: .infinity)
+                    .tourHighlight(tab == .fragments ? .momentsTab : nil)
                 }
             }
             .padding(.leading, 23.99) // 根据 Figma: Padding Left 23.99

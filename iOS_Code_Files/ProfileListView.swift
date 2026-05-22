@@ -33,15 +33,22 @@ struct ProfileListView: View {
                 } else if viewModel.profiles.isEmpty {
                     Spacer()
                     VStack(spacing: 16) {
-                        Image(systemName: "person.circle.fill")
-                            .font(.system(size: 50))
-                            .foregroundColor(AppColors.secondaryText)
-                        Text("No profiles yet")
+                        Image(systemName: "person.badge.plus")
+                            .font(.system(size: 52))
+                            .foregroundColor(AppColors.secondaryText.opacity(0.5))
+                        Text("还没有档案")
                             .font(AppFonts.cardTitle)
-                            .foregroundColor(AppColors.secondaryText)
-                        Text("Tap the button above to create a profile")
+                            .foregroundColor(AppColors.primaryText)
+                        Text("先创建一个档案\n记录你的工作对象背景信息")
                             .font(AppFonts.time)
                             .foregroundColor(AppColors.secondaryText)
+                            .multilineTextAlignment(.center)
+                        Button("创建第一个档案") { showingCreateProfile = true }
+                            .font(.system(size: 14, weight: .semibold, design: .rounded))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 20)
+                            .frame(height: 40)
+                            .background(Capsule().fill(Color.blue))
                     }
                     Spacer()
                 } else {

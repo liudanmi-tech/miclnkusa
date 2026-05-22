@@ -11,12 +11,14 @@ struct ProfileListView: View {
     @ObservedObject private var viewModel = ProfileViewModel.shared
     @ObservedObject private var subscriptionManager = SubscriptionManager.shared
     @State private var showingCreateProfile = false
+    @State private var profileCountBeforeSheet = 0
     @State private var selectedProfile: Profile?
     @State private var showSettingsSheet = false
     @State private var showSubscription = false
     @AppStorage("contentFilterEnabled") private var contentFilterEnabled = true
     @State private var showEmojiTypePicker = false
     @State private var selfEmojiType: String = "self"
+    @State private var showAIInfo = false
     
     var body: some View {
         ZStack {
@@ -25,7 +27,10 @@ struct ProfileListView: View {
             VStack(spacing: 0) {
                 // Header区域
                 ProfileHeaderView(
-                    onAddTap: { showingCreateProfile = true },
+                    onAddTap: {
+                        profileCountBeforeSheet = viewModel.profiles.count
+                        showingCreateProfile = true
+                    },
                     onSettingsTap: { showSettingsSheet = true }
                 )
                 
@@ -38,15 +43,25 @@ struct ProfileListView: View {
                 } else if viewModel.profiles.isEmpty {
                     Spacer()
                     VStack(spacing: 16) {
-                        Image(systemName: "person.circle.fill")
-                            .font(.system(size: 50))
-                            .foregroundColor(AppColors.secondaryText)
-                        Text("No profiles yet")
+                        Image(systemName: "person.badge.plus")
+                            .font(.system(size: 52))
+                            .foregroundColor(AppColors.secondaryText.opacity(0.5))
+                        Text("还没有档案")
                             .font(AppFonts.cardTitle)
-                            .foregroundColor(AppColors.secondaryText)
-                        Text("Tap the button above to create a profile")
+                            .foregroundColor(AppColors.primaryText)
+                        Text("先创建一个档案\n记录你的工作对象背景信息")
                             .font(AppFonts.time)
                             .foregroundColor(AppColors.secondaryText)
+                            .multilineTextAlignment(.center)
+                        Button("创建第一个档案") {
+                            profileCountBeforeSheet = viewModel.profiles.count
+                            showingCreateProfile = true
+                        }
+                            .font(.system(size: 14, weight: .semibold, design: .rounded))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 20)
+                            .frame(height: 40)
+                            .background(Capsule().fill(Color.blue))
                     }
                     Spacer()
                 } else {
@@ -92,7 +107,13 @@ struct ProfileListView: View {
                 viewModel.loadProfiles()
             }
         }
-        .sheet(isPresented: $showingCreateProfile) {
+        .sheet(isPresented: $showingCreateProfile, onDismiss: {
+            // 引导第1步：sheet 关闭且档案数增加 → 确认用户创建了新档案 → 推进到第2步
+            if TourManager.shared.currentStep == .profileAddButton
+               && viewModel.profiles.count > profileCountBeforeSheet {
+                TourManager.shared.advance()
+            }
+        }) {
             ProfileEditView(profile: nil)
         }
         .sheet(item: $selectedProfile) { profile in
@@ -105,33 +126,7 @@ struct ProfileListView: View {
                     .foregroundColor(AppColors.primaryText)
                     .padding(.top, 24)
 
-                // Pro 订阅入口
-                Button(action: {
-                    showSettingsSheet = false
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                        showSubscription = true
-                    }
-                }) {
-                    HStack(spacing: 10) {
-                        Image(systemName: subscriptionManager.isPro ? "crown.fill" : "crown")
-                            .foregroundColor(Color(hex: "#F59E0B"))
-                        Text(subscriptionManager.isPro ? "Pro Member" : "Upgrade to Pro")
-                            .font(AppFonts.cardTitle)
-                            .foregroundColor(AppColors.primaryText)
-                        Spacer()
-                        if !subscriptionManager.isPro {
-                            Image(systemName: "chevron.right")
-                                .foregroundColor(AppColors.secondaryText)
-                                .font(.system(size: 14))
-                        }
-                    }
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 14)
-                    .background(Color.white.opacity(0.05))
-                    .cornerRadius(10)
-                }
-                .padding(.horizontal, 24)
-                .disabled(subscriptionManager.isPro)
+                // Pro 订阅入口（暂时隐藏，后续版本开放）
 
                 // Content Filter 开关
                 HStack(spacing: 10) {
@@ -190,7 +185,7 @@ struct ProfileListView: View {
                 .padding(.horizontal, 24)
 
                 // Privacy Policy
-                Link(destination: URL(string: "https://docs.qq.com/doc/DZHBUZm9CT1haTndI")!) {
+                Link(destination: URL(string: "https://yohomie.art/privacy.html")!) {
                     HStack(spacing: 10) {
                         Image(systemName: "hand.raised.fill")
                             .foregroundColor(AppColors.secondaryText)
@@ -210,7 +205,7 @@ struct ProfileListView: View {
                 .padding(.horizontal, 24)
 
                 // Terms of Service
-                Link(destination: URL(string: "https://docs.qq.com/doc/DZExyTFd6VGFtTG13")!) {
+                Link(destination: URL(string: "https://yohomie.art/terms.html")!) {
                     HStack(spacing: 10) {
                         Image(systemName: "doc.text.fill")
                             .foregroundColor(AppColors.secondaryText)
@@ -228,6 +223,37 @@ struct ProfileListView: View {
                     .cornerRadius(10)
                 }
                 .padding(.horizontal, 24)
+
+                // About AI
+                Button(action: { showAIInfo = true }) {
+                    HStack(spacing: 10) {
+                        Image(systemName: "sparkles")
+                            .foregroundColor(Color(hex: "#A78BFA"))
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("About AI Content")
+                                .font(AppFonts.cardTitle)
+                                .foregroundColor(AppColors.primaryText)
+                            Text("Powered by Google Gemini")
+                                .font(.system(size: 11, design: .rounded))
+                                .foregroundColor(AppColors.secondaryText)
+                        }
+                        Spacer()
+                        Image(systemName: "info.circle")
+                            .foregroundColor(AppColors.secondaryText)
+                            .font(.system(size: 14))
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 12)
+                    .background(Color.white.opacity(0.05))
+                    .cornerRadius(10)
+                }
+                .buttonStyle(.plain)
+                .padding(.horizontal, 24)
+                .alert("About AI Content", isPresented: $showAIInfo) {
+                    Button("OK", role: .cancel) { }
+                } message: {
+                    Text("Chattoon uses Google Gemini AI to generate images and insights from your recordings. AI-generated content is for personal reflection only and is not a substitute for professional advice.")
+                }
 
                 Button("Sign Out") {
                     showSettingsSheet = false
@@ -306,12 +332,13 @@ struct ProfileHeaderView: View {
                         Circle()
                             .fill(Color.white.opacity(0.2))
                             .frame(width: 39.98, height: 39.98)
-                        
+
                         Image(systemName: "plus")
                             .font(.system(size: 19.99, weight: .bold))
                             .foregroundColor(AppColors.headerText)
                     }
                 }
+                .tourHighlight(.profileAddButton)
             }
         }
         .padding(.horizontal, 23.990530014038086) // 根据Figma: padding horizontal 23.99px

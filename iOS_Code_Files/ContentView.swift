@@ -14,6 +14,11 @@ struct ContentView: View {
     @StateObject private var recordingViewModel = RecordingViewModel()
     @State private var showFilePicker = false
     @AppStorage("onboarding_completed") private var onboardingCompleted = false
+    @AppStorage("walkthrough_completed") private var walkthroughCompleted = false
+
+    private var showOnboardingCover: Bool {
+        !onboardingCompleted || !walkthroughCompleted
+    }
 
     var body: some View {
         Group {
@@ -72,8 +77,15 @@ struct ContentView: View {
                     .ignoresSafeArea(edges: .bottom)
                     .navigationBarHidden(true)
                 }
-                .fullScreenCover(isPresented: .constant(!onboardingCompleted)) {
-                    OnboardingView()
+                .fullScreenCover(isPresented: .constant(showOnboardingCover)) {
+                    if !onboardingCompleted {
+                        OnboardingView()
+                    } else {
+                        WalkthroughView()
+                    }
+                }
+                .onChange(of: walkthroughCompleted) { completed in
+                    if completed { selectedTab = .profile }
                 }
             } else {
                 LoginView()

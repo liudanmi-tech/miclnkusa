@@ -21,7 +21,7 @@ class SubscriptionManager: ObservableObject {
     @Published var isPro: Bool = false
     @Published var isLoading: Bool = false
     @Published var purchaseError: String? = nil
-    @Published var monthlyLimit: Int = 3
+    @Published var monthlyLimit: Int = 20
     @Published var usedCount: Int = 0
 
     private var transactionListenerTask: Task<Void, Error>?
@@ -32,7 +32,7 @@ class SubscriptionManager: ObservableObject {
             isPro = tier == "pro"
         }
         let cachedLimit = UserDefaults.standard.integer(forKey: "sub_monthly_limit")
-        monthlyLimit = cachedLimit > 0 ? cachedLimit : 3
+        monthlyLimit = cachedLimit > 0 ? cachedLimit : 20
 
         // 后台监听 StoreKit 事务更新
         transactionListenerTask = listenForTransactions()

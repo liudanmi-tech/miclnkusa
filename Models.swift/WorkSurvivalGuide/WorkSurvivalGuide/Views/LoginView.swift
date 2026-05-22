@@ -28,7 +28,7 @@ struct LoginView: View {
                             .font(.system(size: 72))
                             .foregroundColor(.blue)
 
-                        Text("MicLnk")
+                        Text("Chattoon")
                             .font(.system(size: 26, weight: .bold))
                             .foregroundColor(.white)
 
@@ -343,13 +343,13 @@ struct PrivacyFooterView: View {
                 .font(.system(size: 12))
                 .foregroundColor(.white.opacity(0.35))
             HStack(spacing: 4) {
-                Link("Privacy Policy", destination: URL(string: "https://docs.qq.com/doc/DZHBUZm9CT1haTndI")!)
+                Link("Privacy Policy", destination: URL(string: "https://yohomie.art/privacy.html")!)
                     .font(.system(size: 12))
                     .foregroundColor(.white.opacity(0.5))
                 Text("and")
                     .font(.system(size: 12))
                     .foregroundColor(.white.opacity(0.35))
-                Link("Terms of Service", destination: URL(string: "https://docs.qq.com/doc/DZExyTFd6VGFtTG13")!)
+                Link("Terms of Service", destination: URL(string: "https://yohomie.art/terms.html")!)
                     .font(.system(size: 12))
                     .foregroundColor(.white.opacity(0.5))
             }

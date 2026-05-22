@@ -44,7 +44,7 @@ struct SubscriptionView: View {
                                 .font(.system(size: 34, weight: .bold))
                                 .foregroundColor(.white)
 
-                            Text("Unlock the full MicLnk experience")
+                            Text("Unlock the full Chattoon experience")
                                 .font(.system(size: 16))
                                 .foregroundColor(.white.opacity(0.6))
                                 .multilineTextAlignment(.center)

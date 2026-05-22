@@ -1,6 +1,6 @@
 # Privacy Policy
 
-**MicLnk**
+**Chattoon**
 **Effective Date: May 5, 2025**
 **Last Updated: May 5, 2025**
 
@@ -8,9 +8,9 @@
 
 ## 1. Introduction
 
-Welcome to MicLnk ("we," "our," or "us"). MicLnk is a mobile application that helps you reflect on your daily experiences through voice recording and AI-powered analysis. We are committed to protecting your privacy and being transparent about how we handle your data.
+Welcome to Chattoon ("we," "our," or "us"). Chattoon is a mobile application that helps you reflect on your daily experiences through voice recording and AI-powered analysis. We are committed to protecting your privacy and being transparent about how we handle your data.
 
-This Privacy Policy explains what information we collect, how we use it, and your rights regarding your personal data. By using MicLnk, you agree to the practices described in this policy.
+This Privacy Policy explains what information we collect, how we use it, and your rights regarding your personal data. By using Chattoon, you agree to the practices described in this policy.
 
 ---
 
@@ -23,12 +23,12 @@ When you create an account, we collect:
 - Optional profile information you choose to provide
 
 ### 2.2 Voice and Audio Data
-MicLnk's core function is voice recording. When you use the app, we collect:
+Chattoon's core function is voice recording. When you use the app, we collect:
 - Audio recordings you create within the app
 - Transcripts generated from your recordings
 - Duration and timestamp of recordings
 
-**Important:** MicLnk is designed as a personal reflection tool. Our microphone permission is used exclusively for recordings you intentionally initiate by pressing the record button. We do not record in the background or without your active consent.
+**Important:** Chattoon is designed as a personal reflection tool. Our microphone permission is used exclusively for recordings you intentionally initiate by pressing the record button. We do not record in the background or without your active consent.
 
 ### 2.3 AI-Generated Content
 We collect and store content created through our AI features, including:
@@ -114,7 +114,7 @@ When you delete your account, we will delete or anonymize your personal data wit
 
 ## 7. Children's Privacy
 
-MicLnk is not directed to children under the age of 13. We do not knowingly collect personal information from children under 13. If you are a parent or guardian and believe your child has provided us with personal information, please contact us immediately at the address below, and we will take steps to delete that information.
+Chattoon is not directed to children under the age of 13. We do not knowingly collect personal information from children under 13. If you are a parent or guardian and believe your child has provided us with personal information, please contact us immediately at the address below, and we will take steps to delete that information.
 
 Users between the ages of 13 and 17 should review this policy with a parent or guardian before using the app.
 
@@ -142,19 +142,19 @@ Regardless of your location, you may:
 
 ## 9. Microphone Access
 
-MicLnk requires access to your device's microphone to record audio. This permission is used **only** when you actively choose to record. We do not access the microphone at any other time. You can revoke microphone access at any time through your device's Settings app, though this will prevent you from using recording features.
+Chattoon requires access to your device's microphone to record audio. This permission is used **only** when you actively choose to record. We do not access the microphone at any other time. You can revoke microphone access at any time through your device's Settings app, though this will prevent you from using recording features.
 
 ---
 
 ## 10. Bluetooth Devices
 
-If you connect a Bluetooth microphone or recording device, MicLnk accesses Bluetooth solely to enable audio input from that device. We do not collect data about other Bluetooth devices in your vicinity.
+If you connect a Bluetooth microphone or recording device, Chattoon accesses Bluetooth solely to enable audio input from that device. We do not collect data about other Bluetooth devices in your vicinity.
 
 ---
 
 ## 11. Changes to This Privacy Policy
 
-We may update this Privacy Policy from time to time. We will notify you of material changes by updating the "Last Updated" date at the top of this page and, where appropriate, by sending a notification through the app. Your continued use of MicLnk after changes are posted constitutes your acceptance of the updated policy.
+We may update this Privacy Policy from time to time. We will notify you of material changes by updating the "Last Updated" date at the top of this page and, where appropriate, by sending a notification through the app. Your continued use of Chattoon after changes are posted constitutes your acceptance of the updated policy.
 
 ---
 
@@ -162,8 +162,8 @@ We may update this Privacy Policy from time to time. We will notify you of mater
 
 If you have questions, concerns, or requests regarding this Privacy Policy, please contact us at:
 
-**Email:** privacy@miclnk.com
-**App:** MicLnk — available on the Apple App Store
+**Email:** privacy@chattoon.com
+**App:** Chattoon — available on the Apple App Store
 
 We will respond to all legitimate requests within 30 days.
 

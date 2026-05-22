@@ -79,15 +79,15 @@ struct SkillsRadarCardView: View {
                 } else if let p1 = vm.recap?.page1 {
                     // Core stats row
                     HStack(spacing: 0) {
-                        cardStat(value: "\(p1.totalSessions)", label: "时刻")
+                        cardStat(value: "\(p1.totalSessions)", label: "Moments")
                         Rectangle()
                             .fill(Color.white.opacity(0.12))
                             .frame(width: 0.5, height: 32)
-                        cardStat(value: "\(p1.totalScenes)", label: "场景")
+                        cardStat(value: "\(p1.totalScenes)", label: "Scenes")
                         Rectangle()
                             .fill(Color.white.opacity(0.12))
                             .frame(width: 0.5, height: 32)
-                        cardStat(value: "\(p1.totalSkillsHit)", label: "技能")
+                        cardStat(value: "\(p1.totalSkillsHit)", label: "Skills")
                     }
                     .padding(.horizontal, 14)
 
@@ -107,7 +107,7 @@ struct SkillsRadarCardView: View {
                     .padding(.horizontal, 14)
                     .padding(.top, 8)
                 } else {
-                    Text("记录技能，解锁故事")
+                    Text("Record skills, unlock stories")
                         .font(.system(size: 12, design: .rounded))
                         .foregroundColor(.white.opacity(0.3))
                         .padding(.horizontal, 14)
@@ -333,7 +333,7 @@ struct SkillsRadarDetailPage: View {
 
                             // ── 高光时刻 ──────────────────────────────────
                             if !vm.highlights.isEmpty {
-                                RadarSectionHeader(title: "近期高光时刻")
+                                RadarSectionHeader(title: "Recent Highlights")
                                 VStack(spacing: 10) {
                                     ForEach(vm.highlights) { h in
                                         RadarHighlightCard(highlight: h)
@@ -427,7 +427,7 @@ private struct SceneInsightBlock: View {
                     .font(.system(size: 15, weight: .bold, design: .rounded))
                     .foregroundColor(.white)
                 Spacer()
-                Text("\(scene.sessionCount) 次录音")
+                Text("\(scene.sessionCount) recordings")
                     .font(.system(size: 11, design: .rounded))
                     .foregroundColor(.white.opacity(0.35))
             }
@@ -461,7 +461,7 @@ private struct SceneInsightBlock: View {
                 let activeSkills = scene.skills.filter { $0.hit_count > 0 }
                 if !activeSkills.isEmpty {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("技能表现")
+                        Text("Skill Performance")
                             .font(.system(size: 11, weight: .semibold, design: .rounded))
                             .foregroundColor(.white.opacity(0.35))
                             .textCase(.uppercase)
@@ -478,7 +478,7 @@ private struct SceneInsightBlock: View {
 
                 if !scene.recommendations.isEmpty {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("推荐添加")
+                        Text("Recommended")
                             .font(.system(size: 11, weight: .semibold, design: .rounded))
                             .foregroundColor(.white.opacity(0.35))
                             .textCase(.uppercase)
@@ -601,7 +601,7 @@ private struct SceneAssessmentSection: View {
                     .font(.system(size: 15, weight: .bold, design: .rounded))
                     .foregroundColor(.white)
                 Spacer()
-                Text("\(scene.session_count) 次录音")
+                Text("\(scene.session_count) recordings")
                     .font(.system(size: 11, design: .rounded))
                     .foregroundColor(.white.opacity(0.35))
             }
@@ -719,7 +719,7 @@ private struct RecommendationRow: View {
                 HStack(spacing: 3) {
                     Image(systemName: added ? "checkmark" : "plus")
                         .font(.system(size: 9, weight: .bold))
-                    Text(added ? "已添加" : "添加")
+                    Text(added ? "Added" : "Add")
                         .font(.system(size: 10, weight: .semibold, design: .rounded))
                 }
                 .foregroundColor(added ? Color(hex: "#34D399") : Color(hex: "#45B7D1"))

@@ -155,6 +155,8 @@ struct SkillsView: View {
             if viewModel.categories.isEmpty && !viewModel.isLoading {
                 viewModel.loadCatalog()
             }
+            // 首次进入 Skills 页触发 Add Skill 提示
+            TourManager.shared.tryShowSkillTip()
             // Seed subskills from categories if this is a user who onboarded before the sub-skill update
             if savedSubSkills.isEmpty && !savedCategories.isEmpty {
                 let catIds = Set(savedCategories.split(separator: ",").map(String.init))
@@ -659,7 +661,12 @@ struct SkillsHeaderView: View {
             Spacer()
 
             // Add skills button
-            Button(action: { onAddTap?() }) {
+            Button(action: {
+                onAddTap?()
+                if TourManager.shared.currentStep == .addSkillButton {
+                    TourManager.shared.dismissExtraTip()
+                }
+            }) {
                 HStack(spacing: 5) {
                     Image(systemName: "plus")
                         .font(.system(size: 13, weight: .semibold))
@@ -673,6 +680,7 @@ struct SkillsHeaderView: View {
                 .background(Capsule().fill(Color(hex: "#5E7C8B")))
             }
             .buttonStyle(.plain)
+            .tourHighlight(.addSkillButton)
         }
         .padding(.horizontal, 24)
         .frame(height: 60)

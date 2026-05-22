@@ -55,10 +55,10 @@ struct SkillRadarRecapView: View {
                         Text(selectedRange.rawValue)
                             .font(.system(size: 22, weight: .bold, design: .rounded))
                             .foregroundColor(.white.opacity(0.7))
-                        Text("该时段暂无录音记录")
+                        Text("No recordings in this period")
                             .font(.system(size: 16, design: .rounded))
                             .foregroundColor(.white.opacity(0.4))
-                        Text("← 切换其他时间段")
+                        Text("← Try another time range")
                             .font(.system(size: 13, design: .rounded))
                             .foregroundColor(.white.opacity(0.25))
                             .padding(.top, 4)
@@ -72,25 +72,25 @@ struct SkillRadarRecapView: View {
                     if let p2 = displayRecap.page2 {
                         RecapPage2View(page2: p2, appeared: appeared)
                     } else {
-                        placeholderPage(text: "最好的时刻", icon: "star.fill")
+                        placeholderPage(text: "Best Moment", icon: "star.fill")
                     }
                 case 2:
                     if let p3 = displayRecap.page3 {
                         RecapPage3View(page3: p3, appeared: appeared)
                     } else {
-                        placeholderPage(text: "你的感受", icon: "heart.fill")
+                        placeholderPage(text: "Your Feelings", icon: "heart.fill")
                     }
                 case 3:
                     if let p4 = displayRecap.page4 {
                         RecapPage4View(page4: p4, coverImageUrl: displayRecap.page2?.coverImageUrl, appeared: appeared)
                     } else {
-                        placeholderPage(text: "技能说了什么", icon: "chart.bar.fill")
+                        placeholderPage(text: "What Skills Said", icon: "chart.bar.fill")
                     }
                 case 4:
                     if let p5 = displayRecap.page5 {
                         RecapPage5View(page5: p5, appeared: appeared, onDismiss: { dismiss() })
                     } else {
-                        placeholderPage(text: "接下来", icon: "arrow.right.circle.fill")
+                        placeholderPage(text: "What's Next", icon: "arrow.right.circle.fill")
                     }
                 default:
                     EmptyView()
@@ -267,11 +267,11 @@ struct SkillRadarRecapView: View {
 
 private func recapPage3BG(mood: String) -> Color {
     switch mood {
-    case "高兴":   return Color(hex: "#041A0F")
-    case "焦虑":   return Color(hex: "#1A0C04")
-    case "亢奋":   return Color(hex: "#120A1F")
-    case "悲伤":   return Color(hex: "#040A1A")
-    default:       return Color(hex: "#0A0E1A")  // 平常心
+    case "Happy":   return Color(hex: "#041A0F")
+    case "Anxious": return Color(hex: "#1A0C04")
+    case "Excited": return Color(hex: "#120A1F")
+    case "Sad":     return Color(hex: "#040A1A")
+    default:        return Color(hex: "#0A0E1A")  // Neutral
     }
 }
 
@@ -450,7 +450,7 @@ struct RecapPage1View: View {
                 .opacity(appeared ? 1 : 0)
                 .animation(.easeOut(duration: 0.5), value: appeared)
 
-                Text("个时刻")
+                Text("moments")
                     .font(.system(size: 28, weight: .medium, design: .rounded))
                     .foregroundColor(.white.opacity(0.75))
                     .opacity(appeared ? 1 : 0)
@@ -461,13 +461,13 @@ struct RecapPage1View: View {
 
                 VStack(spacing: 12) {
                     HStack(spacing: 6) {
-                        Text("横跨")
+                        Text("across")
                             .font(.system(size: 18, design: .rounded))
                             .foregroundColor(.white.opacity(0.55))
                         Text("\(page1.totalScenes)")
                             .font(.system(size: 20, weight: .bold, design: .rounded))
                             .foregroundColor(Color(hex: "#B8A4FF"))
-                        Text("个场景")
+                        Text("scenes")
                             .font(.system(size: 18, design: .rounded))
                             .foregroundColor(.white.opacity(0.55))
                     }
@@ -479,7 +479,7 @@ struct RecapPage1View: View {
                         Text("\(page1.totalSkillsHit)")
                             .font(.system(size: 20, weight: .bold, design: .rounded))
                             .foregroundColor(Color(hex: "#B8A4FF"))
-                        Text("项技能随你出现")
+                        Text("skills appeared")
                             .font(.system(size: 18, design: .rounded))
                             .foregroundColor(.white.opacity(0.55))
                     }
@@ -489,7 +489,7 @@ struct RecapPage1View: View {
 
                     if !page1.topSceneLabel.isEmpty {
                         HStack(spacing: 6) {
-                            Text("最常出现于")
+                            Text("Most often in")
                                 .font(.system(size: 16, design: .rounded))
                                 .foregroundColor(.white.opacity(0.4))
                             Text(page1.topSceneEmoji + " " + page1.topSceneLabel)
@@ -558,7 +558,7 @@ struct RecapPage2View: View {
                 Spacer()
 
                 // Header label
-                Text("最重要的那一刻")
+                Text("Most Important Moment")
                     .font(.system(size: 13, weight: .medium, design: .rounded))
                     .foregroundColor(Color(hex: "#F59E0B").opacity(0.8))
                     .opacity(appeared ? 1 : 0)
@@ -621,11 +621,11 @@ struct RecapPage3View: View {
 
     var accentColor: Color {
         switch page3.dominantMood {
-        case "高兴":   return Color(hex: "#34D399")
-        case "焦虑":   return Color(hex: "#FB923C")
-        case "亢奋":   return Color(hex: "#A78BFA")
-        case "悲伤":   return Color(hex: "#60A5FA")
-        default:       return Color(hex: "#94A3B8")
+        case "Happy":   return Color(hex: "#34D399")
+        case "Anxious": return Color(hex: "#FB923C")
+        case "Excited": return Color(hex: "#A78BFA")
+        case "Sad":     return Color(hex: "#60A5FA")
+        default:        return Color(hex: "#94A3B8")
         }
     }
 
@@ -654,7 +654,7 @@ struct RecapPage3View: View {
                 Spacer().frame(height: 24)
 
                 // Dominant mood label
-                Text("你的感受")
+                Text("Your Mood")
                     .font(.system(size: 14, design: .rounded))
                     .foregroundColor(.white.opacity(0.4))
                     .opacity(appeared ? 1 : 0)
@@ -669,7 +669,7 @@ struct RecapPage3View: View {
                     .offset(y: appeared ? 0 : 12)
                     .animation(.spring(response: 0.45, dampingFraction: 0.75).delay(0.25), value: appeared)
 
-                Text("是这段时间最常出现的情绪")
+                Text("was your most frequent feeling")
                     .font(.system(size: 15, design: .rounded))
                     .foregroundColor(.white.opacity(0.45))
                     .multilineTextAlignment(.center)
@@ -681,13 +681,13 @@ struct RecapPage3View: View {
                 // Stats row
                 HStack(spacing: 0) {
                     Spacer()
-                    statColumn(value: page3.sighTotal, label: "叹气次数", color: Color(hex: "#94A3B8"))
+                    statColumn(value: page3.sighTotal, label: "Sighs", color: Color(hex: "#94A3B8"))
                     Spacer()
                     Divider()
                         .frame(height: 40)
                         .background(Color.white.opacity(0.1))
                     Spacer()
-                    statColumn(value: page3.hahaTotal, label: "哈哈次数", color: Color(hex: "#FBBF24"))
+                    statColumn(value: page3.hahaTotal, label: "Laughs", color: Color(hex: "#FBBF24"))
                     Spacer()
                 }
                 .opacity(appeared ? 1 : 0)
@@ -733,7 +733,7 @@ struct RecapPage4View: View {
                 Spacer().frame(height: 100)
 
                 // Header
-                Text("技能说了什么")
+                Text("What Skills Said")
                     .font(.system(size: 13, weight: .medium, design: .rounded))
                     .foregroundColor(Color(hex: "#2DD4BF").opacity(0.7))
                     .opacity(appeared ? 1 : 0)
@@ -848,7 +848,7 @@ struct RecapPage5View: View {
         VStack(spacing: 0) {
             Spacer()
 
-            Text("接下来")
+            Text("What's Next")
                 .font(.system(size: 13, weight: .medium, design: .rounded))
                 .foregroundColor(Color(hex: "#E879F9").opacity(0.7))
                 .opacity(appeared ? 1 : 0)
@@ -859,7 +859,7 @@ struct RecapPage5View: View {
             VStack(alignment: .leading, spacing: 20) {
                 if let improving = page5.improvingSkill {
                     nextLine(
-                        prefix: "正在变强",
+                        prefix: "Getting Stronger",
                         name: improving.skillLabel + " ↑",
                         color: Color(hex: "#34D399"),
                         delay: 0.1
@@ -868,7 +868,7 @@ struct RecapPage5View: View {
 
                 if let watch = page5.watchSkill {
                     nextLine(
-                        prefix: "可以多留意",
+                        prefix: "Worth Watching",
                         name: watch.skillLabel,
                         color: Color(hex: "#FB923C"),
                         delay: 0.25
@@ -877,7 +877,7 @@ struct RecapPage5View: View {
 
                 if let rec = page5.recommendations.first {
                     nextLine(
-                        prefix: "还没探索过",
+                        prefix: "Not Yet Explored",
                         name: rec.skillLabel,
                         color: Color(hex: "#E879F9"),
                         delay: 0.4
@@ -893,7 +893,7 @@ struct RecapPage5View: View {
             Button {
                 onDismiss()
             } label: {
-                Text("加入我的技能库")
+                Text("Add to My Skills")
                     .font(.system(size: 16, weight: .semibold, design: .rounded))
                     .foregroundColor(Color(hex: "#0D0820"))
                     .frame(maxWidth: .infinity)
@@ -918,7 +918,7 @@ struct RecapPage5View: View {
             Spacer().frame(height: 32)
 
             // Closing line
-            Text("这段时间的你，已经发生了。")
+            Text("This version of you has already happened.")
                 .font(.system(size: 14, design: .rounded))
                 .foregroundColor(.white.opacity(0.45))
                 .multilineTextAlignment(.center)

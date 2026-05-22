@@ -16,6 +16,9 @@ struct RecordingButtonView: View {
     @State private var introTimer: Timer? = nil
     // 文字脉冲动画
     @State private var textPulse: Bool = false
+    // 录音同意提示（首次录音前显示一次）
+    @AppStorage("recording_consent_shown") private var recordingConsentShown = false
+    @State private var showRecordingConsent = false
 
     /// 上一条录音仍在分析中（非录音过程中）
     private var isLocked: Bool {
@@ -30,6 +33,12 @@ struct RecordingButtonView: View {
     var body: some View {
         // trailing 对齐：右边缘固定 → 向右收起效果
         ZStack(alignment: .trailing) {
+            // 聚光灯锚点：始终与圆形按钮重合，不随 pill 展开变大
+            Color.clear
+                .frame(width: circleSize, height: circleSize)
+                .allowsHitTesting(false)
+                .tourHighlight(.recordingButton)
+
             Button(action: handleTap) {
                 ZStack {
                     // ── 毛玻璃背景（同 BottomNavView）──────────────────
@@ -108,6 +117,15 @@ struct RecordingButtonView: View {
                 dismissIntro()
             }
         }
+        .alert("Recording Consent", isPresented: $showRecordingConsent) {
+            Button("Cancel", role: .cancel) { }
+            Button("I Agree") {
+                recordingConsentShown = true
+                startRecordingAfterConsent()
+            }
+        } message: {
+            Text("By recording, you confirm this is your own voice or experience, and you have the consent of any other parties involved.")
+        }
     }
 
     // MARK: - Actions
@@ -115,6 +133,18 @@ struct RecordingButtonView: View {
     private func handleTap() {
         // 上一条录音仍在分析中，禁止开始新录音（停止当前录音不受影响）
         guard !isLocked else { return }
+
+        // 引导第3步：用户点击录音按钮 → 推进（隐藏聚光灯，等待详情页）
+        if TourManager.shared.currentStep == .recordingButton {
+            TourManager.shared.advance()
+        }
+
+        // 首次录音前弹出同意提示（仅当未开始录音时拦截）
+        if !recordingConsentShown && !viewModel.isRecording {
+            if isIntro { dismissIntro() }
+            showRecordingConsent = true
+            return
+        }
 
         if isIntro {
             // 5秒内点击：立即收起 → 进入录音
@@ -128,6 +158,12 @@ struct RecordingButtonView: View {
             } else {
                 viewModel.startRecording()
             }
+        }
+    }
+
+    private func startRecordingAfterConsent() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+            viewModel.startRecording()
         }
     }
 

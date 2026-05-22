@@ -54,9 +54,27 @@ struct ImageLoaderView: View {
         }
     }
     
+    /// 将旧 HTTP IP 地址替换为新 HTTPS 域名，兼容数据库中存储的历史 URL
+    private static func normalizedURL(_ urlString: String) -> String {
+        let oldPrefixes = [
+            "http://34.74.150.225",
+            "http://47.79.254.213",
+            "http://123.57.29.111",
+        ]
+        var result = urlString
+        for prefix in oldPrefixes {
+            if result.hasPrefix(prefix) {
+                result = "https://api.yohomie.art" + result.dropFirst(prefix.count)
+                break
+            }
+        }
+        return result
+    }
+
     private func loadImage() {
+        let resolvedUrl = imageUrl.map { Self.normalizedURL($0) }
         // 优先检查本地缓存
-        if let url = imageUrl, let cached = ImageCacheManager.shared.image(for: url) {
+        if let url = resolvedUrl, let cached = ImageCacheManager.shared.image(for: url) {
             image = cached
             isLoading = false
             return
@@ -66,8 +84,8 @@ struct ImageLoaderView: View {
             isLoading = false
             return
         }
-        if let imageUrl = imageUrl {
-            loadImageFromURL(imageUrl)
+        if let url = resolvedUrl {
+            loadImageFromURL(url)
         } else if let imageBase64 = imageBase64 {
             loadImageFromBase64(imageBase64)
         } else {

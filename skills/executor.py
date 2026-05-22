@@ -20,11 +20,11 @@ GEMINI_FLASH_MODEL = os.getenv("GEMINI_FLASH_MODEL", "gemini-3-flash-preview")
 
 # 情绪状态 -> emoji 映射（与 SKILL.md 一致）
 MOOD_EMOJI_MAP = {
-    "高兴": "😊",
-    "焦虑": "😰",
-    "平常心": "😐",
-    "亢奋": "🤩",
-    "悲伤": "😢",
+    "Happy": "😊",
+    "Anxious": "😰",
+    "Neutral": "😐",
+    "Excited": "🤩",
+    "Sad": "😢",
 }
 
 

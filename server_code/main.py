@@ -510,7 +510,7 @@ def wait_for_file_active(file: Any, max_wait_time=300) -> Any:
 
 
 def _add_watermark(image_bytes: bytes) -> bytes:
-    """在图片右下角添加半透明 MicLnk 水印，失败时返回原图。"""
+    """在图片右下角添加半透明 Chattoon 水印，失败时返回原图。"""
     try:
         from PIL import Image, ImageDraw, ImageFont
         import io
@@ -529,7 +529,7 @@ def _add_watermark(image_bytes: bytes) -> bytes:
         except Exception:
             font = ImageFont.load_default()
 
-        text = "MicLnk"
+        text = "Chattoon"
         bbox = draw.textbbox((0, 0), text, font=font)
         text_w = bbox[2] - bbox[0]
         text_h = bbox[3] - bbox[1]
@@ -2961,19 +2961,19 @@ async def get_image_status(
 
 
 _SKILL_ID_TO_NAME = {
-    "workplace_jungle": "职场丛林",
-    "family_relationship": "家庭关系",
-    "education_communication": "教育沟通",
-    "brainstorm": "头脑风暴",
-    "emotion_recognition": "情绪识别",
+    "workplace_jungle": "Workplace Dynamics",
+    "family_relationship": "Family Relationships",
+    "education_communication": "Academic Communication",
+    "brainstorm": "Brainstorming",
+    "emotion_recognition": "Emotion Recognition",
 }
 
 
 _CATEGORY_DISPLAY_MAP = {
-    "workplace": "职场",
-    "family": "家庭",
-    "emotion": "个人成长",
-    "personal": "个人成长",
+    "workplace": "Work Life",
+    "family": "Family",
+    "emotion": "Personal Growth",
+    "personal": "Personal Growth",
 }
 
 def _extract_matched_scenes(skill_cards: list) -> list:
@@ -3351,7 +3351,7 @@ async def _generate_strategies_core(
             # 情绪技能
             if skill_result.get("emotion_insight") is not None:
                 emotion_insight = skill_result["emotion_insight"]
-                _mood_state_val = emotion_insight.get("mood_state", "平常心")
+                _mood_state_val = emotion_insight.get("mood_state", "Neutral")
                 # 千人千面情绪头像：R2 预签名 URL（7天有效，无需客户端携带 JWT）
                 # [节点3-生成] mood_emoji_url
                 try:
@@ -4969,7 +4969,7 @@ def _load_skill_label_map(db_skills):
         with open(_cfg_path) as _f:
             _cfg = _j.load(_f)
         for _sid, _sv in _cfg.get("system_skills", {}).items():
-            _cn = (_sv.get("exec_context") or {}).get("sub_skill_cn") or _sv.get("name", _sid)
+            _cn = _sv.get("name") or (_sv.get("exec_context") or {}).get("sub_skill_cn") or _sid
             result[_sid] = {"label": _cn, "category": _sv.get("category", "")}
     except Exception:
         pass
@@ -5222,7 +5222,7 @@ async def get_skills_radar(
                         "skill_id": sk_id,
                         "skill_label": sk_meta["label"],
                         "scene_count": 0,
-                        "reason": f"在{label}场景中尚未练习",
+                        "reason": f"Not yet practiced in {label}",
                     })
                     if len(recommendations) >= 3:
                         break
