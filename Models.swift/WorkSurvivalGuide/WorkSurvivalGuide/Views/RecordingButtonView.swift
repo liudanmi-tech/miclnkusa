@@ -131,13 +131,13 @@ struct RecordingButtonView: View {
     // MARK: - Actions
 
     private func handleTap() {
-        // 上一条录音仍在分析中，禁止开始新录音（停止当前录音不受影响）
-        guard !isLocked else { return }
-
-        // 引导第3步：用户点击录音按钮 → 推进（隐藏聚光灯，等待详情页）
+        // 引导第3步：只要点击了录音按钮就推进，不依赖录音是否完成或上传
         if TourManager.shared.currentStep == .recordingButton {
             TourManager.shared.advance()
         }
+
+        // 上一条录音仍在分析中，禁止开始新录音（停止当前录音不受影响）
+        guard !isLocked else { return }
 
         // 首次录音前弹出同意提示（仅当未开始录音时拦截）
         if !recordingConsentShown && !viewModel.isRecording {

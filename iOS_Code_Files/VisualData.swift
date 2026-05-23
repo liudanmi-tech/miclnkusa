@@ -91,6 +91,15 @@ struct TriadItem: Codable {
     let reason: String
 }
 
+private let moodZhToEn: [String: String] = [
+    // Chinese → aligned emoji style names
+    "高兴": "Happy", "焦虑": "Slight", "平常心": "Calm",
+    "亢奋": "Excited", "悲伤": "Sad", "平静": "Calm",
+    "愤怒": "Slight", "轻松": "Calm", "紧张": "Slight", "未知": "Calm",
+    // Legacy English → aligned names
+    "Neutral": "Calm", "Anxious": "Slight",
+]
+
 // 技能卡片内容：情绪型
 struct SkillCardEmotionContent: Codable {
     let sighCount: Int
@@ -98,6 +107,10 @@ struct SkillCardEmotionContent: Codable {
     let moodState: String
     let moodEmoji: String
     let charCount: Int
+
+    var localizedMoodState: String {
+        moodZhToEn[moodState] ?? moodState
+    }
     
     enum CodingKeys: String, CodingKey {
         case sighCount = "sigh_count"
@@ -224,7 +237,7 @@ struct SkillCardContent: Codable {
         return SkillCardEmotionContent(
             sighCount: sighCount ?? 0,
             hahaCount: hahaCount ?? 0,
-            moodState: moodState ?? "平常心",
+            moodState: moodState ?? "Neutral",
             moodEmoji: moodEmoji ?? "😐",
             charCount: charCount ?? 0
         )

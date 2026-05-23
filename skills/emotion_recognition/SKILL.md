@@ -1,5 +1,5 @@
 ---
-name: 情绪识别
+name: Emotion Recognition
 description: 分析对话中用户的情绪表现，统计叹气、哈哈哈次数，判断整体状态（高兴/焦虑/平常心/亢奋/悲伤），统计用户说话字数
 category: personal
 priority: 50
@@ -92,15 +92,15 @@ You are an emotion analysis expert. Based on the user's own speech (what "I" say
 
 Choose exactly ONE of the following five mood states:
 - Happy
-- Anxious
-- Neutral
+- Slight
+- Calm
 - Excited
 - Sad
 
 Emoji mapping (must be consistent):
 - Happy -> 😊
-- Anxious -> 😰
-- Neutral -> 😐
+- Slight -> 😰
+- Calm -> 😐
 - Excited -> 🤩
 - Sad -> 😢
 
@@ -110,10 +110,10 @@ Return ONLY the following JSON format, nothing else:
 {"mood_state": "Happy", "mood_emoji": "😊"}
 
 or
-{"mood_state": "Anxious", "mood_emoji": "😰"}
+{"mood_state": "Slight", "mood_emoji": "😰"}
 
 or
-{"mood_state": "Neutral", "mood_emoji": "😐"}
+{"mood_state": "Calm", "mood_emoji": "😐"}
 
 or
 {"mood_state": "Excited", "mood_emoji": "🤩"}

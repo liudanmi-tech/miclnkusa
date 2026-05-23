@@ -159,7 +159,7 @@ struct TaskListView: View {
                 Button(action: {
                     showStylePicker = true
                     if TourManager.shared.currentStep == .styleButton {
-                        TourManager.shared.dismissExtraTip()
+                        TourManager.shared.advance()
                     }
                 }) {
                     HStack(spacing: 4) {
@@ -198,13 +198,6 @@ struct TaskListView: View {
             // hasLoaded=true 时跳过（server 已成功响应过，数据是最新的）
             if !viewModel.hasLoaded && !viewModel.isLoading {
                 viewModel.loadTasks()
-            }
-            // 从 Detail 返回后触发 Style 提示
-            if TourManager.shared.hasVisitedDetail {
-                TourManager.shared.hasVisitedDetail = false
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                    TourManager.shared.tryShowStyleTip()
-                }
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("TaskUploaded"))) { _ in
@@ -280,8 +273,8 @@ struct TaskCardRow: View {
     @State private var isCancelling = false
     @State private var navigateToDetail = false
 
-    private let deleteWidth: CGFloat = 200
-    private let snapThreshold: CGFloat = 120
+    private let deleteWidth: CGFloat = 68
+    private let snapThreshold: CGFloat = 40
 
     /// 卡片处于处理中状态：录音上传中 / 分析中 / archived 但封面图尚未生成
     private var isProcessingCard: Bool {
@@ -300,9 +293,9 @@ struct TaskCardRow: View {
                             .progressViewStyle(CircularProgressViewStyle(tint: .white))
                     } else {
                         Image(systemName: "trash")
-                            .font(.system(size: 20, weight: .medium))
-                        Text("删除")
-                            .font(.system(size: 14, weight: .medium))
+                            .font(.system(size: 16, weight: .medium))
+                        Text("Delete")
+                            .font(.system(size: 11, weight: .medium))
                     }
                 }
                 .foregroundColor(.white)
@@ -378,15 +371,16 @@ struct TaskCardRow: View {
                 }
             }
         )
-        // ── 4. 横向拖拽手势（挂在最外层）────────────────────────────
-        .gesture(
-            DragGesture(minimumDistance: 20, coordinateSpace: .local)
+        // ── 4. 横向拖拽手势（simultaneousGesture 不阻塞 ScrollView 垂直滚动）────
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 30, coordinateSpace: .local)
                 .onChanged { value in
                     guard !isDeleting else { return }
                     let dx = value.translation.width
                     let dy = value.translation.height
                     if !gestureStarted {
-                        guard abs(dx) > abs(dy) else { return }
+                        // 必须向左 + 水平分量至少是垂直分量的 3 倍，才激活左滑删除
+                        guard dx < 0, abs(dx) > abs(dy) * 3.0 else { return }
                         gestureStarted = true
                         gestureStartOffset = dragOffset
                     }
@@ -397,7 +391,7 @@ struct TaskCardRow: View {
                     guard !isDeleting else { return }
                     let dx = value.translation.width
                     let dy = value.translation.height
-                    guard abs(dx) > abs(dy) * 0.6 else {
+                    guard dx < 0, abs(dx) > abs(dy) * 2.0 else {
                         withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) { dragOffset = 0 }
                         return
                     }

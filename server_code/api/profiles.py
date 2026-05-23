@@ -30,28 +30,30 @@ logger = logging.getLogger(__name__)
 
 EMOTION_SLOTS = ["very_happy", "happy", "neutral", "slightly_sad", "sad"]
 
-# 旧4槽档案向下兼容回退映射（新槽 → 旧R2文件名）
+# 情绪槽 → R2文件名映射（与 emoji style 名称对齐）
 EMOTION_SLOT_FALLBACK = {
     "very_happy":   "excited",
     "happy":        "happy",
     "neutral":      "calm",
-    "slightly_sad": "sad",
+    "slightly_sad": "slight",
     "sad":          "sad",
 }
 
 def _mood_state_to_emotion(mood_state: str) -> str:
-    """将 LLM 返回的 mood_state 映射到 5 个情绪槽之一。"""
+    """将 LLM 返回的 mood_state 映射到 5 个情绪槽之一。
+    对齐 emoji style 名称：excited / happy / calm / slight / sad
+    """
     m = (mood_state or "").lower()
     if any(k in m for k in ["excit", "energ", "elat", "ecstat", "亢奋", "兴奋", "激动"]):
         return "very_happy"
     if any(k in m for k in ["happy", "joy", "glad", "高兴", "开心", "快乐", "愉快"]):
         return "happy"
-    if any(k in m for k in ["anxious", "worry", "nervou", "stress", "焦虑", "担心", "紧张"]):
+    if any(k in m for k in ["slight", "anxious", "worry", "nervou", "stress", "焦虑", "担心", "紧张"]):
         return "slightly_sad"
     if any(k in m for k in ["sad", "depress", "griev", "distress", "upset",
                               "悲", "难过", "痛苦", "沮丧"]):
         return "sad"
-    return "neutral"  # default（原 calm）
+    return "neutral"  # calm
 
 
 async def _generate_emotion_avatars_task(user_id: str, photo_bytes: bytes, photo_mime: str):

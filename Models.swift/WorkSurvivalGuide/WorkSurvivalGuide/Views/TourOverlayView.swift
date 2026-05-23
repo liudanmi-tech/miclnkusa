@@ -16,7 +16,7 @@ struct TourOverlayView: View {
         ZStack {
             if let step = tour.currentStep, tour.highlightFrame != .zero {
                 let fr = tour.highlightFrame
-                let r  = max(fr.width, fr.height) / 2 + 22
+                let r = max(fr.width, fr.height) / 2 + 22
 
                 // Dimmed overlay with circular cutout (purely visual, no hit-testing)
                 SpotlightMask(cx: fr.midX, cy: fr.midY, r: r)
@@ -30,7 +30,6 @@ struct TourOverlayView: View {
                     .id(step)
                     .allowsHitTesting(false)
 
-                // Tooltip bubble（内含 Skip/关闭，可交互）
                 TooltipBubble(step: step, frame: fr, spotRadius: r, tour: tour)
             }
         }

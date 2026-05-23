@@ -13,7 +13,7 @@ struct EmotionTrendChartView: View {
     @State private var isLoading = false
     @State private var errorMessage: String?
     
-    private static let moodOrder = ["Happy", "Excited", "Calm", "Anxious", "Sad"]
+    private static let moodOrder = ["Excited", "Happy", "Calm", "Slight", "Sad"]
     
     private var moodScore: (String) -> Double {
         { mood in

@@ -108,9 +108,8 @@ struct ProfileListView: View {
             }
         }
         .sheet(isPresented: $showingCreateProfile, onDismiss: {
-            // 引导第1步：sheet 关闭且档案数增加 → 确认用户创建了新档案 → 推进到第2步
-            if TourManager.shared.currentStep == .profileAddButton
-               && viewModel.profiles.count > profileCountBeforeSheet {
+            // 引导第1步：只要点击了档案入口并返回到列表页，就推进到第2步
+            if TourManager.shared.currentStep == .profileAddButton {
                 TourManager.shared.advance()
             }
         }) {

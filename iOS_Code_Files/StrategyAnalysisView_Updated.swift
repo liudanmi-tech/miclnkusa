@@ -140,7 +140,7 @@ struct StrategyAnalysisView_Updated: View {
                                 cognitiveTriad: nil, insight: nil, strategy: nil, crisisAlert: nil
                             )
                             return skills.map { s in
-                                let name = (["workplace_jungle": "职场丛林", "family_relationship": "家庭关系", "emotion_recognition": "情绪识别", "depression_prevention": "防抑郁监控"])[s.skillId] ?? s.skillId
+                                let name = (["workplace_jungle": "职场丛林", "family_relationship": "家庭关系", "emotion_recognition": "Emotion Recognition"])[s.skillId] ?? s.skillId
                                 let ct = s.skillId == "emotion_recognition" ? "emotion" : "strategy"
                                 return SkillCard(skillId: s.skillId, skillName: name, contentType: ct, content: content)
                             }
@@ -383,8 +383,7 @@ struct StrategyAnalysisView_Updated: View {
             "family_relationship": "家庭关系",
             "education_communication": "教育沟通",
             "brainstorm": "头脑风暴",
-            "emotion_recognition": "情绪识别",
-            "depression_prevention": "防抑郁监控"
+            "emotion_recognition": "Emotion Recognition"
         ]
         return skills.map { names[$0.skillId] ?? $0.skillId }.joined(separator: "、")
     }
@@ -782,13 +781,13 @@ struct EmotionCardView: View {
         VStack(spacing: 16) {
             Text(content.moodEmoji)
                 .font(.system(size: 64))
-            Text(content.moodState)
+            Text(content.localizedMoodState)
                 .font(.system(size: 18, weight: .bold, design: .rounded))
                 .foregroundColor(AppColors.headerText)
             HStack(spacing: 24) {
-                StatItem(label: "叹气", value: "\(content.sighCount)")
-                StatItem(label: "哈哈", value: "\(content.hahaCount)")
-                StatItem(label: "字数", value: "\(content.charCount)")
+                StatItem(label: "Sighs", value: "\(content.sighCount)")
+                StatItem(label: "Laughs", value: "\(content.hahaCount)")
+                StatItem(label: "Words", value: "\(content.charCount)")
             }
         }
         .frame(maxWidth: .infinity)

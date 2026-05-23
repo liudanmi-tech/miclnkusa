@@ -152,8 +152,6 @@ struct TaskDetailView: View {
             .navigationBarHidden(true)
             .onAppear {
                 loadAll()
-                TourManager.shared.hasVisitedDetail = true
-                TourManager.shared.isInDetailView = true
                 if !aiDisclaimerShown {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
                         showAIDisclaimer = true
@@ -163,13 +161,6 @@ struct TaskDetailView: View {
             }
             .onDisappear {
                 audioPlayer.stop()
-                TourManager.shared.isInDetailView = false
-            }
-            .onChange(of: strategyIsLoading) { loading in
-                if !loading && TourManager.shared.isInDetailView {
-                    let hasSkills = !(strategySkillCards?.isEmpty ?? true)
-                    TourManager.shared.onDetailViewAppeared(hasSkills: hasSkills)
-                }
             }
             .task {
                 if profileVM.selfEmojiType == "self" {
@@ -536,13 +527,11 @@ private struct MomentSkillsCard: View {
                 .cornerRadius(20)
             }
 
-            // Skill rows
+            // Skill rows — onAppear fires when skills section is visible on screen,
+            // guaranteeing: detail page is showing AND skills are loaded.
             VStack(spacing: 0) {
                 ForEach(Array(skillCards.enumerated()), id: \.element.id) { idx, card in
                     Button(action: {
-                        if idx == 0 && TourManager.shared.currentStep == .skillInDetail {
-                            TourManager.shared.advance()
-                        }
                         assistantCard = card
                     }) {
                         HStack(spacing: 12) {
@@ -567,7 +556,6 @@ private struct MomentSkillsCard: View {
                     .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .tourHighlight(idx == 0 ? .skillInDetail : nil)
 
                     if idx < skillCards.count - 1 {
                         Divider()

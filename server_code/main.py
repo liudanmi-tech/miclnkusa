@@ -1128,6 +1128,8 @@ def generate_image_from_prompt(
         logger.info(f"[图片生成] 使用 {len(reference_images)} 张档案照片作为人物参考图")
     # 追加 4:5 竖版尺寸要求（使用 512×640 小尺寸，加快生成速度，客户端可放大）
     full_prompt += "\n\n【输出尺寸】请生成 4:5 竖版比例的图片（512×640px），适合竖版展示。"
+    # 禁止 Gemini 在画面中复制参考图的水印或生成任何文字水印
+    full_prompt += "\n\n【严禁】画面中不得出现任何文字、水印、logo、版权标注，包括但不限于 miclnk、MicLnk、Chattoon、AI Generated 等字样。参考图中若有水印请忽略，不得复制到生成图片中。"
     contents_list.append(full_prompt)
 
     for attempt in range(max_retries):
@@ -2976,6 +2978,25 @@ _CATEGORY_DISPLAY_MAP = {
     "personal": "Personal Growth",
 }
 
+_MOOD_ZH_TO_EN = {
+    # Chinese → aligned emoji style names
+    "高兴": "Happy",
+    "焦虑": "Slight",
+    "平常心": "Calm",
+    "亢奋": "Excited",
+    "悲伤": "Sad",
+    "平静": "Calm",
+    "轻松": "Calm",
+    "紧张": "Slight",
+    # Legacy English → aligned names
+    "Neutral": "Calm",
+    "Anxious": "Slight",
+}
+
+def _normalize_mood(mood: str) -> str:
+    """Convert legacy mood state (Chinese or old English) to aligned emoji style names."""
+    return _MOOD_ZH_TO_EN.get(mood, mood)
+
 def _extract_matched_scenes(skill_cards: list) -> list:
     """从 skill_cards 中提取匹配到的顶级场景列表（去重、保持顺序）"""
     seen = set()
@@ -3762,6 +3783,8 @@ async def generate_strategies(
                     _c = dict(_card) if isinstance(_card, dict) else _card
                     if isinstance(_c, dict) and _c.get("content_type") == "emotion":
                         _content = dict(_c.get("content") or {})
+                        # Normalize legacy Chinese mood values to English
+                        _content["mood_state"] = _normalize_mood(_content.get("mood_state", "Neutral"))
                         _mood_state_v = _content.get("mood_state", "")
                         _slot = _mood_state_to_emotion(_mood_state_v)
                         _oss_key = f"emotion_avatars/{user_id}/{_slot}.png"
@@ -3929,7 +3952,7 @@ async def get_emotion_trend(
                     points.append({
                         "session_id": str(sa.session_id),
                         "created_at": created_at.isoformat() if created_at else None,
-                        "mood_state": content.get("mood_state", "平常心"),
+                        "mood_state": _normalize_mood(content.get("mood_state", "Neutral")),
                         "mood_emoji": content.get("mood_emoji", "😐"),
                         "sigh_count": content.get("sigh_count", 0),
                         "haha_count": content.get("haha_count", 0),
@@ -5163,10 +5186,12 @@ async def get_skills_radar(
             .where(SkillExecution.session_id.in_(session_ids))
         )).scalars().all()
 
-        # session_id(str) -> set of skill_ids
+        # session_id(str) -> set of skill_ids (exclude removed skills)
+        _EXCLUDE_SKILL_IDS = {"depression_prevention"}
         session_skill_map = _col2.defaultdict(set)
         for se in se_rows:
-            session_skill_map[str(se.session_id)].add(se.skill_id)
+            if se.skill_id not in _EXCLUDE_SKILL_IDS:
+                session_skill_map[str(se.session_id)].add(se.skill_id)
 
         # 3. 构建 skill label 映射
         db_skills = (await db.execute(select(Skill))).scalars().all()
@@ -5307,7 +5332,7 @@ async def get_skills_radar(
                 for card in sa.skill_cards:
                     if isinstance(card, dict) and card.get("content_type") == "emotion":
                         c = card.get("content", {})
-                        mood = c.get("mood_state", "平常心")
+                        mood = _normalize_mood(c.get("mood_state", "Neutral"))
                         _mood_freq[mood] = _mood_freq.get(mood, 0) + 1
                         _sigh_total += c.get("sigh_count", 0)
                         _haha_total += c.get("haha_count", 0)
@@ -5321,7 +5346,7 @@ async def get_skills_radar(
                             _dominant_emoji_char = c.get("mood_emoji", "😐")
                         break
 
-        _dominant_mood = max(_mood_freq, key=_mood_freq.get) if _mood_freq else "平常心"
+        _dominant_mood = max(_mood_freq, key=_mood_freq.get) if _mood_freq else "Neutral"
 
         # Page 4: strategy quote — find longest strategy content
         _strategy_quote = None
