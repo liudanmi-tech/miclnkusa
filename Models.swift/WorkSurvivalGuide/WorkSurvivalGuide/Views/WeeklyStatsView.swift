@@ -730,7 +730,8 @@ struct WeeklyStatsDetailSheet: View {
                                     WeeklySessionRow(
                                         session: session,
                                         cardType: selectedCard,
-                                        isHighlighted: session.session_id == highlightedSessionId
+                                        isHighlighted: session.session_id == highlightedSessionId,
+                                        emojiType: selfEmojiType
                                     )
                                 }
                                 .buttonStyle(.plain)
@@ -739,7 +740,8 @@ struct WeeklyStatsDetailSheet: View {
                                 WeeklySessionRow(
                                     session: session,
                                     cardType: selectedCard,
-                                    isHighlighted: false
+                                    isHighlighted: false,
+                                    emojiType: selfEmojiType
                                 )
                                 .id(session.session_id)
                             }
@@ -1006,6 +1008,7 @@ struct WeeklySessionRow: View {
     let session: WeeklySession
     let cardType: WeeklyStatsCarouselView.CardType
     var isHighlighted: Bool = false
+    var emojiType: String = "self"
 
     var body: some View {
         HStack(spacing: 12) {
@@ -1074,8 +1077,7 @@ struct WeeklySessionRow: View {
         case .mood:
             if let score = session.mood_score {
                 VStack(spacing: 2) {
-                    Text(moodEmoji(session.mood_polarity))
-                        .font(.system(size: 18))
+                    MoodEmojiView(score: Double(score), emojiType: emojiType, size: 28)
                     Text("\(score)")
                         .font(.system(size: 11, weight: .bold, design: .rounded))
                         .foregroundColor(WeeklyStatsViewModel.moodColor(for: session.mood_polarity))

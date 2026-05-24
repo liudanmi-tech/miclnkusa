@@ -75,12 +75,7 @@ struct ContentView: View {
                         TourOverlayView()
                             .zIndex(9998)
 
-                        // Debug 悬浮面板（DEBUG 或 INTERNALTEST 构建可见）
-                        #if DEBUG || INTERNALTEST
-                        DebugPanelView()
-                            .zIndex(9999)
-                            .allowsHitTesting(true)
-                        #endif
+                        // Debug 悬浮面板已隐藏
                     }
                     .ignoresSafeArea(edges: .bottom)
                     .navigationBarHidden(true)
