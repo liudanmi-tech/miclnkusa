@@ -2,7 +2,7 @@
 //  ProfileMemoryView.swift
 //  WorkSurvivalGuide
 //
-//  档案记忆 Sheet — 展示 AI 累积的人际记忆（关系、事件、目标）
+//  Profile Memory Sheet — displays AI-accumulated interpersonal memories (relationships, events, goals)
 //
 
 import SwiftUI
@@ -24,7 +24,7 @@ struct ProfileMemoryView: View {
                     VStack(spacing: 12) {
                         ProgressView()
                             .tint(AppColors.headerText)
-                        Text("加载记忆...")
+                        Text("Loading memories...")
                             .font(.system(size: 14, weight: .medium, design: .rounded))
                             .foregroundColor(AppColors.secondaryText)
                     }
@@ -38,7 +38,7 @@ struct ProfileMemoryView: View {
                             .foregroundColor(AppColors.secondaryText)
                             .multilineTextAlignment(.center)
                             .padding(.horizontal, 32)
-                        Button("重试") {
+                        Button("Retry") {
                             Task { await loadMemories() }
                         }
                         .font(.system(size: 14, weight: .semibold, design: .rounded))
@@ -49,10 +49,10 @@ struct ProfileMemoryView: View {
                         Image(systemName: "brain")
                             .font(.system(size: 44))
                             .foregroundColor(AppColors.secondaryText.opacity(0.5))
-                        Text("暂无关于\(profile.name)的记忆")
+                        Text("No memories about \(profile.name) yet")
                             .font(.system(size: 16, weight: .semibold, design: .rounded))
                             .foregroundColor(AppColors.secondaryText)
-                        Text("与 AI 对话或分析音频后，记忆会在这里积累。")
+                        Text("Memories will appear here after AI conversations or audio analysis.")
                             .font(.system(size: 13, design: .rounded))
                             .foregroundColor(AppColors.secondaryText.opacity(0.7))
                             .multilineTextAlignment(.center)
@@ -63,7 +63,7 @@ struct ProfileMemoryView: View {
                         VStack(spacing: 16) {
                             if !mem.relationship.isEmpty {
                                 MemorySectionView(
-                                    title: "关系概况",
+                                    title: "Relationship",
                                     icon: "brain",
                                     iconColor: Color.purple,
                                     items: mem.relationship
@@ -71,7 +71,7 @@ struct ProfileMemoryView: View {
                             }
                             if !mem.events.isEmpty {
                                 MemorySectionView(
-                                    title: "事件记录",
+                                    title: "Events",
                                     icon: "calendar",
                                     iconColor: Color.blue,
                                     items: mem.events
@@ -79,7 +79,7 @@ struct ProfileMemoryView: View {
                             }
                             if !mem.goals.isEmpty {
                                 MemorySectionView(
-                                    title: "目标追踪",
+                                    title: "Goals",
                                     icon: "target",
                                     iconColor: Color.green,
                                     items: mem.goals
@@ -87,7 +87,7 @@ struct ProfileMemoryView: View {
                             }
                             if !mem.skills.isEmpty {
                                 MemorySectionView(
-                                    title: "应用技能",
+                                    title: "Applied Skills",
                                     icon: "bolt.fill",
                                     iconColor: Color(red: 0.6, green: 0.4, blue: 1.0),
                                     items: mem.skills
@@ -95,7 +95,7 @@ struct ProfileMemoryView: View {
                             }
                             if !mem.other.isEmpty {
                                 MemorySectionView(
-                                    title: "其他记忆",
+                                    title: "Other",
                                     icon: "sparkles",
                                     iconColor: Color.orange,
                                     items: mem.other
@@ -108,11 +108,11 @@ struct ProfileMemoryView: View {
                     }
                 }
             }
-            .navigationTitle("\(profile.name) 的记忆")
+            .navigationTitle("\(profile.name)'s Memory")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("完成") { dismiss() }
+                    Button("Done") { dismiss() }
                         .font(.system(size: 15, weight: .semibold, design: .rounded))
                         .foregroundColor(AppColors.headerText)
                 }
@@ -219,7 +219,7 @@ private struct MemoryCardView: View {
         formatter.dateFormat = "yyyy-MM-dd"
         if let date = formatter.date(from: iso) {
             let out = DateFormatter()
-            out.dateFormat = "M月d日"
+            out.dateFormat = "MMM d"
             return out.string(from: date)
         }
         return iso
@@ -229,10 +229,10 @@ private struct MemoryCardView: View {
     private func statusPill(_ status: String) -> some View {
         let (label, color): (String, Color) = {
             switch status {
-            case "in_progress": return ("进行中", Color.orange)
-            case "completed":   return ("已完成", Color.green)
-            case "abandoned":   return ("已放弃", Color.gray)
-            default:            return (status, Color.gray)
+            case "in_progress": return ("In Progress", Color.orange)
+            case "completed":   return ("Completed",   Color.green)
+            case "abandoned":   return ("Abandoned",   Color.gray)
+            default:            return (status,        Color.gray)
             }
         }()
 
