@@ -56,13 +56,13 @@ struct AIAssistantView: View {
                     HStack(spacing: 6) {
                         Image(systemName: "clock.arrow.circlepath")
                             .font(.system(size: 12))
-                        Text("已恢复上次对话")
+                        Text("Previous conversation restored")
                             .font(.system(size: 12, design: .rounded))
                         Spacer()
                         Button {
                             vm.clearHistory()
                         } label: {
-                            Text("重新开始")
+                            Text("Start over")
                                 .font(.system(size: 12, weight: .medium, design: .rounded))
                                 .foregroundColor(Color(hex: "#5E7C8B"))
                         }
@@ -238,7 +238,7 @@ struct AIAssistantView: View {
         HStack(spacing: 8) {
             TagChip(icon: "✨", text: vm.skillName, color: Color(hex: "#7C5CBF"))
             if vm.memoryUsed {
-                TagChip(icon: "🌐", text: "记忆整合", color: Color(hex: "#2D7DD2"))
+                TagChip(icon: "🌐", text: "Memory Sync", color: Color(hex: "#2D7DD2"))
             }
             Spacer()
         }
@@ -248,7 +248,7 @@ struct AIAssistantView: View {
 
     private var suggestionsGrid: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("猜你想问")
+            Text("You might want to ask")
                 .font(.system(size: 12, weight: .medium, design: .rounded))
                 .foregroundColor(AppColors.headerText.opacity(0.45))
                 .padding(.bottom, 2)
@@ -393,7 +393,7 @@ struct AIAssistantView: View {
                     // 文字输入框
                     ZStack(alignment: .leading) {
                         if inputText.isEmpty {
-                            Text("输入消息...")
+                            Text("Type a message...")
                                 .font(.system(size: 15, design: .rounded))
                                 .foregroundColor(AppColors.headerText.opacity(0.35))
                                 .padding(.leading, 14)
@@ -841,7 +841,7 @@ final class VoiceInputService: NSObject, ObservableObject {
     private var audioEngine = AVAudioEngine()
     private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
     private var recognitionTask: SFSpeechRecognitionTask?
-    private let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "zh-CN"))
+    private let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-US"))
         ?? SFSpeechRecognizer(locale: Locale.current)
 
     private var onResultCallback: ((String?) -> Void)?

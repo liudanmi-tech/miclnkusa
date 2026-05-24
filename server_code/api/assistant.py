@@ -81,71 +81,71 @@ def _build_prompt(
     history: List[ChatHistoryItem],
     message: str,
 ) -> str:
-    """组装发给 Gemini 的完整 prompt"""
-    mem_block = f"\n相关历史记忆：\n{memory_context}" if memory_context else ""
-    summary_block = f"\n职场对话摘要：\n{conversation_summary}" if conversation_summary else ""
+    """Build the complete prompt for Gemini"""
+    mem_block = f"\nRelevant memory context:\n{memory_context}" if memory_context else ""
+    summary_block = f"\nWork conversation summary:\n{conversation_summary}" if conversation_summary else ""
 
     history_block = ""
     if history:
         lines = []
         for h in history:
-            prefix = "用户" if h.role == "user" else "AI"
+            prefix = "User" if h.role == "user" else "AI"
             lines.append(f"{prefix}: {h.content}")
-        history_block = "\n对话历史：\n" + "\n".join(lines)
+        history_block = "\nConversation history:\n" + "\n".join(lines)
 
-    # 技能内容：轮次少时完整展示，多轮后仅保留名称节省token
-    history_turns = len(history) // 2  # 每轮 = 1条用户 + 1条AI
+    # Skill content: show full detail for early turns, abbreviate later to save tokens
+    history_turns = len(history) // 2  # each turn = 1 user + 1 AI message
     if history_turns < 3:
-        skill_block = f"职场背景参考（{skill_name}）：\n{skill_content_json}"
+        skill_block = f"Work context reference ({skill_name}):\n{skill_content_json}"
     else:
-        skill_block = f"职场背景参考（{skill_name}）：[已知该技能场景，不再重复展开]"
+        skill_block = f"Work context reference ({skill_name}): [known skill context, omitted to save tokens]"
 
     if message == "__INIT__":
         task_desc = (
-            f"请基于以上背景生成一段友好开场白（2-3句话）：\n"
-            f"1. 用一句话概括你注意到的对话关键点\n"
-            f"2. 表达你可以帮助的方向\n"
-            f"3. 以一个开放性问题结尾\n"
-            f"语气亲切自然，像一个了解用户的朋友。"
+            f"Based on the context above, write a friendly opening message (2-3 sentences):\n"
+            f"1. Briefly summarize the key point you noticed in the conversation\n"
+            f"2. Describe how you can help\n"
+            f"3. End with an open-ended question\n"
+            f"Tone should be warm and natural, like a knowledgeable friend."
         )
     elif message == "__SWITCH__":
         task_desc = (
-            f"用户刚从之前的话题切换到了「{skill_name}」这个技能。\n"
-            f"请用1-2句话自然地承接，简要说明「{skill_name}」能帮到用户的核心点，"
-            f"不要重复之前对话的内容，最后以一个针对性的问题结尾。语气轻快自然。"
+            f"The user just switched to the \"{skill_name}\" skill.\n"
+            f"Write 1-2 sentences naturally transitioning into this topic, briefly explaining how \"{skill_name}\" can help, "
+            f"without repeating previous conversation content, and end with a targeted question. Keep the tone light and natural."
         )
     else:
         task_desc = (
-            f"用户说：{message}\n\n"
-            f"请直接回应用户的问题。"
-            f"如果问题与职场背景相关，可结合背景给出更有针对性的建议；"
-            f"如果用户问的是其他事情，就直接帮他解决，不要强行往背景参考上靠。"
+            f"User says: {message}\n\n"
+            f"Respond directly to the user's message. "
+            f"If it relates to their work context, use that context to give more targeted advice; "
+            f"if they're asking about something else, just help them directly without forcing it into the work context."
         )
 
     suggestions_instruction = (
         "\n\n---\n"
-        "在你的回复最后，另起一行，严格按以下格式输出4个用户可能追问的问题（不要包含编号）：\n"
-        '[SUGGESTIONS]{"items":["问题1","问题2","问题3","问题4"]}[/SUGGESTIONS]\n'
-        "问题需简洁（15字以内），与本次回复内容紧密相关。\n\n"
-        "然后在[/SUGGESTIONS]之后，紧接着另起一行，根据本次回复的情感氛围输出一个梗图标签：\n"
-        "[MEME:category] 或 [MEME:none]（不合适时输出none）\n"
-        "category 可选值及适用场景：\n"
-        "  feel_you=用户被怼/委屈/遭遇不公  hang_in_there=鼓励用户坚持/加油\n"
-        "  this_is_fine=无奈接受职场现实     mind_blown=恍然大悟/关键洞察\n"
-        "  seriously=调侃/吐槽职场荒唐事     celebration=用户达成目标/好消息\n"
-        "  same=共鸣/同感                    thinking=深度思考/策略建议\n"
-        "【不发梗图的情况】：用户情绪崩溃、严肃的利益冲突、回复超过3段时，输出[MEME:none]"
+        "At the end of your reply, on a new line, strictly output 4 follow-up questions the user might ask (no numbering):\n"
+        '[SUGGESTIONS]{"items":["question1","question2","question3","question4"]}[/SUGGESTIONS]\n'
+        "Questions should be concise (under 15 words), closely related to this reply.\n\n"
+        "Then after [/SUGGESTIONS], on a new line, output a meme tag based on the emotional tone of your reply:\n"
+        "[MEME:category] or [MEME:none] (use none if inappropriate)\n"
+        "Available categories and when to use them:\n"
+        "  feel_you=user was criticized/hurt/treated unfairly  hang_in_there=encouraging user to keep going\n"
+        "  this_is_fine=accepting workplace reality with resignation  mind_blown=aha moment/key insight\n"
+        "  seriously=joking/venting about absurd work situations  celebration=user achieved goal/good news\n"
+        "  same=shared feeling/relatability  thinking=deep analysis/strategic advice\n"
+        "【Do NOT send meme when】: user is very distressed, serious conflict of interests, or reply is longer than 3 paragraphs → output [MEME:none]"
     )
 
     return (
-        f"你是用户的职场 AI 助手，了解用户的职场处境。用户问什么你答什么，跟随对话自然走向。\n\n"
+        f"You are the user's workplace AI assistant who understands their work situation. Answer what they ask and follow the natural flow of conversation.\n\n"
         f"{skill_block}"
         f"{summary_block}"
         f"{mem_block}"
         f"{history_block}\n\n"
         f"{task_desc}"
         f"{suggestions_instruction}\n\n"
-        f"用中文回复，语气友好自然。"
+        f"Reply in English with a friendly, natural tone."
     )
 
 
@@ -211,7 +211,7 @@ async def _stream_gemini(prompt: str, image_base64_list: Optional[List[str]] = N
                     for b64 in image_base64_list[:3]  # 最多3张
                 ]
                 count = len(image_parts)
-                hint = f"（用户同时发送了{count}张图片，请结合图片内容回应用户。）"
+                hint = f"(The user also sent {count} image(s). Please incorporate the image content in your response.)"
                 full_prompt = prompt + "\n\n" + hint
                 contents = image_parts + [full_prompt]
             else:
@@ -236,13 +236,13 @@ async def _stream_gemini(prompt: str, image_base64_list: Optional[List[str]] = N
 
 
 async def _generate_suggestions(context: str, skill_name: str) -> List[str]:
-    """基于当前回复内容，生成猜你想问（非流式，快速调用）"""
+    """Generate follow-up suggestions based on the current reply (non-streaming, fast call)"""
     prompt = (
-        f"基于以下 AI Assistant 对 {skill_name} 技能的回复：\n\n"
+        f"Based on the following AI Assistant reply about the {skill_name} skill:\n\n"
         f'"{context[:600]}"\n\n'
-        f"生成4个用户可能继续追问的简短问题（中文，每个不超过15字）。\n"
-        f"只输出 JSON 数组，不要任何其他内容。\n"
-        f'示例：["问题1","问题2","问题3","问题4"]'
+        f"Generate 4 short follow-up questions the user might ask (in English, under 15 words each).\n"
+        f"Output only a JSON array, no other content.\n"
+        f'Example: ["question1","question2","question3","question4"]'
     )
     try:
         genai.configure(api_key=GEMINI_API_KEY)
@@ -431,14 +431,14 @@ async def assistant_chat(
             try:
                 from services.knowledge_graph import save_kg_from_chat
                 history_text = "\n".join(
-                    f"{'用户' if h.role == 'user' else 'AI'}: {h.content}"
+                    f"{'User' if h.role == 'user' else 'AI'}: {h.content}"
                     for h in req.history[-6:]
                 )
                 round_content = (
-                    f"技能场景：{skill_name}\n"
-                    f"对话摘要：{conv_summary[:200]}\n"
+                    f"Skill context: {skill_name}\n"
+                    f"Conversation summary: {conv_summary[:200]}\n"
                     f"---\n{history_text}\n"
-                    f"用户：{req.message}\nAI：{full_text[:500]}"
+                    f"User: {req.message}\nAI: {full_text[:500]}"
                 )
                 asyncio.create_task(
                     save_kg_from_chat(
