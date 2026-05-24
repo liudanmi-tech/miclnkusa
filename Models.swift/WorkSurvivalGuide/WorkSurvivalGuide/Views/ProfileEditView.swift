@@ -644,6 +644,16 @@ struct ProfileEditView: View {
                         pendingCroppedImage = nil
                         print("✅ [ProfileEditView] 图片上传成功: \(url)")
                     }
+
+                    // Self 档案换头像 → 立即清空 emoji 缓存，并在 30s 后重新拉取（等 Gemini 生成完成）
+                    if viewModel.relationship == RelationshipType.self_.rawValue {
+                        SelfEmojiURLCache.shared.reset()
+                        Task {
+                            try? await Task.sleep(nanoseconds: 30_000_000_000)
+                            SelfEmojiURLCache.shared.reset()
+                            await SelfEmojiURLCache.shared.load()
+                        }
+                    }
                 }
 
                 if let profile = profile {
