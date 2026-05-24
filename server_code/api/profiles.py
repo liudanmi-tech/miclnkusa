@@ -605,49 +605,36 @@ async def upload_profile_photo(
             api_base = os.getenv("API_PUBLIC_URL", "http://47.79.254.213")
             photo_url = f"{api_base.rstrip('/')}/api/v1/images/{session_id}/0"
         
-        # 有 profile_id 时同步更新 Profile.photo_url，确保策略图片生成能获取参考图
+        # 有 profile_id 时同步更新 Profile.photo_url；在 commit 前读取 relationship_type
+        # （commit 后 SQLAlchemy async session 会 expire 对象，再次访问属性会触发 MissingGreenlet）
+        _is_self_profile = False
         if profile_id and profile_id.strip() and session_id.startswith("profile_"):
             try:
                 r = await db.execute(select(Profile).where(Profile.id == uuid.UUID(profile_id), Profile.user_id == uuid.UUID(user_id)))
                 prof = r.scalar_one_or_none()
                 if prof:
+                    # ★ commit 前读取 relationship_type，避免 session expire 导致属性访问异常
+                    _rel = prof.relationship_type  # 此时对象未 expire，安全读取
+                    _is_self_profile = (_rel == "Self")
+                    logger.info(f"[档案照片] 档案关系={_rel}，is_self={_is_self_profile}")
                     prof.photo_url = photo_url
                     await db.commit()
                     logger.info(f"[档案照片] 已更新 Profile.photo_url: profile_id={profile_id}")
+                else:
+                    logger.warning(f"[档案照片] 未找到档案 profile_id={profile_id}")
             except Exception as e:
                 logger.warning(f"[档案照片] 更新 Profile.photo_url 失败: {e}")
                 await db.rollback()
-        
+
         response_data = {"photo_url": photo_url}
         logger.info(f"[档案照片] 返回 photo_url={photo_url}")
-
-        # ── 异步触发情绪头像生成（仅限 Self 档案，防止他人档案照片覆盖情绪头像）──
-        # 从已更新的 prof 对象判断；若无 profile_id 也不触发（来源不明的照片）
-        _is_self_profile = False
-        if profile_id and profile_id.strip() and session_id.startswith("profile_"):
-            try:
-                _r2 = await db.execute(
-                    select(Profile).where(
-                        Profile.id == uuid.UUID(profile_id),
-                        Profile.user_id == uuid.UUID(user_id)
-                    )
-                )
-                _prof_check = _r2.scalar_one_or_none()
-                if _prof_check and getattr(_prof_check, "relationship_type", None) == "Self":
-                    _is_self_profile = True
-                    logger.info(f"[档案照片] 档案关系=Self，允许生成情绪头像")
-                else:
-                    rel = getattr(_prof_check, "relationship_type", "unknown") if _prof_check else "no_profile"
-                    logger.info(f"[档案照片] 档案关系={rel}，跳过情绪头像生成")
-            except Exception as _ce:
-                logger.warning(f"[档案照片] 查询档案关系类型失败: {_ce}")
 
         if _is_self_profile:
             try:
                 asyncio.create_task(
                     _generate_emotion_avatars_task(user_id, file_content, file.content_type or "image/jpeg")
                 )
-                logger.info(f"[档案照片] 已触发情绪头像异步生成 user_id={user_id}")
+                logger.info(f"[档案照片] ✅ 已触发情绪头像异步生成 user_id={user_id}")
             except Exception as _e:
                 logger.warning(f"[档案照片] 触发情绪头像生成失败（非致命）: {_e}")
 
