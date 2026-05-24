@@ -618,10 +618,6 @@ private struct MessageBubble: View {
                                     .fill(Color(hex: "#5E7C8B"))
                             )
                     } else {
-                        if let skillName = message.skillName {
-                            TagChip(icon: "✨", text: skillName, color: Color(hex: "#7C5CBF"))
-                                .padding(.bottom, 2)
-                        }
                         MarkdownTextView(text: message.content, baseFontSize: 15, textColor: AppColors.headerText)
                             .multilineTextAlignment(.leading)
                             .padding(.horizontal, 14)
