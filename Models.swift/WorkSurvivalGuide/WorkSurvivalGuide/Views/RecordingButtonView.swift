@@ -124,7 +124,7 @@ struct RecordingButtonView: View {
                 startRecordingAfterConsent()
             }
         } message: {
-            Text("By recording, you confirm this is your own voice or experience, and you have the consent of any other parties involved.")
+            Text("By recording, you confirm this is your own voice or experience, and you have the consent of any other parties involved.\n\nYour audio will be securely sent to Google Gemini AI for transcription and analysis, and stored on Google Cloud. We never retain, sell, or share your personal data.")
         }
     }
 
