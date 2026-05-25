@@ -27,6 +27,14 @@ from pydantic import BaseModel
 from dotenv import load_dotenv
 import base64
 
+# Gemini safety settings — applied to all user-facing model calls
+_GEMINI_SAFETY = [
+    {"category": "HARM_CATEGORY_HARASSMENT",        "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
+    {"category": "HARM_CATEGORY_HATE_SPEECH",       "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
+    {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_LOW_AND_ABOVE"},
+    {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
+]
+
 # 配置日志
 # 使用用户目录下的日志文件，避免权限问题
 log_file_path = os.path.expanduser('~/gemini-audio-service.log')
@@ -1003,7 +1011,7 @@ def generate_image_from_prompt(
     # ── 图片生成模型：gemini-3.1-flash-image-preview（v3.0，thinking，人物一致性更强）──
     IMAGE_GEN_MODEL = "gemini-3.1-flash-image-preview"
 
-    model = genai.GenerativeModel(IMAGE_GEN_MODEL)
+    model = genai.GenerativeModel(IMAGE_GEN_MODEL, safety_settings=_GEMINI_SAFETY)
 
     # 构建 prompt：风格前缀 + 主体描述
     key = (style_key or "ghibli").strip().lower()
@@ -1408,7 +1416,7 @@ async def analyze_audio_from_path(temp_file_path: str, file_filename: str, sessi
         logger.info(f"[分析-{_sid}-step6] ✅ 文件 ACTIVE，即将调用 generate_content")
         
         model_name = GEMINI_TEXT_MODEL
-        model = genai.GenerativeModel(model_name)
+        model = genai.GenerativeModel(model_name, safety_settings=_GEMINI_SAFETY)
         
         # 单文件 / 多文件 共用基础提示词
         prompt_base = """角色: 你是一个专业的语音分析与行为观察专家。

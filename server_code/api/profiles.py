@@ -70,6 +70,13 @@ async def _generate_emotion_avatars_task(user_id: str, photo_bytes: bytes, photo
         logger.error(f"[情绪头像] 依赖导入失败: {e}")
         return
 
+    _safety = [
+        {"category": "HARM_CATEGORY_HARASSMENT",        "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
+        {"category": "HARM_CATEGORY_HATE_SPEECH",       "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
+        {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_LOW_AND_ABOVE"},
+        {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
+    ]
+
     IMAGE_GEN_MODEL = "gemini-3.1-flash-image-preview"
 
     logger.info(f"[情绪头像] 开始生成 user_id={user_id} photo_size={len(photo_bytes)}")
@@ -93,7 +100,7 @@ async def _generate_emotion_avatars_task(user_id: str, photo_bytes: bytes, photo
 
     image_bytes = None
     try:
-        model = genai.GenerativeModel(IMAGE_GEN_MODEL)
+        model = genai.GenerativeModel(IMAGE_GEN_MODEL, safety_settings=_safety)
         contents = [{"mime_type": photo_mime, "data": photo_bytes}, grid_prompt]
 
         for attempt in range(2):

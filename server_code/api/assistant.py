@@ -31,6 +31,14 @@ router = APIRouter()
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 ASSISTANT_MODEL = "gemini-2.0-flash"
 
+# Gemini safety settings — applied to all model calls
+_GEMINI_SAFETY = [
+    {"category": "HARM_CATEGORY_HARASSMENT",        "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
+    {"category": "HARM_CATEGORY_HATE_SPEECH",       "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
+    {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_LOW_AND_ABOVE"},
+    {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
+]
+
 # ─── KLIPY Meme Config ────────────────────────────────────────────────────────
 
 KLIPY_APP_KEY = os.getenv("KLIPY_APP_KEY", "")
@@ -138,6 +146,7 @@ def _build_prompt(
     )
 
     return (
+        f"SYSTEM REQUIREMENT: You MUST respond in English only. Do not use Chinese or any other language under any circumstances, even if the context below is in Chinese.\n\n"
         f"You are the user's workplace AI assistant who understands their work situation. Answer what they ask and follow the natural flow of conversation.\n\n"
         f"{skill_block}"
         f"{summary_block}"
@@ -145,7 +154,7 @@ def _build_prompt(
         f"{history_block}\n\n"
         f"{task_desc}"
         f"{suggestions_instruction}\n\n"
-        f"Reply in English with a friendly, natural tone."
+        f"IMPORTANT: Your ENTIRE response must be in English only. Do not write any Chinese characters."
     )
 
 
@@ -199,7 +208,7 @@ async def _stream_gemini(prompt: str, image_base64_list: Optional[List[str]] = N
     def _run():
         try:
             genai.configure(api_key=GEMINI_API_KEY)
-            model = genai.GenerativeModel(ASSISTANT_MODEL)
+            model = genai.GenerativeModel(ASSISTANT_MODEL, safety_settings=_GEMINI_SAFETY)
             if image_base64_list:
                 image_parts = [
                     genai.protos.Part(
@@ -246,7 +255,7 @@ async def _generate_suggestions(context: str, skill_name: str) -> List[str]:
     )
     try:
         genai.configure(api_key=GEMINI_API_KEY)
-        model = genai.GenerativeModel(ASSISTANT_MODEL)
+        model = genai.GenerativeModel(ASSISTANT_MODEL, safety_settings=_GEMINI_SAFETY)
         resp = await asyncio.to_thread(model.generate_content, prompt)
         raw = resp.text.strip()
         # 去掉可能的 markdown 代码块
