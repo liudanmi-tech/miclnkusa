@@ -7,7 +7,7 @@
 	<key>CFBundleGetInfoString</key>
 	<string></string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Chattoon uses the microphone to capture your mood and moments. Your recordings are private and never shared.</string>
+	<string>Chattoon listens to your voice to generate personalized AI comic scenes from your conversations. Recordings are processed privately and never stored or shared.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>Chattoon uses speech recognition to transcribe your voice messages into text for the AI Assistant.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>

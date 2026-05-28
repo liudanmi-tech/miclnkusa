@@ -1674,10 +1674,10 @@ class NetworkManager {
             throw NSError(
                 domain: "NetworkError",
                 code: 401,
-                userInfo: [NSLocalizedDescriptionKey: "请先登录"]
+                userInfo: [NSLocalizedDescriptionKey: "Please log in first."]
             )
         }
-        
+
         var urlString = "\(baseURLForWrite)/profiles/upload-photo"
         if let pid = profileId, !pid.isEmpty {
             urlString += "?profile_id=\(pid.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? pid)"
@@ -1707,39 +1707,44 @@ class NetworkManager {
             print("📤 [NetworkManager] 图片上传进度: \(Int(progress.fractionCompleted * 100))%")
         }
         
-        // 先获取响应数据用于检查状态码和解析
         let dataResponse = await uploadTask.serializingData().response
         let responseData = dataResponse.data ?? Data()
-        
+
+        // 网络层错误（连接失败、超时等）
+        if let afError = dataResponse.error {
+            let underlying = (afError.underlyingError as NSError?) ?? (afError as NSError)
+            let msg: String
+            switch underlying.code {
+            case NSURLErrorTimedOut:           msg = "Upload timed out. Please check your connection and try again."
+            case NSURLErrorNotConnectedToInternet: msg = "No internet connection. Please try again."
+            case NSURLErrorCannotConnectToHost: msg = "Cannot reach the server. Please try again later."
+            default:
+                msg = "Photo upload failed (\(underlying.localizedDescription))"
+            }
+            print("❌ [NetworkManager] 图片上传网络错误: \(afError)")
+            throw NSError(domain: "NetworkError", code: underlying.code,
+                          userInfo: [NSLocalizedDescriptionKey: msg])
+        }
+
         if let statusCode = dataResponse.response?.statusCode {
             if statusCode == 401 {
-                print("🔐 [NetworkManager] 图片上传返回 401，认证失败")
-                throw NSError(
-                    domain: "NetworkError",
-                    code: 401,
-                    userInfo: [NSLocalizedDescriptionKey: "认证失败，请重新登录"]
-                )
+                print("🔐 [NetworkManager] 图片上传返回 401")
+                throw NSError(domain: "NetworkError", code: 401,
+                              userInfo: [NSLocalizedDescriptionKey: "Session expired, please log in again."])
             } else if statusCode != 200 {
                 print("❌ [NetworkManager] 图片上传 HTTP 状态码: \(statusCode)")
                 if !responseData.isEmpty, let responseString = String(data: responseData, encoding: .utf8) {
                     print("   响应内容: \(responseString)")
                 }
-                throw NSError(
-                    domain: "NetworkError",
-                    code: statusCode,
-                    userInfo: [NSLocalizedDescriptionKey: "HTTP \(statusCode) 错误"]
-                )
+                throw NSError(domain: "NetworkError", code: statusCode,
+                              userInfo: [NSLocalizedDescriptionKey: "Photo upload failed (HTTP \(statusCode)). Please try again."])
             }
         }
-        
-        // 检查响应数据是否为空
+
         guard !responseData.isEmpty else {
             print("❌ [NetworkManager] 图片上传响应数据为空")
-            throw NSError(
-                domain: "NetworkError",
-                code: -1,
-                userInfo: [NSLocalizedDescriptionKey: "服务端返回空响应"]
-            )
+            throw NSError(domain: "NetworkError", code: -1,
+                          userInfo: [NSLocalizedDescriptionKey: "No response from server. Please try again."])
         }
         
         // 打印原始响应用于调试

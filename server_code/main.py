@@ -1713,11 +1713,40 @@ async def delete_account(
 ):
     """Permanently delete the current user account and all associated data."""
     from sqlalchemy import delete as sql_delete
-    user = await db.get(User, user_id)
-    if not user:
+    from database.models import KgPerson, KgEvent, KgEventPerson, KgGoal
+
+    try:
+        uid = uuid.UUID(user_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid user ID")
+
+    # 验证用户存在
+    result = await db.execute(select(User).where(User.id == uid))
+    if not result.scalar_one_or_none():
         raise HTTPException(status_code=404, detail="User not found")
-    await db.delete(user)
+
+    # 1. 删除知识图谱数据（KgPerson/KgEvent/KgGoal 的 user_id 无 FK 约束，DB CASCADE 无法自动处理）
+    kg_person_ids_result = await db.execute(select(KgPerson.id).where(KgPerson.user_id == uid))
+    kg_person_ids = [r[0] for r in kg_person_ids_result.all()]
+    kg_event_ids_result = await db.execute(select(KgEvent.id).where(KgEvent.user_id == uid))
+    kg_event_ids = [r[0] for r in kg_event_ids_result.all()]
+
+    if kg_person_ids:
+        await db.execute(sql_delete(KgEventPerson).where(KgEventPerson.person_id.in_(kg_person_ids)))
+    if kg_event_ids:
+        await db.execute(sql_delete(KgEventPerson).where(KgEventPerson.event_id.in_(kg_event_ids)))
+
+    await db.execute(sql_delete(KgGoal).where(KgGoal.user_id == uid))
+    await db.execute(sql_delete(KgEvent).where(KgEvent.user_id == uid))
+    await db.execute(sql_delete(KgPerson).where(KgPerson.user_id == uid))
+
+    # 2. 直接用 SQL DELETE 删除用户，跳过 ORM 级联（async 环境下 ORM cascade 会触发 MissingGreenlet）
+    #    DB 层的 ondelete="CASCADE" 会自动级联删除：
+    #    sessions → analysis_results, strategy_analysis, skill_executions
+    #    profiles, custom_skills, user_skill_preferences
+    await db.execute(sql_delete(User).where(User.id == uid))
     await db.commit()
+
     logger.info(f"[账号删除] user_id={user_id} 账号已永久删除")
     return APIResponse(code=200, message="Account deleted successfully", data={}, timestamp=datetime.now().isoformat())
 

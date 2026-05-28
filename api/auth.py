@@ -3,6 +3,7 @@
 支持：手机号+验证码（旧）、邮箱+密码、Apple Sign In
 """
 import os
+import time
 import httpx
 import bcrypt as _bcrypt
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -33,6 +34,65 @@ def _verify_password(password: str, hashed: str) -> bool:
 
 APPLE_JWKS_URL = "https://appleid.apple.com/auth/keys"
 APPLE_ISS = "https://appleid.apple.com"
+
+
+def _generate_apple_client_secret() -> str:
+    """生成 Apple client_secret（ES256 JWT）。"""
+    team_id     = os.getenv("APPLE_TEAM_ID", "")
+    key_id      = os.getenv("APPLE_KEY_ID", "")
+    bundle_id   = os.getenv("APPLE_BUNDLE_ID", "")
+    private_key = os.getenv("APPLE_PRIVATE_KEY", "").replace("\\n", "\n")
+    now = int(time.time())
+    payload = {
+        "iss": team_id,
+        "iat": now,
+        "exp": now + 180,
+        "aud": "https://appleid.apple.com",
+        "sub": bundle_id,
+    }
+    return jwt.encode(payload, private_key, algorithm="ES256",
+                      headers={"kid": key_id})
+
+
+async def _exchange_apple_code(auth_code: str) -> str | None:
+    """用 authorization_code 换取 Apple refresh_token。"""
+    bundle_id = os.getenv("APPLE_BUNDLE_ID", "")
+    try:
+        client_secret = _generate_apple_client_secret()
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.post(
+                "https://appleid.apple.com/auth/token",
+                data={
+                    "client_id": bundle_id,
+                    "client_secret": client_secret,
+                    "code": auth_code,
+                    "grant_type": "authorization_code",
+                },
+            )
+            data = resp.json()
+            return data.get("refresh_token")
+    except Exception as e:
+        logger.warning(f"Apple token exchange failed: {e}")
+        return None
+
+
+async def _revoke_apple_token(refresh_token: str) -> None:
+    """撤销 Apple refresh_token（注销账号时调用，失败不阻断主流程）。"""
+    bundle_id = os.getenv("APPLE_BUNDLE_ID", "")
+    try:
+        client_secret = _generate_apple_client_secret()
+        async with httpx.AsyncClient(timeout=10) as client:
+            await client.post(
+                "https://appleid.apple.com/auth/revoke",
+                data={
+                    "client_id": bundle_id,
+                    "client_secret": client_secret,
+                    "token": refresh_token,
+                    "token_type_hint": "refresh_token",
+                },
+            )
+    except Exception as e:
+        logger.warning(f"Apple token revoke failed (non-blocking): {e}")
 
 
 # ──────────────────────────────────────────────
@@ -225,6 +285,12 @@ async def apple_login(
         user.last_login_at = datetime.utcnow()
         await db.commit()
         logger.info(f"Apple 登录: apple_sub={apple_sub}, user_id={user.id}")
+
+    # 换取并保存 refresh_token（用于注销时合规撤销 Apple 授权）
+    refresh_token = await _exchange_apple_code(request.authorization_code)
+    if refresh_token:
+        user.apple_refresh_token = refresh_token
+        await db.commit()
 
     token = create_access_token(str(user.id))
     expires_in = int(os.getenv("JWT_EXPIRATION_HOURS", "168")) * 3600

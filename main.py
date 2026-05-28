@@ -389,40 +389,47 @@ def _patch_gemini_file_upload():
 
 _patch_gemini_file_upload()
 
-# 配置阿里云 OSS
-OSS_ACCESS_KEY_ID = os.getenv("OSS_ACCESS_KEY_ID")
-OSS_ACCESS_KEY_SECRET = os.getenv("OSS_ACCESS_KEY_SECRET")
-OSS_ENDPOINT = os.getenv("OSS_ENDPOINT")
-OSS_BUCKET_NAME = os.getenv("OSS_BUCKET_NAME")
-OSS_CDN_DOMAIN = os.getenv("OSS_CDN_DOMAIN")  # 可选，如果使用 CDN
-USE_OSS = os.getenv("USE_OSS", "true").lower() == "true"  # 是否启用 OSS
+# 配置 Cloudflare R2（兼容 S3 API）
+R2_ACCESS_KEY_ID = os.getenv("R2_ACCESS_KEY_ID") or os.getenv("OSS_ACCESS_KEY_ID")
+R2_SECRET_ACCESS_KEY = os.getenv("R2_SECRET_ACCESS_KEY") or os.getenv("OSS_ACCESS_KEY_SECRET")
+R2_ENDPOINT_URL = os.getenv("R2_ENDPOINT_URL") or os.getenv("OSS_ENDPOINT")
+R2_BUCKET_NAME = os.getenv("R2_BUCKET_NAME") or os.getenv("OSS_BUCKET_NAME")
+_r2_public = os.getenv("R2_PUBLIC_URL", "")
+R2_PUBLIC_DOMAIN = _r2_public.removeprefix("https://").removeprefix("http://") if _r2_public else os.getenv("OSS_CDN_DOMAIN", "")
+USE_OSS = os.getenv("USE_OSS", "true").lower() == "true"
 
-# 初始化 OSS 客户端
-oss_bucket = None
+# 初始化 R2 客户端（boto3 S3-compatible）
+s3_client = None
 if USE_OSS:
-    if not all([OSS_ACCESS_KEY_ID, OSS_ACCESS_KEY_SECRET, OSS_ENDPOINT, OSS_BUCKET_NAME]):
-        logger.warning("⚠️ OSS 配置不完整，将禁用 OSS 功能")
-        logger.warning("需要配置: OSS_ACCESS_KEY_ID, OSS_ACCESS_KEY_SECRET, OSS_ENDPOINT, OSS_BUCKET_NAME")
+    if not all([R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_ENDPOINT_URL, R2_BUCKET_NAME]):
+        logger.warning("⚠️ R2 配置不完整，将禁用图片上传功能")
         USE_OSS = False
     else:
         try:
-            import oss2
-            auth = oss2.Auth(OSS_ACCESS_KEY_ID, OSS_ACCESS_KEY_SECRET)
-            oss_bucket = oss2.Bucket(auth, OSS_ENDPOINT, OSS_BUCKET_NAME)
-            logger.info(f"✅ OSS 配置成功")
-            logger.info(f"OSS Endpoint: {OSS_ENDPOINT}")
-            logger.info(f"OSS Bucket: {OSS_BUCKET_NAME}")
-            if OSS_CDN_DOMAIN:
-                logger.info(f"OSS CDN Domain: {OSS_CDN_DOMAIN}")
+            import boto3
+            from botocore.config import Config
+            _endpoint_url = R2_ENDPOINT_URL if R2_ENDPOINT_URL.startswith(('http://', 'https://')) else f'https://{R2_ENDPOINT_URL}'
+            s3_client = boto3.client(
+                's3',
+                endpoint_url=_endpoint_url,
+                aws_access_key_id=R2_ACCESS_KEY_ID,
+                aws_secret_access_key=R2_SECRET_ACCESS_KEY,
+                config=Config(signature_version='s3v4'),
+            )
+            logger.info(f"✅ R2 配置成功")
+            logger.info(f"R2 Endpoint: {R2_ENDPOINT_URL}")
+            logger.info(f"R2 Bucket: {R2_BUCKET_NAME}")
+            if R2_PUBLIC_DOMAIN:
+                logger.info(f"R2 Public Domain: {R2_PUBLIC_DOMAIN}")
         except ImportError:
-            logger.error("❌ 未安装 oss2 库，请运行: pip install oss2")
+            logger.error("❌ 未安装 boto3 库，请运行: pip install boto3")
             USE_OSS = False
         except Exception as e:
-            logger.error(f"❌ OSS 初始化失败: {e}")
+            logger.error(f"❌ R2 初始化失败: {e}")
             logger.error(traceback.format_exc())
             USE_OSS = False
 else:
-    logger.info("OSS 功能已禁用（USE_OSS=false）")
+    logger.info("R2 功能已禁用（USE_OSS=false）")
 
 # 定义返回数据模型
 class DialogueItem(BaseModel):
@@ -496,63 +503,45 @@ def wait_for_file_active(file: Any, max_wait_time=300) -> Any:
 def upload_image_to_oss(image_bytes: bytes, user_id: str, session_id: str, image_index: int,
                         content_type: str = "image/png") -> Optional[str]:
     """
-    上传图片到阿里云 OSS
-    
-    Args:
-        image_bytes: 图片的字节数据
-        user_id: 用户 ID
-        session_id: 会话 ID
-        image_index: 图片索引
-        content_type: MIME 类型，默认 image/png
-        
+    上传图片到 Cloudflare R2。
+
     Returns:
-        OSS URL，如果失败返回 None
+        R2 公开 URL，如果失败返回 None
     """
-    if not USE_OSS or oss_bucket is None:
-        logger.warning("OSS 未启用或未初始化，无法上传图片")
+    if not USE_OSS or s3_client is None:
+        logger.warning("R2 未启用或未初始化，无法上传图片")
         return None
-    
+
     try:
-        # 统一使用 .png 后缀便于 API 拉取
         oss_key = f"images/{user_id}/{session_id}/{image_index}.png"
-        
-        logger.info(f"上传图片到 OSS: {oss_key} type={content_type}")
+
+        logger.info(f"上传图片到 R2: {oss_key} type={content_type}")
         logger.info(f"图片大小: {len(image_bytes)} 字节")
-        
+
         start_time = time.time()
-        headers = {'Content-Type': content_type}
-        oss_bucket.put_object(oss_key, image_bytes, headers=headers)
+        s3_client.put_object(Bucket=R2_BUCKET_NAME, Key=oss_key, Body=image_bytes, ContentType=content_type)
         upload_time = time.time() - start_time
-        
+
         logger.info(f"✅ 图片上传成功，耗时: {upload_time:.2f} 秒")
-        
-        # 构建图片 URL
-        if OSS_CDN_DOMAIN:
-            # 使用 CDN 域名
-            image_url = f"https://{OSS_CDN_DOMAIN}/{oss_key}"
+
+        # 构建公开 URL
+        if R2_PUBLIC_DOMAIN:
+            image_url = f"https://{R2_PUBLIC_DOMAIN}/{oss_key}"
         else:
-            # 使用 OSS 直接访问 URL
-            # 格式: https://{bucket}.{endpoint}/{key}
-            if OSS_ENDPOINT.startswith('http://'):
-                endpoint = OSS_ENDPOINT.replace('http://', 'https://')
-            elif OSS_ENDPOINT.startswith('https://'):
-                endpoint = OSS_ENDPOINT
-            else:
-                endpoint = f"https://{OSS_BUCKET_NAME}.{OSS_ENDPOINT}"
-            image_url = f"{endpoint}/{oss_key}"
-        
+            _ep = R2_ENDPOINT_URL.removeprefix('https://').removeprefix('http://')
+            image_url = f"https://{R2_BUCKET_NAME}.{_ep}/{oss_key}"
+
         logger.info(f"✅ 图片 URL: {image_url}")
         return image_url
-        
+
     except Exception as e:
-        logger.error(f"❌ 上传图片到 OSS 失败: {e}")
+        logger.error(f"❌ 上传图片到 R2 失败: {e}")
         logger.error(f"错误类型: {type(e).__name__}")
-        logger.error(f"完整错误堆栈:")
         logger.error(traceback.format_exc())
         return None
 
 
-# 原音频是否上传阿里云 OSS（默认 false：仅本地，直接走 Gemini）
+# 原音频是否上传 R2（默认 false：仅本地，直接走 Gemini）
 USE_OSS_FOR_ORIGINAL_AUDIO = os.getenv("USE_OSS_FOR_ORIGINAL_AUDIO", "false").lower() == "true"
 
 
@@ -563,10 +552,10 @@ def persist_original_audio(
     user_id: str,
 ) -> Tuple[Optional[str], Optional[str]]:
     """
-    将原音频持久化到本地（或 OSS，需显式启用），供后续剪切与声纹使用。
-    默认不上传阿里云，直接走 Gemini 分析。
+    将原音频持久化到本地（或 R2，需显式启用），供后续剪切与声纹使用。
+    默认不上传，直接走 Gemini 分析。
     Returns:
-        (audio_url, audio_path): OSS 时 url 有值；仅本地时 path 有值。
+        (audio_url, audio_path): R2 时 url 有值；仅本地时 path 有值。
     """
     audio_url: Optional[str] = None
     audio_path: Optional[str] = None
@@ -574,26 +563,21 @@ def persist_original_audio(
     if not file_ext.startswith("."):
         file_ext = "." + file_ext
 
-    if USE_OSS_FOR_ORIGINAL_AUDIO and USE_OSS and oss_bucket is not None:
+    if USE_OSS_FOR_ORIGINAL_AUDIO and USE_OSS and s3_client is not None:
         try:
             oss_key = f"sessions/{user_id}/{session_id}/original{file_ext}"
             with open(temp_file_path, "rb") as f:
                 content = f.read()
-            headers = {"Content-Type": "audio/mp4" if file_ext == ".m4a" else "application/octet-stream"}
-            oss_bucket.put_object(oss_key, content, headers=headers)
-            if OSS_CDN_DOMAIN:
-                audio_url = f"https://{OSS_CDN_DOMAIN}/{oss_key}"
+            content_type = "audio/mp4" if file_ext == ".m4a" else "application/octet-stream"
+            s3_client.put_object(Bucket=R2_BUCKET_NAME, Key=oss_key, Body=content, ContentType=content_type)
+            if R2_PUBLIC_DOMAIN:
+                audio_url = f"https://{R2_PUBLIC_DOMAIN}/{oss_key}"
             else:
-                if OSS_ENDPOINT.startswith("http://"):
-                    endpoint = OSS_ENDPOINT.replace("http://", "https://")
-                elif OSS_ENDPOINT.startswith("https://"):
-                    endpoint = OSS_ENDPOINT
-                else:
-                    endpoint = f"https://{OSS_BUCKET_NAME}.{OSS_ENDPOINT}"
-                audio_url = f"{endpoint}/{oss_key}"
-            logger.info(f"[分析-{session_id}] 原音频已上传 OSS: {audio_url[:80]}...")
+                _ep = R2_ENDPOINT_URL.removeprefix('https://').removeprefix('http://')
+                audio_url = f"https://{R2_BUCKET_NAME}.{_ep}/{oss_key}"
+            logger.info(f"[分析-{session_id}] 原音频已上传 R2: {audio_url[:80]}...")
         except Exception as e:
-            logger.warning(f"原音频上传 OSS 失败，将使用本地路径: {e}")
+            logger.warning(f"原音频上传 R2 失败，将使用本地路径: {e}")
             audio_url = None
 
     if not audio_url:
@@ -645,19 +629,26 @@ def _fetch_image_bytes(url: str, timeout: float = 10.0) -> Optional[Tuple[bytes,
         return None
 
 
-def _fetch_profile_image_from_oss(user_id: str, profile_id: str) -> Optional[Tuple[bytes, str]]:
+def _fetch_profile_image_from_oss(user_id: str, profile_id: str, photo_url: Optional[str] = None) -> Optional[Tuple[bytes, str]]:
     """
-    从 OSS 直接读取档案照片，用于图片生成参考（避免 API 需 JWT 的问题）。
-    路径: images/{user_id}/profile_{profile_id}/0.png
+    从 R2 直接读取档案照片，用于图片生成参考（避免 API 需 JWT 的问题）。
+    photo_url 不为空时，从 URL 中提取真实的 session_id 路径（如 profile_f264cb3d...）。
     """
-    if not USE_OSS or oss_bucket is None:
+    if not USE_OSS or s3_client is None:
         return None
     try:
-        oss_key = f"images/{user_id}/profile_{profile_id}/0.png"
-        obj = oss_bucket.get_object(oss_key)
-        data = obj.read()
+        oss_session_id = None
+        if photo_url:
+            m = re.search(r"(profile_[0-9a-f-]+)", photo_url)
+            if m:
+                oss_session_id = m.group(1)
+        if not oss_session_id:
+            oss_session_id = f"profile_{profile_id}"
+        oss_key = f"images/{user_id}/{oss_session_id}/0.png"
+        obj = s3_client.get_object(Bucket=R2_BUCKET_NAME, Key=oss_key)
+        data = obj['Body'].read()
         if len(data) > 7 * 1024 * 1024:
-            logger.warning(f"[档案照片] OSS 图片过大 ({len(data)} bytes)，跳过")
+            logger.warning(f"[档案照片] R2 图片过大 ({len(data)} bytes)，跳过")
             return None
         if len(data) >= 2 and data[0:2] == b"\xff\xd8":
             mime = "image/jpeg"
@@ -667,7 +658,7 @@ def _fetch_profile_image_from_oss(user_id: str, profile_id: str) -> Optional[Tup
             mime = "image/jpeg"
         return (data, mime)
     except Exception as e:
-        logger.debug(f"[档案照片] OSS 读取失败 profile_id={profile_id}: {e}")
+        logger.debug(f"[档案照片] R2 读取失败 profile_id={profile_id}: {e}")
         return None
 
 
@@ -766,18 +757,18 @@ async def _get_profile_reference_images(session_id: str, user_id: str, db: Async
                 continue
             photo_url = getattr(p, "photo_url", None)
             fetched = None
-            # 优先从 OSS 直接读取（不依赖 JWT）
-            if USE_OSS and oss_bucket:
-                fetched = _fetch_profile_image_from_oss(user_id, pid)
+            # 优先从 R2 直接读取（不依赖 JWT）
+            if USE_OSS and s3_client:
+                fetched = _fetch_profile_image_from_oss(user_id, pid, photo_url=photo_url)
             if not fetched and photo_url and photo_url.startswith(("http://", "https://")):
-                # 若为直连 OSS CDN 等公开 URL，可尝试 HTTP 拉取（/api/v1/images 需 JWT 会失败）
+                # R2 公开 bucket，可直接 HTTP 拉取
                 if "/api/v1/images/" not in photo_url:
                     fetched = _fetch_image_bytes(photo_url)
             if fetched:
                 result.append(fetched)
                 logger.info(f"[档案照片] 已加载参考图: profile_id={pid} name={getattr(p,'name','')} rel={getattr(p,'relationship_type','')}")
             else:
-                logger.warning(f"[档案照片] 无法加载 profile_id={pid} photo_url={bool(photo_url)} OSS={USE_OSS and oss_bucket is not None}")
+                logger.warning(f"[档案照片] 无法加载 profile_id={pid} photo_url={bool(photo_url)} R2={USE_OSS and s3_client is not None}")
     except Exception as e:
         logger.warning(f"[档案照片] 获取参考图失败: {e}", exc_info=True)
     return result
@@ -927,17 +918,17 @@ def generate_image_from_prompt(
                 logger.warning("⚠️ 响应中没有找到图片数据")
                 return None
             
-            # 尝试上传到 OSS
-            if USE_OSS and oss_bucket is not None:
-                logger.info(f"尝试上传图片到 OSS...")
+            # 尝试上传到 R2
+            if USE_OSS and s3_client is not None:
+                logger.info(f"尝试上传图片到 R2...")
                 image_url = upload_image_to_oss(image_bytes, user_id, session_id, image_index)
                 if image_url:
-                    logger.info(f"✅ 图片已上传到 OSS，URL: {image_url}")
+                    logger.info(f"✅ 图片已上传到 R2，URL: {image_url}")
                     return image_url
                 else:
-                    logger.warning("⚠️ OSS 上传失败，降级到 Base64")
-            
-            # 如果 OSS 未启用或上传失败，降级到 Base64
+                    logger.warning("⚠️ R2 上传失败，降级到 Base64")
+
+            # 如果 R2 未启用或上传失败，降级到 Base64
             logger.info("使用 Base64 编码返回图片")
             image_base64 = base64.b64encode(image_bytes).decode('utf-8')
             logger.info(f"✅ 图片 Base64 编码完成，大小: {len(image_base64)} 字符")
@@ -1436,6 +1427,54 @@ async def update_user_preferences(
             timestamp=datetime.now().isoformat()
         )
     return APIResponse(code=200, message="success", data={}, timestamp=datetime.now().isoformat())
+
+
+@app.delete("/api/v1/users/me", response_model=dict)
+async def delete_account(
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db)
+):
+    """永久删除当前用户账号及所有关联数据。"""
+    from sqlalchemy import delete as sql_delete
+    from database.models import KgPerson, KgEvent, KgEventPerson, KgGoal
+
+    try:
+        uid = uuid.UUID(user_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid user ID")
+
+    # 从 DB 取真实 User（get_current_user 返回 SimpleNamespace，不能直接用）
+    result = await db.execute(select(User).where(User.id == uid))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # 若是 Apple 用户且存有 refresh_token，先撤销（非阻断）
+    if getattr(user, "apple_refresh_token", None):
+        from api.auth import _revoke_apple_token
+        await _revoke_apple_token(user.apple_refresh_token)
+
+    # 删除 KG 数据（无 FK CASCADE，需手动清理）
+    kg_person_ids_result = await db.execute(select(KgPerson.id).where(KgPerson.user_id == uid))
+    kg_person_ids = [r[0] for r in kg_person_ids_result.all()]
+    kg_event_ids_result = await db.execute(select(KgEvent.id).where(KgEvent.user_id == uid))
+    kg_event_ids = [r[0] for r in kg_event_ids_result.all()]
+
+    if kg_person_ids:
+        await db.execute(sql_delete(KgEventPerson).where(KgEventPerson.person_id.in_(kg_person_ids)))
+    if kg_event_ids:
+        await db.execute(sql_delete(KgEventPerson).where(KgEventPerson.event_id.in_(kg_event_ids)))
+
+    await db.execute(sql_delete(KgGoal).where(KgGoal.user_id == uid))
+    await db.execute(sql_delete(KgEvent).where(KgEvent.user_id == uid))
+    await db.execute(sql_delete(KgPerson).where(KgPerson.user_id == uid))
+
+    # 删除用户，DB CASCADE 自动处理 sessions/profiles/skill_preferences 等
+    await db.execute(sql_delete(User).where(User.id == uid))
+    await db.commit()
+
+    logger.info(f"✅ 账号已永久删除 user_id={user_id}")
+    return {"code": 200, "message": "Account deleted"}
 
 
 # ==================== 任务管理 API ====================
@@ -2089,13 +2128,22 @@ async def get_task_list(
             api_base = api_base.rstrip("/")
             for sa in sa_result.scalars().all():
                 sid = str(sa.session_id)
+                def _is_valid_img_url(u):
+                    return u and isinstance(u, str) and (
+                        ".r2.dev" in u or "r2.cloudflarestorage.com" in u
+                    )
+
+                def _cover_url_for(raw_url, session_id, api_base):
+                    """所有图片均托管在 R2 公开 bucket，直接返回原始 URL。"""
+                    return raw_url
+
                 # 优先：从 visual_data[0] 取封面（旧版图片生成流程）
                 vd = sa.visual_data
                 if isinstance(vd, list) and len(vd) > 0:
                     first_v = vd[0] if isinstance(vd[0], dict) else getattr(vd[0], "__dict__", {})
                     img_url = first_v.get("image_url") if isinstance(first_v, dict) else getattr(first_v, "image_url", None)
-                    if img_url and isinstance(img_url, str) and ("oss" in img_url or "geminipicture" in img_url.lower()):
-                        cover_map[sid] = f"{api_base}/api/v1/images/{sid}/0"
+                    if _is_valid_img_url(img_url):
+                        cover_map[sid] = _cover_url_for(img_url, sid, api_base)
                 # 兜底：从 scene_images[0] 取封面（新版并行生图流程）
                 if sid not in cover_map:
                     scene_imgs = sa.scene_images
@@ -2103,12 +2151,9 @@ async def get_task_list(
                         for si in scene_imgs:
                             si_dict = si if isinstance(si, dict) else {}
                             si_url = si_dict.get("image_url")
-                            if si_url and isinstance(si_url, str) and ("oss" in si_url or "geminipicture" in si_url.lower()):
-                                # 从 OSS URL 解析真实 image_index：images/{uid}/{sid}/{idx}.png
-                                _m = re.search(r'/([0-9]+)\.png', si_url)
-                                if _m:
-                                    cover_map[sid] = f"{api_base}/api/v1/images/{sid}/{_m.group(1)}"
-                                    break
+                            if _is_valid_img_url(si_url):
+                                cover_map[sid] = _cover_url_for(si_url, sid, api_base)
+                                break
         
         task_items = [
             TaskItem(
@@ -3632,27 +3677,13 @@ async def get_image(
     db: AsyncSession = Depends(get_db)
 ):
     """
-    获取图片（通过后端 API 访问，支持私有 OSS bucket，需要JWT认证）
-    
-    注意：由于 OSS bucket 设置为私有，不能直接通过 OSS URL 访问图片。
-    必须通过此 API 接口访问，后端会从 OSS 获取图片并返回。
-    仅能访问属于当前用户的图片。
-    
-    Args:
-        session_id: 会话 ID
-        image_index: 图片索引
-        
-    Returns:
-        图片数据（PNG 格式）
+    获取图片（通过后端 API 访问，需要 JWT 认证）。
+    所有图片现托管在 Cloudflare R2 公开 bucket，此接口从 R2 读取并返回。
     """
     try:
-        # 档案照片：session_id 为 profile_{uuid}，无需查 Session 表
-        # 策略图片：session_id 为任务 UUID，需验证归属
         if session_id.startswith("profile_"):
-            # 档案照片路径 images/{user_id}/profile_xxx/0.png，仅校验 user_id 归属
             pass
         else:
-            # 策略图片：验证任务属于当前用户
             result = await db.execute(
                 select(Session).where(
                     Session.id == uuid.UUID(session_id),
@@ -3662,51 +3693,45 @@ async def get_image(
             db_session = result.scalar_one_or_none()
             if not db_session:
                 raise HTTPException(status_code=404, detail="任务不存在")
-        
-        # 如果 OSS 未启用，返回错误
-        if not USE_OSS or oss_bucket is None:
-            logger.warning("OSS 未启用，无法提供图片访问")
+
+        if not USE_OSS or s3_client is None:
             raise HTTPException(status_code=503, detail="Image service unavailable")
-        
-        # 构建 OSS 文件路径: images/{user_id}/{session_id}/{image_index}.png
+
         oss_key = f"images/{user_id}/{session_id}/{image_index}.png"
-        
         logger.info(f"获取图片: {oss_key}")
-        
+
         try:
-            # 从 OSS 获取图片
             start_time = time.time()
-            image_object = oss_bucket.get_object(oss_key)
-            image_data = image_object.read()
+            obj = s3_client.get_object(Bucket=R2_BUCKET_NAME, Key=oss_key)
+            image_data = obj['Body'].read()
             fetch_time = time.time() - start_time
-            
+
             logger.info(f"✅ 图片获取成功，大小: {len(image_data)} 字节，耗时: {fetch_time:.2f} 秒")
-            
+
             media_type = "image/png"
             if len(image_data) >= 2 and image_data[0:2] == b"\xff\xd8":
                 media_type = "image/jpeg"
             elif len(image_data) >= 4 and image_data[0:4] == b"\x89PNG":
                 media_type = "image/png"
-            
+
             return Response(
                 content=image_data,
                 media_type=media_type,
                 headers={
-                    "Cache-Control": "public, max-age=3600",  # 缓存 1 小时
+                    "Cache-Control": "public, max-age=3600",
                     "Content-Disposition": f'inline; filename="image_{image_index}.png"'
                 }
             )
-            
+
         except Exception as e:
             error_msg = str(e)
             if "NoSuchKey" in error_msg or "404" in error_msg:
-                logger.warning(f"图片不存在: {oss_key}")
                 raise HTTPException(status_code=404, detail="Image not found")
             else:
-                logger.error(f"❌ 从 OSS 获取图片失败: {e}")
+                logger.error(f"❌ 从 R2 获取图片失败: {e}")
                 logger.error(traceback.format_exc())
                 raise HTTPException(status_code=500, detail="Failed to fetch image")
-                
+
     except HTTPException:
         raise
     except Exception as e:
@@ -3717,24 +3742,23 @@ async def get_image(
 
 @app.get("/api/v1/style-thumbnails/{style_key}")
 async def get_style_thumbnail(style_key: str):
-    """返回风格缩略图（无需 JWT），从 OSS style_thumbnails/{style_key}.png 读取"""
-    # 仅允许合法的 style_key 字符，防止路径遍历
+    """返回风格缩略图（无需 JWT），从 R2 style_thumbnails/{style_key}.png 读取"""
     import re as _re
     if not _re.match(r'^[a-z0-9_]+$', style_key):
         raise HTTPException(status_code=400, detail="Invalid style_key")
-    if not USE_OSS or oss_bucket is None:
+    if not USE_OSS or s3_client is None:
         raise HTTPException(status_code=503, detail="Image service unavailable")
     try:
         oss_key = f"style_thumbnails/{style_key}.png"
-        image_object = oss_bucket.get_object(oss_key)
-        image_data = image_object.read()
+        obj = s3_client.get_object(Bucket=R2_BUCKET_NAME, Key=oss_key)
+        image_data = obj['Body'].read()
         return Response(
             content=image_data,
             media_type="image/png",
-            headers={"Cache-Control": "public, max-age=86400"},  # 缓存1天
+            headers={"Cache-Control": "public, max-age=86400"},
         )
     except Exception as e:
-        if "NoSuchKey" in str(e) or "404" in str(e):
+        if "NoSuchKey" in str(e) or "404" in str(e) or "NoSuchKey" in type(e).__name__:
             raise HTTPException(status_code=404, detail="Thumbnail not found")
         logger.error(f"[风格缩略图] 获取失败 {style_key}: {e}")
         raise HTTPException(status_code=500, detail="Failed to fetch thumbnail")
@@ -3742,39 +3766,49 @@ async def get_style_thumbnail(style_key: str):
 
 def cleanup_old_images(days: int = 7):
     """
-    清理过期的图片文件
-    
+    清理 R2 中过期的图片文件
+
     Args:
         days: 保留天数，默认 7 天
     """
-    if not USE_OSS or oss_bucket is None:
-        logger.warning("OSS 未启用，无法清理图片")
+    if not USE_OSS or s3_client is None:
+        logger.warning("R2 未启用，无法清理图片")
         return
-    
+
     try:
-        from datetime import datetime, timedelta
-        cutoff_date = datetime.now() - timedelta(days=days)
-        
+        from datetime import datetime, timedelta, timezone
+        cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
+
         logger.info(f"开始清理 {days} 天前的图片文件...")
-        
-        # 列出所有图片文件
+
         prefix = "images/"
         deleted_count = 0
         error_count = 0
-        
-        for obj in oss2.ObjectIterator(oss_bucket, prefix=prefix):
-            # 检查文件修改时间
-            if obj.last_modified < cutoff_date:
-                try:
-                    oss_bucket.delete_object(obj.key)
-                    deleted_count += 1
-                    logger.debug(f"删除文件: {obj.key}")
-                except Exception as e:
-                    error_count += 1
-                    logger.error(f"删除文件失败 {obj.key}: {e}")
-        
+        continuation_token = None
+
+        while True:
+            list_kwargs = {"Bucket": R2_BUCKET_NAME, "Prefix": prefix}
+            if continuation_token:
+                list_kwargs["ContinuationToken"] = continuation_token
+            resp = s3_client.list_objects_v2(**list_kwargs)
+
+            for obj in resp.get("Contents", []):
+                if obj["LastModified"] < cutoff_date:
+                    try:
+                        s3_client.delete_object(Bucket=R2_BUCKET_NAME, Key=obj["Key"])
+                        deleted_count += 1
+                        logger.debug(f"删除文件: {obj['Key']}")
+                    except Exception as e:
+                        error_count += 1
+                        logger.error(f"删除文件失败 {obj['Key']}: {e}")
+
+            if resp.get("IsTruncated"):
+                continuation_token = resp.get("NextContinuationToken")
+            else:
+                break
+
         logger.info(f"✅ 清理完成: 删除 {deleted_count} 个文件，失败 {error_count} 个")
-        
+
     except Exception as e:
         logger.error(f"❌ 清理图片文件失败: {e}")
         logger.error(traceback.format_exc())

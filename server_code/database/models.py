@@ -18,6 +18,7 @@ class User(Base):
     phone = Column(String(11), unique=True, nullable=True, index=True)
     email = Column(String(200), nullable=True)
     apple_user_id = Column(String(255), unique=True, nullable=True, index=True)
+    apple_refresh_token = Column(String(2000), nullable=True)
     password_hash = Column(String(255), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

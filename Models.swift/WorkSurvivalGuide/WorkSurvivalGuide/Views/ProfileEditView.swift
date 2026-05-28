@@ -632,7 +632,7 @@ struct ProfileEditView: View {
                     guard let data = imageToUpload.jpegData(compressionQuality: 0.85) else {
                         await MainActor.run {
                             isSaving = false
-                            errorMessage = "图片处理失败"
+                            errorMessage = "Failed to process image. Please try a different photo."
                             showError = true
                         }
                         return

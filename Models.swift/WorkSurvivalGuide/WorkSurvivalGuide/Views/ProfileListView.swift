@@ -19,7 +19,8 @@ struct ProfileListView: View {
     @State private var showEmojiTypePicker = false
     @State private var selfEmojiType: String = "self"
     @State private var showAIInfo = false
-    @State private var showDeleteAccountConfirm = false
+    @State private var showDeleteStep1 = false
+    @State private var showDeleteStep2 = false
     @State private var isDeletingAccount = false
     
     var body: some View {
@@ -48,14 +49,14 @@ struct ProfileListView: View {
                         Image(systemName: "person.badge.plus")
                             .font(.system(size: 52))
                             .foregroundColor(AppColors.secondaryText.opacity(0.5))
-                        Text("还没有档案")
+                        Text("No profiles yet")
                             .font(AppFonts.cardTitle)
                             .foregroundColor(AppColors.primaryText)
-                        Text("先创建一个档案\n记录你的工作对象背景信息")
+                        Text("Add profiles for the people in your life —\nfriends, family, or coworkers.\nTheir photos help generate richer,\nmore personalized conversation art.")
                             .font(AppFonts.time)
                             .foregroundColor(AppColors.secondaryText)
                             .multilineTextAlignment(.center)
-                        Button("创建第一个档案") {
+                        Button("Create Your First Profile") {
                             profileCountBeforeSheet = viewModel.profiles.count
                             showingCreateProfile = true
                         }
@@ -121,6 +122,7 @@ struct ProfileListView: View {
             ProfileEditView(profile: profile)
         }
         .sheet(isPresented: $showSettingsSheet) {
+            ZStack {
             VStack(spacing: 24) {
                 Text("Settings")
                     .font(AppFonts.cardTitle)
@@ -257,17 +259,11 @@ struct ProfileListView: View {
                 }
 
                 // Delete Account
-                Button(action: { showDeleteAccountConfirm = true }) {
+                Button(action: { showDeleteStep1 = true }) {
                     HStack(spacing: 8) {
-                        if isDeletingAccount {
-                            ProgressView()
-                                .progressViewStyle(CircularProgressViewStyle(tint: Color(hex: "#EF4444")))
-                                .scaleEffect(0.8)
-                        } else {
-                            Image(systemName: "trash.fill")
-                                .font(.system(size: 14))
-                        }
-                        Text(isDeletingAccount ? "Deleting…" : "Delete Account")
+                        Image(systemName: "trash.fill")
+                            .font(.system(size: 14))
+                        Text("Delete Account")
                             .font(AppFonts.cardTitle)
                     }
                     .foregroundColor(Color(hex: "#EF4444"))
@@ -277,26 +273,41 @@ struct ProfileListView: View {
                     .cornerRadius(8)
                 }
                 .buttonStyle(.plain)
-                .disabled(isDeletingAccount)
                 .padding(.horizontal, 24)
-                .alert("Delete Account", isPresented: $showDeleteAccountConfirm) {
-                    Button("Cancel", role: .cancel) { }
-                    Button("Delete Permanently", role: .destructive) {
+                .alert("Delete Account?", isPresented: $showDeleteStep1) {
+                    Button("Cancel", role: .cancel) {}
+                    Button("Continue", role: .destructive) {
+                        showDeleteStep2 = true
+                    }
+                } message: {
+                    Text("All your recordings, profiles, and data will be permanently deleted. This action cannot be undone.")
+                }
+                .alert("Delete Account Permanently?", isPresented: $showDeleteStep2) {
+                    Button("Cancel", role: .cancel) {}
+                    Button("Delete", role: .destructive) {
+                        guard !isDeletingAccount else { return }
+                        isDeletingAccount = true
                         Task {
-                            isDeletingAccount = true
                             do {
                                 try await NetworkManager.shared.deleteAccount()
                                 await MainActor.run {
+                                    if let bundleID = Bundle.main.bundleIdentifier {
+                                        UserDefaults.standard.removePersistentDomain(forName: bundleID)
+                                    }
+                                    URLCache.shared.removeAllCachedResponses()
                                     showSettingsSheet = false
+                                    isDeletingAccount = false
                                     AuthManager.shared.logout()
                                 }
                             } catch {
-                                await MainActor.run { isDeletingAccount = false }
+                                await MainActor.run {
+                                    isDeletingAccount = false
+                                }
                             }
                         }
                     }
                 } message: {
-                    Text("This will permanently delete your account, all recordings, profiles, and data. This action cannot be undone.")
+                    Text("This is your final confirmation. Your account and all data will be permanently deleted.")
                 }
 
                 Button("Sign Out") {
@@ -315,6 +326,8 @@ struct ProfileListView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(AppColors.background)
+
+            } // ZStack
         }
         .sheet(isPresented: $showSubscription) {
             SubscriptionView()
@@ -550,5 +563,6 @@ struct ProfileCardView: View {
                 .shadow(color: Color.black.opacity(0.1), radius: 2, x: 0, y: 2)
         }
     }
-    
+
 }
+
