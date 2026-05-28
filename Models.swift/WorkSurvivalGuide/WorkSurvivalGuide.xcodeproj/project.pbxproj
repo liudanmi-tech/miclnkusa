@@ -451,7 +451,7 @@
 				INFOPLIST_KEY_CFBundleDisplayName = Chattoon;
 				INFOPLIST_KEY_LSApplicationCategoryType = "";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "需要访问麦克风以录制音频";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Chattoon listens to your voice to generate personalized AI comic scenes from your conversations. Recordings are processed privately and never stored or shared.";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "需要保存策略分析图片到相册";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Chattoon uses speech recognition to transcribe your voice messages into text for the AI Assistant.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -489,7 +489,7 @@
 				INFOPLIST_KEY_CFBundleDisplayName = Chattoon;
 				INFOPLIST_KEY_LSApplicationCategoryType = "";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "需要访问麦克风以录制音频";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Chattoon listens to your voice to generate personalized AI comic scenes from your conversations. Recordings are processed privately and never stored or shared.";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "需要保存策略分析图片到相册";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Chattoon uses speech recognition to transcribe your voice messages into text for the AI Assistant.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
