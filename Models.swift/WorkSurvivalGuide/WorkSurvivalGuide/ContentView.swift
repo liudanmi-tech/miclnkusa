@@ -111,7 +111,12 @@ struct ContentView: View {
             // 处理从 LoginView 刚登录完成的情况
             if isLoggedIn && !TourManager.shared.mainTourCompleted {
                 selectedTab = .profile
-                TourManager.shared.startMainTour()
+                // 仅当 onboarding 已完成时才启动 tour；否则由 onChange(of: onboardingCompleted) 启动
+                // 避免 onboarding 未完成时 currentStep 被提前设为 .profileAddButton，
+                // 导致 onboarding 完成后再次 startMainTour() 时 onChange 不触发（值未变）→ 引导延迟 3-5 秒
+                if onboardingCompleted {
+                    TourManager.shared.startMainTour()
+                }
             }
         }
         .fileImporter(

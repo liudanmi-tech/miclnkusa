@@ -116,9 +116,9 @@ struct TaskItem: Codable, Identifiable {
         let minutes = duration / 60
         let seconds = duration % 60
         if minutes > 0 {
-            return "\(minutes)分钟"
+            return seconds > 0 ? "\(minutes)m \(seconds)s" : "\(minutes)m"
         } else {
-            return "\(seconds)秒"
+            return "\(seconds)s"
         }
     }
     

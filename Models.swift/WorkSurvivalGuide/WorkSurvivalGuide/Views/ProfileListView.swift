@@ -19,6 +19,8 @@ struct ProfileListView: View {
     @State private var showEmojiTypePicker = false
     @State private var selfEmojiType: String = "self"
     @State private var showAIInfo = false
+    @State private var showDeleteAccountConfirm = false
+    @State private var isDeletingAccount = false
     
     var body: some View {
         ZStack {
@@ -252,6 +254,49 @@ struct ProfileListView: View {
                     Button("OK", role: .cancel) { }
                 } message: {
                     Text("Chattoon uses Google Gemini AI to generate images and insights from your recordings. AI-generated content is for personal reflection only and is not a substitute for professional advice.")
+                }
+
+                // Delete Account
+                Button(action: { showDeleteAccountConfirm = true }) {
+                    HStack(spacing: 8) {
+                        if isDeletingAccount {
+                            ProgressView()
+                                .progressViewStyle(CircularProgressViewStyle(tint: Color(hex: "#EF4444")))
+                                .scaleEffect(0.8)
+                        } else {
+                            Image(systemName: "trash.fill")
+                                .font(.system(size: 14))
+                        }
+                        Text(isDeletingAccount ? "Deleting…" : "Delete Account")
+                            .font(AppFonts.cardTitle)
+                    }
+                    .foregroundColor(Color(hex: "#EF4444"))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .background(Color(hex: "#EF4444").opacity(0.12))
+                    .cornerRadius(8)
+                }
+                .buttonStyle(.plain)
+                .disabled(isDeletingAccount)
+                .padding(.horizontal, 24)
+                .alert("Delete Account", isPresented: $showDeleteAccountConfirm) {
+                    Button("Cancel", role: .cancel) { }
+                    Button("Delete Permanently", role: .destructive) {
+                        Task {
+                            isDeletingAccount = true
+                            do {
+                                try await NetworkManager.shared.deleteAccount()
+                                await MainActor.run {
+                                    showSettingsSheet = false
+                                    AuthManager.shared.logout()
+                                }
+                            } catch {
+                                await MainActor.run { isDeletingAccount = false }
+                            }
+                        }
+                    }
+                } message: {
+                    Text("This will permanently delete your account, all recordings, profiles, and data. This action cannot be undone.")
                 }
 
                 Button("Sign Out") {

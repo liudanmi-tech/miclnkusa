@@ -3,20 +3,24 @@
 //  WorkSurvivalGuide
 //
 //  任务卡片组件 - 1:1 图片卡片，策略首图填充，底部半透明蒙层展示标题与时间
-//  1-6 步：图标+状态在卡片中央；7-12 步：summary 由下至上滚动，阶段 badge 在右上角
+//  loading 阶段：居中播放阶段 GIF（卡片宽/高的 1/2）+ 状态文字；有封面后替换为封面图
 //
 
 import SwiftUI
+import UIKit
 
 struct TaskCardView: View {
     let task: TaskItem
     /// 封面图 404 时置为 true，切换为占位内容
     @State private var coverLoadFailed = false
-    
+    /// loading 倒计时已过秒数
+    @State private var loadingElapsed: Int = 0
+    @State private var loadTimer: Timer?
+
     private var baseURL: String {
         NetworkManager.shared.getBaseURL()
     }
-    
+
     private var hasCoverImage: Bool {
         guard let url = task.coverImageUrl, !url.isEmpty else { return false }
         return true
@@ -26,27 +30,36 @@ struct TaskCardView: View {
     private var isGeneratingImages: Bool {
         task.status == .archived && task.coverImageUrl == nil
     }
-    
-    /// 7-12 步：有 summary 且在分析中、无封面图时，显示滚动 summary
-    private var hasScrollingSummary: Bool {
-        task.status == .analyzing
-            && (task.summary != nil && !(task.summary?.isEmpty ?? true))
-            && !hasCoverImage
+
+    /// Returns local GIF resource name for current loading stage, nil if no GIF should show
+    private var cardGIFName: String? {
+        if task.status == .recording { return nil }
+        if isGeneratingImages { return "04" }
+        guard task.status == .analyzing, let desc = task.progressDescription else { return nil }
+        // Group 1: saving_audio, transcribing
+        if desc == "Upload complete" || desc.hasPrefix("Saving audio") || desc.hasPrefix("Transcribing") {
+            return "01"
+        }
+        // Group 2: matching_profiles → strategy_matched_n
+        if desc.hasPrefix("Matching profiles") || desc.hasPrefix("Identifying scene")
+            || desc.hasPrefix("Matching skills") || desc.hasPrefix("Matched") || desc == "Skills matched" {
+            return "02"
+        }
+        // Group 3: strategy_executing, strategy_done（不含 Generating images）
+        if desc.hasPrefix("Processing skills") || desc == "Strategy ready" {
+            return "03"
+        }
+        // Group 4: strategy_images → oss_upload → gemini_analysis → voiceprint（Gemini 生成封面全程）
+        if desc.hasPrefix("Generating images") || desc.hasPrefix("Uploading to cloud")
+            || desc.hasPrefix("Analyzing conversation") || desc.hasPrefix("Matching speakers") {
+            return "04"
+        }
+        return nil
     }
-    
-    /// 是否处于策略阶段（7-12 步），用于右上角 badge
-    private var isStrategyPhase: Bool {
-        guard let stage = task.progressDescription else { return false }
-        return stage.contains("Identifying scene")
-            || stage.contains("Matching skills") || stage.contains("Matched")
-            || stage.contains("Processing skills")
-            || stage.contains("Generating images")
-            || stage.contains("Strategy ready")
-    }
-    
+
     var body: some View {
         ZStack(alignment: .bottomLeading) {
-            // 主内容区：图片 / 滚动 summary / 占位
+            // 主内容区：封面图 或 占位（GIF + 文字）
             if hasCoverImage, let url = task.coverImageUrl, !coverLoadFailed {
                 ImageLoaderView(
                     imageUrl: accessibleImageURL(url),
@@ -58,34 +71,14 @@ struct TaskCardView: View {
                 .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
                 .clipped()
                 .onChange(of: task.id) { _ in coverLoadFailed = false }
-            } else if hasScrollingSummary, let summary = task.summary {
-                scrollingSummaryContent(summary: summary)
             } else {
                 placeholderContent
             }
-            
+
             // 底部渐变蒙层
             overlayGradient
-            
-            // 7-12 步：右上角阶段 badge，不遮挡 summary
-            if hasScrollingSummary && isStrategyPhase, let stage = task.progressDescription {
-                VStack {
-                    Text(stage)
-                        .font(.system(size: 11, weight: .medium, design: .rounded))
-                        .foregroundColor(.white.opacity(0.9))
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(Color.black.opacity(0.4))
-                        .cornerRadius(8)
-                    Spacer()
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-                .padding(.top, 8)
-                .padding(.trailing, 8)
-                .allowsHitTesting(false)
-            }
-            
-            // 文字总结区域：毛玻璃 + 总结/时间/时长
+
+            // 底部信息栏：毛玻璃 + 标题/时间/时长
             VStack {
                 Spacer()
                 VStack(alignment: .leading, spacing: 4) {
@@ -121,35 +114,69 @@ struct TaskCardView: View {
         .aspectRatio(1, contentMode: .fit)
         .clipShape(RoundedRectangle(cornerRadius: 12))
     }
-    
-    /// 7-12 步：summary 由下至上滚动展示，字体样式参照截图 2
-    @ViewBuilder
-    private func scrollingSummaryContent(summary: String) -> some View {
-        ZStack {
-            placeholderBackground
-            ScrollingSummaryView(text: summary)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .padding(.horizontal, 16)
-                .padding(.top, 44)
-                .padding(.bottom, 8)
-                .clipped()
-        }
-    }
-    
+
+    /// loading 占位：顶部状态文字 + 倒计时，居中 GIF（卡片 1/3）
     private var placeholderContent: some View {
-        ZStack {
-            placeholderBackground
-            VStack(spacing: 8) {
-                placeholderIcon
-                if !placeholderText.isEmpty {
-                    Text(placeholderText)
-                        .font(.system(size: 13, weight: .medium, design: .rounded))
-                        .foregroundColor(placeholderTextColor)
+        GeometryReader { geo in
+            ZStack {
+                placeholderBackground
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                // 顶部信息：阶段文字 + 倒计时（两行，相互独立）
+                VStack(spacing: 3) {
+                    if !placeholderText.isEmpty {
+                        Text(placeholderText)
+                            .font(.system(size: 12, weight: .medium, design: .rounded))
+                            .foregroundColor(placeholderTextColor)
+                            .multilineTextAlignment(.center)
+                    }
+                    if let cd = countdownText {
+                        Text(cd)
+                            .font(.system(size: 11, weight: .regular, design: .rounded))
+                            .foregroundColor(placeholderTextColor.opacity(0.75))
+                            .multilineTextAlignment(.center)
+                    }
                 }
+                .padding(.horizontal, 8)
+                .padding(.top, 12)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+
+                // GIF 或图标：卡片正中，1/3 大小
+                if let gifName = cardGIFName {
+                    LocalGIFView(name: gifName)
+                        .frame(width: geo.size.width / 3, height: geo.size.width / 3)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                } else {
+                    placeholderIcon
+                }
+            }
+            .onAppear {
+                guard task.status == .analyzing || isGeneratingImages else { return }
+                loadingElapsed = 0
+                loadTimer?.invalidate()
+                loadTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
+                    loadingElapsed += 1
+                }
+            }
+            .onDisappear {
+                loadTimer?.invalidate()
+                loadTimer = nil
             }
         }
     }
-    
+
+    /// 倒计时显示文字（仅 analyzing / isGeneratingImages 状态）
+    private var countdownText: String? {
+        guard task.status == .analyzing || isGeneratingImages else { return nil }
+        switch loadingElapsed {
+        case 0..<60:    return "Est. ~3 min"
+        case 60..<120:  return "Est. ~2 min"
+        case 120..<150: return "Est. ~1 min"
+        case 150..<180: return "Est. 30s"
+        default:        return "Please be patient..."
+        }
+    }
+
     private var placeholderBackground: Color {
         switch task.status {
         case .recording:
@@ -162,7 +189,7 @@ struct TaskCardView: View {
             return Color(hex: "#4A1C1C").opacity(0.9)
         }
     }
-    
+
     private var placeholderIcon: some View {
         Group {
             switch task.status {
@@ -189,7 +216,7 @@ struct TaskCardView: View {
             }
         }
     }
-    
+
     private var placeholderText: String {
         switch task.status {
         case .recording:
@@ -204,7 +231,7 @@ struct TaskCardView: View {
             return "Analysis Failed"
         }
     }
-    
+
     private var placeholderTextColor: Color {
         switch task.status {
         case .recording:
@@ -217,7 +244,7 @@ struct TaskCardView: View {
             return Color(hex: "#F87171")
         }
     }
-    
+
     private var overlayGradient: some View {
         VStack {
             Spacer()
@@ -232,63 +259,57 @@ struct TaskCardView: View {
             .frame(height: 100)
         }
     }
-    
+
     private var formattedTime: String {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US")
         formatter.dateFormat = "MMM d, h:mm a"
         return formatter.string(from: task.startTime)
     }
-    
+
     private func accessibleImageURL(_ url: String) -> String {
         if url.contains("/api/v1/images/") || url.hasPrefix("http") {
             return url
         }
-        // baseURL 已含 /api/v1，故图片 URL = {base}/images/{id}/0
         let base = baseURL.hasSuffix("/") ? String(baseURL.dropLast()) : baseURL
         return "\(base)/images/\(task.id)/0"
     }
 }
 
-// MARK: - ScrollingSummaryView
-/// 由下至上循环滚动的对话总结，展示全部内容，直到图片生成后替换
-struct ScrollingSummaryView: View {
-    let text: String
-    @State private var offset: CGFloat = 0
-    @State private var scrollTask: Task<Void, Never>?
-    
-    private let scrollDistance: CGFloat = 1200
-    private let scrollDuration: Double = 56
-    
-    var body: some View {
-        Text(text)
-            .font(.system(size: 18, weight: .regular, design: .rounded))
-            .foregroundColor(.white.opacity(0.85))
-            .lineSpacing(8)
-            .multilineTextAlignment(.leading)
-            .lineLimit(nil)
-            .fixedSize(horizontal: false, vertical: true)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .offset(y: offset)
-            .onAppear {
-                startLoopingScroll()
-            }
-            .onDisappear {
-                scrollTask?.cancel()
-            }
+// MARK: - LocalGIFView
+
+/// Loads and plays a GIF from the app bundle by resource name (without extension).
+struct LocalGIFView: UIViewRepresentable {
+    let name: String
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    func makeUIView(context: Context) -> UIImageView {
+        let iv = UIImageView()
+        iv.contentMode = .scaleAspectFit
+        iv.clipsToBounds = true
+        // 让 UIImageView 服从 SwiftUI 的 frame，不用图片原始尺寸撑开布局
+        iv.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        iv.setContentHuggingPriority(.defaultLow, for: .vertical)
+        iv.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        iv.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
+        load(into: iv, coordinator: context.coordinator)
+        return iv
     }
-    
-    private func startLoopingScroll() {
-        withAnimation(.linear(duration: scrollDuration)) {
-            offset = -scrollDistance
-        }
-        scrollTask = Task {
-            try? await Task.sleep(nanoseconds: UInt64(scrollDuration * 1_000_000_000))
-            guard !Task.isCancelled else { return }
-            await MainActor.run {
-                offset = 0
-                startLoopingScroll()
-            }
-        }
+
+    func updateUIView(_ uiView: UIImageView, context: Context) {
+        guard context.coordinator.loadedName != name else { return }
+        load(into: uiView, coordinator: context.coordinator)
+    }
+
+    private func load(into iv: UIImageView, coordinator: Coordinator) {
+        coordinator.loadedName = name
+        guard let url = Bundle.main.url(forResource: name, withExtension: "gif"),
+              let data = try? Data(contentsOf: url) else { return }
+        iv.image = UIImage.animatedGIF(data: data)
+    }
+
+    final class Coordinator: NSObject {
+        var loadedName: String?
     }
 }

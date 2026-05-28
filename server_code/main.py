@@ -1706,6 +1706,22 @@ async def update_user_preferences(
     return APIResponse(code=200, message="success", data={}, timestamp=datetime.now().isoformat())
 
 
+@app.delete("/api/v1/users/me")
+async def delete_account(
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db)
+):
+    """Permanently delete the current user account and all associated data."""
+    from sqlalchemy import delete as sql_delete
+    user = await db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    await db.delete(user)
+    await db.commit()
+    logger.info(f"[账号删除] user_id={user_id} 账号已永久删除")
+    return APIResponse(code=200, message="Account deleted successfully", data={}, timestamp=datetime.now().isoformat())
+
+
 # ==================== 任务管理 API ====================
 
 # 内存存储（临时，后续改为数据库）

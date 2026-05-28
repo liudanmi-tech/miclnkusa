@@ -1645,6 +1645,27 @@ class NetworkManager {
         print("✅ [NetworkManager] 录音删除成功 session_id=\(sessionId)")
     }
 
+    /// Permanently delete the current user account and all associated data.
+    func deleteAccount() async throws {
+        guard hasValidToken() else {
+            throw NSError(domain: "NetworkError", code: 401,
+                          userInfo: [NSLocalizedDescriptionKey: "Not logged in"])
+        }
+        _ = try await AF.request(
+            "\(baseURLForWrite)/users/me",
+            method: .delete,
+            headers: [
+                "Content-Type": "application/json",
+                "Authorization": "Bearer \(getAuthToken())"
+            ],
+            requestModifier: { $0.timeoutInterval = 15 }
+        )
+        .validate(statusCode: 200..<300)
+        .serializingData()
+        .value
+        print("✅ [NetworkManager] 账号已永久删除")
+    }
+
     // MARK: - 图片上传API
     
     // 上传档案照片（profileId 可选，传入则照片与该档案绑定）
