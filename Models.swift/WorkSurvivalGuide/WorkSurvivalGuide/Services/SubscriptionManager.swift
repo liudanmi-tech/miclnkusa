@@ -71,7 +71,7 @@ class SubscriptionManager: ObservableObject {
             switch result {
             case .success(let verification):
                 let transaction = try checkVerified(verification)
-                await sendToBackend(originalTransactionId: String(transaction.originalID), productId: transaction.productID, jwsRepresentation: transaction.jwsRepresentation)
+                await sendToBackend(originalTransactionId: String(transaction.originalID), productId: transaction.productID, jwsRepresentation: verification.jwsRepresentation)
                 await transaction.finish()
             case .userCancelled:
                 break
@@ -99,7 +99,7 @@ class SubscriptionManager: ObservableObject {
         var didRestore = false
         for await result in Transaction.currentEntitlements {
             if let transaction = try? checkVerified(result) {
-                await sendToBackend(originalTransactionId: String(transaction.originalID), productId: transaction.productID, jwsRepresentation: transaction.jwsRepresentation)
+                await sendToBackend(originalTransactionId: String(transaction.originalID), productId: transaction.productID, jwsRepresentation: result.jwsRepresentation)
                 await transaction.finish()
                 didRestore = true
             }
@@ -150,7 +150,7 @@ class SubscriptionManager: ObservableObject {
             for await result in Transaction.updates {
                 guard let self else { return }
                 if let transaction = try? self.checkVerified(result) {
-                    await self.sendToBackend(originalTransactionId: String(transaction.originalID), productId: transaction.productID, jwsRepresentation: transaction.jwsRepresentation)
+                    await self.sendToBackend(originalTransactionId: String(transaction.originalID), productId: transaction.productID, jwsRepresentation: result.jwsRepresentation)
                     await transaction.finish()
                 }
             }
