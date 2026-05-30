@@ -2027,7 +2027,7 @@ class NetworkManager {
         return try JSONDecoder().decode(SubscriptionStatusResponse.self, from: data)
     }
 
-    func verifyAppleTransaction(originalTransactionId: String, productId: String = "") async throws {
+    func verifyAppleTransaction(originalTransactionId: String, productId: String = "", jwsRepresentation: String = "") async throws {
         guard hasValidToken() else {
             throw NSError(domain: "NetworkError", code: 401, userInfo: [NSLocalizedDescriptionKey: "未登录"])
         }
@@ -2035,6 +2035,7 @@ class NetworkManager {
         let url = "\(baseURLForWrite)/subscription/verify"
         var body: [String: Any] = ["original_transaction_id": originalTransactionId]
         if !productId.isEmpty { body["product_id"] = productId }
+        if !jwsRepresentation.isEmpty { body["jws_representation"] = jwsRepresentation }
 
         let dataResponse = await AF.request(
             url,

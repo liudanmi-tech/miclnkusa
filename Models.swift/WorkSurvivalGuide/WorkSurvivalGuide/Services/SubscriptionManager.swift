@@ -23,6 +23,7 @@ class SubscriptionManager: ObservableObject {
     @Published var purchaseError: String? = nil
     @Published var monthlyLimit: Int = 20
     @Published var usedCount: Int = 0
+    @Published var expiresAt: String? = nil  // ISO8601，从后端同步
 
     private var transactionListenerTask: Task<Void, Error>?
 
@@ -70,7 +71,7 @@ class SubscriptionManager: ObservableObject {
             switch result {
             case .success(let verification):
                 let transaction = try checkVerified(verification)
-                await sendToBackend(originalTransactionId: String(transaction.originalID), productId: transaction.productID)
+                await sendToBackend(originalTransactionId: String(transaction.originalID), productId: transaction.productID, jwsRepresentation: transaction.jwsRepresentation)
                 await transaction.finish()
             case .userCancelled:
                 break
@@ -98,7 +99,7 @@ class SubscriptionManager: ObservableObject {
         var didRestore = false
         for await result in Transaction.currentEntitlements {
             if let transaction = try? checkVerified(result) {
-                await sendToBackend(originalTransactionId: String(transaction.originalID), productId: transaction.productID)
+                await sendToBackend(originalTransactionId: String(transaction.originalID), productId: transaction.productID, jwsRepresentation: transaction.jwsRepresentation)
                 await transaction.finish()
                 didRestore = true
             }
@@ -117,6 +118,7 @@ class SubscriptionManager: ObservableObject {
             isPro = status.tier == "pro"
             monthlyLimit = status.monthlyLimit
             usedCount = status.monthlyRecordingCount
+            expiresAt = status.expiresAt
             saveToCache(tier: status.tier, limit: status.monthlyLimit)
         } catch {
             print("[SubscriptionManager] 刷新订阅状态失败: \(error)")
@@ -125,6 +127,22 @@ class SubscriptionManager: ObservableObject {
 
     var remainingRecordings: Int { max(0, monthlyLimit - usedCount) }
 
+    /// 将 ISO8601 到期时间格式化为 "Expires Jun 30, 2026"，无数据时返回 nil
+    var formattedExpiresAt: String? {
+        guard let raw = expiresAt else { return nil }
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        var date = formatter.date(from: raw)
+        if date == nil {
+            formatter.formatOptions = [.withInternetDateTime]
+            date = formatter.date(from: raw)
+        }
+        guard let d = date else { return nil }
+        let display = DateFormatter()
+        display.dateFormat = "MMM d, yyyy"
+        return "Renews \(display.string(from: d))"
+    }
+
     // MARK: - Private
 
     private nonisolated func listenForTransactions() -> Task<Void, Error> {
@@ -132,7 +150,7 @@ class SubscriptionManager: ObservableObject {
             for await result in Transaction.updates {
                 guard let self else { return }
                 if let transaction = try? self.checkVerified(result) {
-                    await self.sendToBackend(originalTransactionId: String(transaction.originalID), productId: transaction.productID)
+                    await self.sendToBackend(originalTransactionId: String(transaction.originalID), productId: transaction.productID, jwsRepresentation: transaction.jwsRepresentation)
                     await transaction.finish()
                 }
             }
@@ -146,11 +164,12 @@ class SubscriptionManager: ObservableObject {
         }
     }
 
-    private func sendToBackend(originalTransactionId: String, productId: String = "") async {
+    private func sendToBackend(originalTransactionId: String, productId: String = "", jwsRepresentation: String = "") async {
         do {
             try await NetworkManager.shared.verifyAppleTransaction(
                 originalTransactionId: originalTransactionId,
-                productId: productId
+                productId: productId,
+                jwsRepresentation: jwsRepresentation
             )
             await refreshFromBackend()
             print("[SubscriptionManager] ✅ 后端验证成功 isPro=\(isPro)")

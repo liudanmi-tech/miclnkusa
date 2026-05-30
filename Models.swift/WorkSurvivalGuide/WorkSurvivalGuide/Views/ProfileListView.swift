@@ -129,7 +129,71 @@ struct ProfileListView: View {
                     .foregroundColor(AppColors.primaryText)
                     .padding(.top, 24)
 
-                // Pro 订阅入口（暂时隐藏，后续版本开放）
+                // 订阅身份入口
+                if subscriptionManager.isPro {
+                    // Pro 用户：显示身份 + 到期日，点击可恢复购买
+                    Button(action: {
+                        Task { await subscriptionManager.restorePurchases() }
+                    }) {
+                        HStack(spacing: 10) {
+                            Image(systemName: "crown.fill")
+                                .foregroundColor(Color(hex: "#F59E0B"))
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Pro Member 👑")
+                                    .font(AppFonts.cardTitle)
+                                    .foregroundColor(AppColors.primaryText)
+                                Text(subscriptionManager.formattedExpiresAt ?? "Active subscription")
+                                    .font(.system(size: 11, design: .rounded))
+                                    .foregroundColor(AppColors.secondaryText)
+                            }
+                            Spacer()
+                            if subscriptionManager.isLoading {
+                                ProgressView().scaleEffect(0.75)
+                            } else {
+                                Text("Restore")
+                                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                                    .foregroundColor(AppColors.secondaryText)
+                            }
+                        }
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 12)
+                        .background(Color(hex: "#F59E0B").opacity(0.10))
+                        .cornerRadius(10)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.horizontal, 24)
+                } else {
+                    // Free 用户：升级引导按钮
+                    Button(action: {
+                        showSettingsSheet = false
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                            showSubscription = true
+                        }
+                    }) {
+                        HStack(spacing: 10) {
+                            Image(systemName: "crown.fill")
+                                .foregroundColor(Color(hex: "#F59E0B"))
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Go Pro ✨")
+                                    .font(AppFonts.cardTitle)
+                                    .foregroundColor(AppColors.primaryText)
+                                Text("30 recordings & 3 images/month")
+                                    .font(.system(size: 11, design: .rounded))
+                                    .foregroundColor(AppColors.secondaryText)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .foregroundColor(Color(hex: "#F59E0B"))
+                                .font(.system(size: 14))
+                        }
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 12)
+                        .background(Color(hex: "#F59E0B").opacity(0.10))
+                        .cornerRadius(10)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.horizontal, 24)
+                }
 
                 // Content Filter 开关
                 HStack(spacing: 10) {

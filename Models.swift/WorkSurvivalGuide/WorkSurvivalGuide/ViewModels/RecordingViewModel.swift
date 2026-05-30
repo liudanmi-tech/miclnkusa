@@ -16,6 +16,7 @@ class RecordingViewModel: ObservableObject {
     @Published var uploadProgress: Double = 0  // 0~1，1.0 表示已发送完毕，等待服务器响应
     @Published var uploadPhaseDescription: String = "Uploading"  // "Uploading" | "Processing, please wait..."
     @Published var showPaywall: Bool = false
+    @Published var showProLimitAlert: Bool = false
     @Published var uploadError: String? = nil
 
     private let audioRecorder = AudioRecorderService.shared
@@ -322,9 +323,13 @@ class RecordingViewModel: ObservableObject {
                     self.uploadProgress = 0
                     let nsError = error as NSError
                     if nsError.code == 429 {
-                        // 录音次数已达上限，弹出升级引导
-                        print("⚠️ [RecordingViewModel] 录音次数已达上限，显示订阅页面")
-                        self.showPaywall = true
+                        // 录音次数已达上限
+                        print("⚠️ [RecordingViewModel] 录音次数已达上限")
+                        if SubscriptionManager.shared.isPro {
+                            self.showProLimitAlert = true  // Pro 用户：友好提示
+                        } else {
+                            self.showPaywall = true  // Free 用户：升级弹窗
+                        }
                         // 删除本地占位卡片
                         if let taskId = self.currentRecordingTaskId {
                             NotificationCenter.default.post(
@@ -503,7 +508,11 @@ class RecordingViewModel: ObservableObject {
                 let nsError = error as NSError
                 if nsError.domain == "NetworkError" && nsError.code == 429 {
                     await MainActor.run {
-                        self.showPaywall = true
+                        if SubscriptionManager.shared.isPro {
+                            self.showProLimitAlert = true
+                        } else {
+                            self.showPaywall = true
+                        }
                         NotificationCenter.default.post(name: NSNotification.Name("TaskDeleted"), object: taskId)
                     }
                 } else {

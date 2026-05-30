@@ -136,10 +136,13 @@ struct ContentView: View {
         .sheet(isPresented: $showTextInput) {
             TextInputView()
         }
-        .alert("Monthly Limit Reached", isPresented: $recordingViewModel.showPaywall) {
-            Button("OK", role: .cancel) { recordingViewModel.showPaywall = false }
+        .sheet(isPresented: $recordingViewModel.showPaywall) {
+            SubscriptionView()
+        }
+        .alert("Monthly Limit Reached", isPresented: $recordingViewModel.showProLimitAlert) {
+            Button("OK", role: .cancel) { recordingViewModel.showProLimitAlert = false }
         } message: {
-            Text("You've used all your recordings for this month. Your quota resets on the 1st of next month.")
+            Text("You've used all 30 recordings this month. Your quota resets on the 1st of next month. Thanks for being a Pro member!")
         }
         .alert("Upload Failed", isPresented: Binding(
             get: { recordingViewModel.uploadError != nil },
