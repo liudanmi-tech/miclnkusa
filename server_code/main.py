@@ -5061,8 +5061,25 @@ async def verify_subscription(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
+    # ── original_transaction_id 唯一性校验：一笔购买只能绑定一个账号 ──────────
+    existing = await db.execute(
+        select(User).where(
+            User.apple_original_transaction_id == original_transaction_id,
+            User.id != uuid.UUID(user_id)
+        )
+    )
+    existing_user = existing.scalar_one_or_none()
+    if existing_user:
+        logger.warning(
+            f"[Subscription/verify] original_transaction_id={original_transaction_id} "
+            f"已绑定账号 {existing_user.id}，拒绝绑定到 {user_id}"
+        )
+        raise HTTPException(status_code=409, detail="This subscription is already bound to another account")
+    # ─────────────────────────────────────────────────────────────────────────
+
     user.subscription_tier = tier
     user.subscription_expires_at = expires_at
+    user.apple_original_transaction_id = original_transaction_id
     await db.commit()
 
     logger.info(f"[Subscription] 验证成功 user={user_id} product={product_id} tier={tier} expires={expires_at.date()}")

@@ -23,6 +23,7 @@ class User(Base):
     is_active = Column(Boolean, default=True)
     subscription_tier = Column(String(50), default="free", nullable=False, server_default="free")
     subscription_expires_at = Column(DateTime(timezone=True), nullable=True)
+    apple_original_transaction_id = Column(String(100), nullable=True, unique=True)  # Apple 购买凭证绑定，每笔购买只能绑定一个账号
 
     # 关系
     sessions = relationship("Session", back_populates="user", cascade="all, delete-orphan")
