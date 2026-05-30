@@ -330,12 +330,9 @@ class RecordingViewModel: ObservableObject {
                         } else {
                             self.showPaywall = true  // Free 用户：升级弹窗
                         }
-                        // 删除本地占位卡片
+                        // 取消占位卡片并解锁录音按钮（cancelTask = clearProcessing + deleteTask）
                         if let taskId = self.currentRecordingTaskId {
-                            NotificationCenter.default.post(
-                                name: NSNotification.Name("TaskDeleted"),
-                                object: taskId
-                            )
+                            TaskListViewModel.shared.cancelTask(taskId: taskId)
                         }
                     } else {
                         print("❌ [RecordingViewModel] ========== 上传/分析失败 ==========")
@@ -513,7 +510,8 @@ class RecordingViewModel: ObservableObject {
                         } else {
                             self.showPaywall = true
                         }
-                        NotificationCenter.default.post(name: NSNotification.Name("TaskDeleted"), object: taskId)
+                        // 取消占位卡片并解锁录音按钮（cancelTask = clearProcessing + deleteTask）
+                        TaskListViewModel.shared.cancelTask(taskId: taskId)
                     }
                 } else {
                     let friendly = Self.friendlyErrorMessage(error)
