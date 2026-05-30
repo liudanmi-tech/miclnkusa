@@ -2007,6 +2007,8 @@ async def upload_audio_api(
             status_code=200,
             headers={"Content-Type": "application/json"}
         )
+    except HTTPException:
+        raise  # 直接透传（如 429 月度限额、400 参数错误等），不能改写成 500
     except Exception as e:
         logger.error(f"========== 上传音频失败 ==========")
         logger.error(f"错误类型: {type(e).__name__}")
