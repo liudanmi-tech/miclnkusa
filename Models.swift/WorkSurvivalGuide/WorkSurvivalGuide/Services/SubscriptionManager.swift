@@ -128,8 +128,8 @@ class SubscriptionManager: ObservableObject {
             monthlyLimit = status.monthlyLimit
             usedCount = status.monthlyRecordingCount
             expiresAt = status.expiresAt
-            profileCount = status.profileCount
-            profileLimit = status.profileLimit
+            profileCount = status.profileCount ?? 0
+            profileLimit = status.profileLimit ?? 2
             saveToCache(tier: status.tier, limit: status.monthlyLimit)
         } catch {
             print("[SubscriptionManager] 刷新订阅状态失败: \(error)")

@@ -2079,8 +2079,8 @@ struct SubscriptionStatusResponse: Codable {
     let monthlyRecordingCount: Int
     let monthlyLimit: Int
     let imagesPerRecording: Int
-    let profileCount: Int
-    let profileLimit: Int
+    let profileCount: Int?
+    let profileLimit: Int?
 
     enum CodingKeys: String, CodingKey {
         case tier
