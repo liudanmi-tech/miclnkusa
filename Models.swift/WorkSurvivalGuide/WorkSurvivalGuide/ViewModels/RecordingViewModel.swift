@@ -558,6 +558,7 @@ class RecordingViewModel: ObservableObject {
                 }
             }
             defer { NotificationCenter.default.removeObserver(cancelObserver) }
+            guard let self else { return }
 
             // 轮询开始时缓存 Token，避免其他请求（如任务列表刷新）返回 401 时登出导致 Token 被清空、轮询中断
             let cachedToken = KeychainManager.shared.getToken()
