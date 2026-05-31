@@ -51,9 +51,6 @@ struct SubscriptionView: View {
                         }
                         .padding(.top, 8)
 
-                        // 功能对比
-                        featureSection
-
                         // 产品卡片
                         productSection
 
@@ -80,63 +77,50 @@ struct SubscriptionView: View {
             if newValue { dismiss() }
         }
         .task {
-            if manager.products.isEmpty {
-                await manager.loadProducts()
-            }
+            await manager.loadProducts()
         }
-    }
-
-    // MARK: - Feature rows
-
-    private var featureSection: some View {
-        VStack(spacing: 0) {
-            featureRow(icon: "mic.fill",
-                       title: "30 recordings / month",
-                       subtitle: "Free: 3/month")
-            Divider().background(Color.white.opacity(0.1))
-            featureRow(icon: "photo.stack.fill",
-                       title: "3 scene images per recording",
-                       subtitle: "Free: 1 image")
-            Divider().background(Color.white.opacity(0.1))
-            featureRow(icon: "clock.fill",
-                       title: "Unlimited history",
-                       subtitle: "Free: 30 days only")
-            Divider().background(Color.white.opacity(0.1))
-            featureRow(icon: "person.2.fill",
-                       title: "Archive up to 10 people",
-                       subtitle: "Free: included")
-        }
-        .background(Color.white.opacity(0.07))
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-    }
-
-    private func featureRow(icon: String, title: String, subtitle: String) -> some View {
-        HStack(spacing: 14) {
-            Image(systemName: icon)
-                .font(.system(size: 15))
-                .foregroundColor(Color(hex: "#F59E0B"))
-                .frame(width: 24)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundColor(.white)
-                Text(subtitle)
-                    .font(.system(size: 12))
-                    .foregroundColor(.white.opacity(0.4))
-            }
-
-            Spacer()
-
-            Image(systemName: "checkmark.circle.fill")
-                .foregroundColor(Color(hex: "#F59E0B"))
-                .font(.system(size: 18))
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 14)
     }
 
     // MARK: - Product section
+
+    // 固定展示顺序：年 → 月 → 周
+    private var sortedProducts: [Product] {
+        let order = [SubscriptionManager.yearlyProductID,
+                     SubscriptionManager.monthlyProductID,
+                     SubscriptionManager.weeklyProductID]
+        return manager.products.sorted {
+            let i0 = order.firstIndex(of: $0.id) ?? 99
+            let i1 = order.firstIndex(of: $1.id) ?? 99
+            return i0 < i1
+        }
+    }
+
+    // 年/周 显示平均每周价格
+    private func weeklyEquivalent(for product: Product) -> String? {
+        switch product.id {
+        case SubscriptionManager.yearlyProductID:
+            let perWeek = product.price / 52
+            return "≈ " + perWeek.formatted(product.priceFormatStyle) + " / week"
+        case SubscriptionManager.weeklyProductID:
+            return product.displayPrice + " / week"
+        default:
+            return nil
+        }
+    }
+
+    // 各档位服务说明
+    private func services(for productId: String) -> String {
+        switch productId {
+        case SubscriptionManager.yearlyProductID:
+            return "365 recordings · 15 profiles · AI skill chat"
+        case SubscriptionManager.monthlyProductID:
+            return "30 recordings · 15 profiles · AI skill chat"
+        case SubscriptionManager.weeklyProductID:
+            return "7 recordings · 5 profiles · AI skill chat"
+        default:
+            return ""
+        }
+    }
 
     @ViewBuilder
     private var productSection: some View {
@@ -146,10 +130,12 @@ struct SubscriptionView: View {
                 .frame(height: 80)
         } else {
             VStack(spacing: 12) {
-                ForEach(manager.products, id: \.id) { product in
+                ForEach(sortedProducts, id: \.id) { product in
                     ProductCard(
                         product: product,
-                        isRecommended: false,
+                        isRecommended: product.id == SubscriptionManager.yearlyProductID,
+                        weeklyEquivalent: weeklyEquivalent(for: product),
+                        services: services(for: product.id),
                         onPurchase: { Task { await manager.purchase(product) } }
                     )
                 }
@@ -171,12 +157,14 @@ struct SubscriptionView: View {
 private struct ProductCard: View {
     let product: Product
     let isRecommended: Bool
+    let weeklyEquivalent: String?
+    let services: String
     let onPurchase: () -> Void
     @ObservedObject private var manager: SubscriptionManager = .shared
 
     var body: some View {
         Button(action: onPurchase) {
-            HStack(spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 8) {
                         Text(product.displayName)
@@ -197,6 +185,19 @@ private struct ProductCard: View {
                     Text(product.displayPrice)
                         .font(.system(size: 22, weight: .bold))
                         .foregroundColor(Color(hex: "#F59E0B"))
+
+                    if let weekly = weeklyEquivalent {
+                        Text(weekly)
+                            .font(.system(size: 12))
+                            .foregroundColor(.white.opacity(0.5))
+                    }
+
+                    if !services.isEmpty {
+                        Text(services)
+                            .font(.system(size: 12))
+                            .foregroundColor(.white.opacity(0.45))
+                            .padding(.top, 2)
+                    }
                 }
 
                 Spacer()

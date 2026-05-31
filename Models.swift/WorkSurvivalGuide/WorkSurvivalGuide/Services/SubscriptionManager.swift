@@ -14,8 +14,10 @@ class SubscriptionManager: ObservableObject {
     static let shared = SubscriptionManager()
 
     // App Store 产品 ID（与后端 PRODUCT_TIER_MAP 保持一致）
+    static let weeklyProductID    = "com.miclnk.pro.weekly"
     static let monthlyProductID   = "com.miclnk.pro.monthly"
-    static let allProductIDs: Set<String> = [monthlyProductID]
+    static let yearlyProductID    = "com.miclnk.pro.yearly"
+    static let allProductIDs: Set<String> = [weeklyProductID, monthlyProductID, yearlyProductID]
 
     @Published var products: [Product] = []
     @Published var isPro: Bool = false
@@ -24,6 +26,9 @@ class SubscriptionManager: ObservableObject {
     @Published var monthlyLimit: Int = 20
     @Published var usedCount: Int = 0
     @Published var expiresAt: String? = nil  // ISO8601，从后端同步
+    @Published var profileCount: Int = 0
+    @Published var profileLimit: Int = 2
+    @Published var currentProductId: String? = nil
 
     private var transactionListenerTask: Task<Void, Error>?
 
@@ -53,7 +58,11 @@ class SubscriptionManager: ObservableObject {
         do {
             let storeProducts = try await Product.products(for: Self.allProductIDs)
             self.products = storeProducts
-            print("[SubscriptionManager] 产品加载成功: \(self.products.map(\.id))")
+            print("[SubscriptionManager] 产品加载成功(\(storeProducts.count)个): \(storeProducts.map(\.id))")
+            if storeProducts.count < Self.allProductIDs.count {
+                let missing = Self.allProductIDs.subtracting(Set(storeProducts.map(\.id)))
+                print("[SubscriptionManager] ⚠️ 缺失产品: \(missing)")
+            }
         } catch {
             print("[SubscriptionManager] 产品加载失败: \(error)")
         }
@@ -119,10 +128,26 @@ class SubscriptionManager: ObservableObject {
             monthlyLimit = status.monthlyLimit
             usedCount = status.monthlyRecordingCount
             expiresAt = status.expiresAt
+            profileCount = status.profileCount
+            profileLimit = status.profileLimit
             saveToCache(tier: status.tier, limit: status.monthlyLimit)
         } catch {
             print("[SubscriptionManager] 刷新订阅状态失败: \(error)")
         }
+        await loadCurrentSubscription()
+    }
+
+    /// 用户曾是 Pro 但当前未激活 (tier=free + expiresAt 有值) → 已到期
+    var isExpired: Bool {
+        guard !isPro, let raw = expiresAt, !raw.isEmpty else { return false }
+        let fmt = ISO8601DateFormatter()
+        fmt.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        var d = fmt.date(from: raw)
+        if d == nil {
+            fmt.formatOptions = [.withInternetDateTime]
+            d = fmt.date(from: raw)
+        }
+        return d != nil   // expiresAt 存在 + isPro=false ⇒ 已过期
     }
 
     var remainingRecordings: Int { max(0, monthlyLimit - usedCount) }
@@ -141,6 +166,19 @@ class SubscriptionManager: ObservableObject {
         let display = DateFormatter()
         display.dateFormat = "MMM d, yyyy"
         return "Renews \(display.string(from: d))"
+    }
+
+    // MARK: - 读取当前激活的订阅产品 ID（StoreKit currentEntitlements）
+
+    func loadCurrentSubscription() async {
+        for await result in Transaction.currentEntitlements {
+            if let transaction = try? checkVerified(result),
+               Self.allProductIDs.contains(transaction.productID) {
+                currentProductId = transaction.productID
+                return
+            }
+        }
+        currentProductId = nil
     }
 
     // MARK: - Private

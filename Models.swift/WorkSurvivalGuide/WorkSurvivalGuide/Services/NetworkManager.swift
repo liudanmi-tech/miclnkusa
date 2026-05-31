@@ -909,7 +909,20 @@ class NetworkManager {
                     await MainActor.run { onError("Invalid response") }; return
                 }
                 guard http.statusCode == 200 else {
-                    await MainActor.run { onError("Server error: \(http.statusCode)") }; return
+                    if http.statusCode == 403 {
+                        // 读取 body 判断是否为对话轮数超限
+                        var bodyData = Data()
+                        for try await byte in asyncBytes { bodyData.append(byte) }
+                        let body = String(data: bodyData, encoding: .utf8) ?? ""
+                        if body.contains("chat_limit_reached") {
+                            await MainActor.run { onError("chat_limit_reached") }
+                        } else {
+                            await MainActor.run { onError("Server error: 403") }
+                        }
+                    } else {
+                        await MainActor.run { onError("Server error: \(http.statusCode)") }
+                    }
+                    return
                 }
 
                 for try await line in asyncBytes.lines {
@@ -2066,6 +2079,8 @@ struct SubscriptionStatusResponse: Codable {
     let monthlyRecordingCount: Int
     let monthlyLimit: Int
     let imagesPerRecording: Int
+    let profileCount: Int
+    let profileLimit: Int
 
     enum CodingKeys: String, CodingKey {
         case tier
@@ -2073,6 +2088,8 @@ struct SubscriptionStatusResponse: Codable {
         case monthlyRecordingCount = "monthly_recording_count"
         case monthlyLimit = "monthly_limit"
         case imagesPerRecording = "images_per_recording"
+        case profileCount = "profile_count"
+        case profileLimit = "profile_limit"
     }
 }
 

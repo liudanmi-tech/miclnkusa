@@ -22,9 +22,30 @@
         {
           "adHocOffers" : [],
           "codeOffers" : [],
-          "displayPrice" : "8.99",
+          "displayPrice" : "7.99",
           "familyShareable" : false,
-          "groupNumber" : 1,
+          "groupNumber" : 3,
+          "internalID" : "B12E34F5-1A2B-3C4D-5E6F-7A8B9C0D1E2F",
+          "introductoryOffer" : null,
+          "localizations" : [
+            {
+              "description" : "Full access to all Pro features",
+              "displayName" : "Pro Weekly",
+              "locale" : "en_US"
+            }
+          ],
+          "productID" : "com.miclnk.pro.weekly",
+          "referenceName" : "Pro Weekly",
+          "recurringSubscriptionPeriod" : "P1W",
+          "subscriptionGroupID" : "0A3ADE0F-9A0F-46FA-807A-8D58C7F72D75",
+          "type" : "RecurringSubscription"
+        },
+        {
+          "adHocOffers" : [],
+          "codeOffers" : [],
+          "displayPrice" : "24.99",
+          "familyShareable" : false,
+          "groupNumber" : 2,
           "internalID" : "A55C17C1-DAD2-415A-847B-D066F9CE0698",
           "introductoryOffer" : null,
           "localizations" : [
@@ -37,6 +58,27 @@
           "productID" : "com.miclnk.pro.monthly",
           "referenceName" : "Pro Monthly",
           "recurringSubscriptionPeriod" : "P1M",
+          "subscriptionGroupID" : "0A3ADE0F-9A0F-46FA-807A-8D58C7F72D75",
+          "type" : "RecurringSubscription"
+        },
+        {
+          "adHocOffers" : [],
+          "codeOffers" : [],
+          "displayPrice" : "129.99",
+          "familyShareable" : false,
+          "groupNumber" : 1,
+          "internalID" : "C23D45E6-2B3C-4D5E-6F7A-8B9C0D1E2F3A",
+          "introductoryOffer" : null,
+          "localizations" : [
+            {
+              "description" : "Full access to all Pro features",
+              "displayName" : "Pro Yearly",
+              "locale" : "en_US"
+            }
+          ],
+          "productID" : "com.miclnk.pro.yearly",
+          "referenceName" : "Pro Yearly",
+          "recurringSubscriptionPeriod" : "P1Y",
           "subscriptionGroupID" : "0A3ADE0F-9A0F-46FA-807A-8D58C7F72D75",
           "type" : "RecurringSubscription"
         }

@@ -4930,7 +4930,9 @@ async def analyze_text_async(session_id: str, text: str, user_id: str):
 # ──────────────────────────────────────────────────────────────────────────────
 
 _PRODUCT_TIER_MAP = {
+    "com.miclnk.pro.weekly":  ("pro", 8),    # 7天 + 1天缓冲
     "com.miclnk.pro.monthly": ("pro", 31),
+    "com.miclnk.pro.yearly":  ("pro", 366),  # 365天 + 1天缓冲
 }
 
 _TIER_LIMITS = {
@@ -4975,12 +4977,22 @@ async def get_subscription_status(
     )
     monthly_count = cnt.scalar() or 0
 
+    # 档案数量
+    _PROFILE_LIMITS = {"free": 2, "pro": 15}
+    profile_limit = _PROFILE_LIMITS.get(tier, _PROFILE_LIMITS["free"])
+    pcnt = await db.execute(
+        select(func.count(Profile.id)).where(Profile.user_id == uuid.UUID(user_id))
+    )
+    profile_count = pcnt.scalar() or 0
+
     resp = {
         "tier": tier,
         "expires_at": expires_at.isoformat() if expires_at else None,
         "monthly_recording_count": monthly_count,
         "monthly_limit": limits["monthly_limit"],
         "images_per_recording": limits["images_per_recording"],
+        "profile_count": profile_count,
+        "profile_limit": profile_limit,
     }
     logger.info(f"[Subscription/status] user={user_id} tier={tier} expires={expires_at} resp={resp}")
     return resp
