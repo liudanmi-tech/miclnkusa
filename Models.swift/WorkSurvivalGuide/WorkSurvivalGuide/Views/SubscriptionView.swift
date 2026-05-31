@@ -11,6 +11,7 @@ import StoreKit
 struct SubscriptionView: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var manager: SubscriptionManager = .shared
+    @State private var loadTimeout = false
 
     var body: some View {
         ZStack {
@@ -62,11 +63,22 @@ struct SubscriptionView: View {
                         .foregroundColor(.white.opacity(0.45))
 
                         // 法律说明
-                        Text("Subscription automatically renews unless cancelled at least 24 hours before the end of the current period. Manage in App Store Settings.")
-                            .font(.system(size: 11))
-                            .foregroundColor(.white.opacity(0.3))
-                            .multilineTextAlignment(.center)
-                            .padding(.bottom, 40)
+                        VStack(spacing: 8) {
+                            Text("Subscription automatically renews unless cancelled at least 24 hours before the end of the current period. Manage in App Store Settings.")
+                                .font(.system(size: 11))
+                                .foregroundColor(.white.opacity(0.55))
+                                .multilineTextAlignment(.center)
+
+                            HStack(spacing: 16) {
+                                Link("Privacy Policy", destination: URL(string: "https://yohomie.art/privacy.html")!)
+                                    .font(.system(size: 11))
+                                    .foregroundColor(.white.opacity(0.55))
+                                Link("Terms of Use", destination: URL(string: "https://yohomie.art/terms.html")!)
+                                    .font(.system(size: 11))
+                                    .foregroundColor(.white.opacity(0.55))
+                            }
+                        }
+                        .padding(.bottom, 40)
                     }
                     .padding(.horizontal, 24)
                     .padding(.top, 24)
@@ -79,6 +91,9 @@ struct SubscriptionView: View {
         .task {
             await manager.loadProducts()
             await manager.refreshFromBackend()
+            if manager.products.isEmpty {
+                loadTimeout = true
+            }
         }
     }
 
@@ -126,9 +141,28 @@ struct SubscriptionView: View {
     @ViewBuilder
     private var productSection: some View {
         if manager.products.isEmpty {
-            ProgressView()
-                .tint(.white)
-                .frame(height: 80)
+            if loadTimeout {
+                VStack(spacing: 12) {
+                    Text("Unable to load subscription options.\nPlease check your connection and try again.")
+                        .font(.system(size: 14))
+                        .foregroundColor(.white.opacity(0.6))
+                        .multilineTextAlignment(.center)
+                    Button("Retry") {
+                        loadTimeout = false
+                        Task {
+                            await manager.loadProducts()
+                            if manager.products.isEmpty { loadTimeout = true }
+                        }
+                    }
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(Color(hex: "#F59E0B"))
+                }
+                .frame(height: 100)
+            } else {
+                ProgressView()
+                    .tint(.white)
+                    .frame(height: 80)
+            }
         } else {
             VStack(spacing: 12) {
                 ForEach(sortedProducts, id: \.id) { product in

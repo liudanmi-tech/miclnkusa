@@ -130,6 +130,9 @@ class SubscriptionManager: ObservableObject {
             expiresAt = status.expiresAt
             profileCount = status.profileCount ?? 0
             profileLimit = status.profileLimit ?? 2
+            if let pid = status.subscriptionProductId, !pid.isEmpty {
+                currentProductId = pid
+            }
             saveToCache(tier: status.tier, limit: status.monthlyLimit)
         } catch {
             print("[SubscriptionManager] 刷新订阅状态失败: \(error)")

@@ -2081,6 +2081,7 @@ struct SubscriptionStatusResponse: Codable {
     let imagesPerRecording: Int
     let profileCount: Int?
     let profileLimit: Int?
+    let subscriptionProductId: String?
 
     enum CodingKeys: String, CodingKey {
         case tier
@@ -2090,6 +2091,7 @@ struct SubscriptionStatusResponse: Codable {
         case imagesPerRecording = "images_per_recording"
         case profileCount = "profile_count"
         case profileLimit = "profile_limit"
+        case subscriptionProductId = "subscription_product_id"
     }
 }
 

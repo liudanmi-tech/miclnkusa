@@ -187,16 +187,6 @@ struct SubscriptionStatusView: View {
                     showPaywall = true
                 }
             } else {
-                // 活跃 Pro → 更换套餐
-                actionButton(
-                    title: "Change Plan",
-                    icon: "arrow.left.arrow.right",
-                    color: Color.white.opacity(0.1),
-                    foreground: .white
-                ) {
-                    showPaywall = true
-                }
-
                 // Manage Subscription（打开 App Store 管理页）
                 actionButton(
                     title: "Manage Subscription",
