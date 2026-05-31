@@ -78,6 +78,7 @@ struct SubscriptionView: View {
         }
         .task {
             await manager.loadProducts()
+            await manager.refreshFromBackend()
         }
     }
 
