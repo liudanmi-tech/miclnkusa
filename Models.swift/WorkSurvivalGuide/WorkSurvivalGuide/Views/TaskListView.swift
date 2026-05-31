@@ -425,6 +425,11 @@ struct TaskCardRow: View {
             do {
                 try await NetworkManager.shared.deleteSession(task.id)
                 await TaskListViewModel.shared.cancelTask(taskId: task.id)
+                // 终止 RecordingViewModel 的轮询 Task
+                NotificationCenter.default.post(
+                    name: NSNotification.Name("TaskPollingCancelled"),
+                    object: task.id
+                )
             } catch {
                 print("❌ [TaskCardRow] 取消录音失败: \(error)")
                 await MainActor.run { isCancelling = false }
