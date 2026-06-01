@@ -14,7 +14,9 @@ struct ContentView: View {
     @StateObject private var recordingViewModel = RecordingViewModel()
     @State private var showFilePicker = false
     @State private var showTextInput = false
+    @State private var showSubscriptionStatus = false
     @AppStorage("onboarding_completed") private var onboardingCompleted = false
+    @AppStorage("hasAcceptedTerms") private var hasAcceptedTerms = false
 
     var body: some View {
         Group {
@@ -80,7 +82,7 @@ struct ContentView: View {
                     .ignoresSafeArea(edges: .bottom)
                     .navigationBarHidden(true)
                 }
-                .fullScreenCover(isPresented: .constant(!onboardingCompleted)) {
+                .fullScreenCover(isPresented: .constant(hasAcceptedTerms && !onboardingCompleted)) {
                     OnboardingView()
                 }
                 .onChange(of: onboardingCompleted) { completed in
@@ -136,8 +138,17 @@ struct ContentView: View {
         .sheet(isPresented: $showTextInput) {
             TextInputView()
         }
-        .sheet(isPresented: $recordingViewModel.showPaywall) {
+        .sheet(isPresented: $recordingViewModel.showPaywall, onDismiss: {
+            if SubscriptionManager.shared.isPro {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    showSubscriptionStatus = true
+                }
+            }
+        }) {
             SubscriptionView()
+        }
+        .sheet(isPresented: $showSubscriptionStatus) {
+            SubscriptionStatusView()
         }
         .alert("Monthly Limit Reached", isPresented: $recordingViewModel.showProLimitAlert) {
             Button("OK", role: .cancel) { recordingViewModel.showProLimitAlert = false }
