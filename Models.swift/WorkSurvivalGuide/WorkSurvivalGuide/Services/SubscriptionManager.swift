@@ -135,14 +135,16 @@ class SubscriptionManager: ObservableObject {
             expiresAt = status.expiresAt
             profileCount = status.profileCount ?? 0
             profileLimit = status.profileLimit ?? 2
-            if let pid = status.subscriptionProductId, !pid.isEmpty {
-                currentProductId = pid
-            }
             saveToCache(tier: status.tier, limit: status.monthlyLimit)
+            if let pid = status.subscriptionProductId, !pid.isEmpty {
+                currentProductId = pid  // 后端是权威来源，不再查 StoreKit 避免被沙盒缓存覆盖
+            } else {
+                await loadCurrentSubscription()  // 后端无记录时降级查本地
+            }
         } catch {
             print("[SubscriptionManager] 刷新订阅状态失败: \(error)")
+            await loadCurrentSubscription()  // 网络失败时降级查本地
         }
-        await loadCurrentSubscription()
     }
 
     /// 用户曾是 Pro 但当前未激活 (tier=free + expiresAt 有值) → 已到期
