@@ -127,7 +127,7 @@ struct SubscriptionStatusView: View {
         VStack(spacing: 16) {
             usageRow(
                 icon: "mic.fill",
-                label: "Recordings this month",
+                label: "Records",
                 used: manager.usedCount,
                 limit: manager.monthlyLimit
             )

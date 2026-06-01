@@ -22,6 +22,7 @@ class SubscriptionManager: ObservableObject {
     @Published var products: [Product] = []
     @Published var isPro: Bool = false
     @Published var isLoading: Bool = false
+    @Published var loadingProductId: String? = nil
     @Published var purchaseError: String? = nil
     @Published var monthlyLimit: Int = 20
     @Published var usedCount: Int = 0
@@ -72,8 +73,12 @@ class SubscriptionManager: ObservableObject {
 
     func purchase(_ product: Product) async {
         isLoading = true
+        loadingProductId = product.id
         purchaseError = nil
-        defer { isLoading = false }
+        defer {
+            isLoading = false
+            loadingProductId = nil
+        }
 
         do {
             let result = try await product.purchase()

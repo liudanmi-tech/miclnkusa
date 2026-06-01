@@ -242,9 +242,7 @@ struct ProfileListView: View {
                                 Text("Go Pro ✨")
                                     .font(AppFonts.cardTitle)
                                     .foregroundColor(AppColors.primaryText)
-                                Text("30 recordings & 3 images/month")
-                                    .font(.system(size: 11, design: .rounded))
-                                    .foregroundColor(AppColors.secondaryText)
+
                             }
                             Spacer()
                             Image(systemName: "chevron.right")
@@ -458,7 +456,13 @@ struct ProfileListView: View {
 
         } // settings sheet ZStack
         }
-        .sheet(isPresented: $showSubscription) {
+        .sheet(isPresented: $showSubscription, onDismiss: {
+            if subscriptionManager.isPro {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    showSubscriptionStatus = true
+                }
+            }
+        }) {
             SubscriptionView()
         }
         .sheet(isPresented: $showSubscriptionStatus) {

@@ -111,11 +111,14 @@ struct SubscriptionView: View {
         }
     }
 
-    // 年/周 显示平均每周价格
+    // 年/月/周 显示平均每周价格
     private func weeklyEquivalent(for product: Product) -> String? {
         switch product.id {
         case SubscriptionManager.yearlyProductID:
             let perWeek = product.price / 52
+            return "≈ " + perWeek.formatted(product.priceFormatStyle) + " / week"
+        case SubscriptionManager.monthlyProductID:
+            let perWeek = product.price / 4
             return "≈ " + perWeek.formatted(product.priceFormatStyle) + " / week"
         case SubscriptionManager.weeklyProductID:
             return product.displayPrice + " / week"
@@ -128,11 +131,11 @@ struct SubscriptionView: View {
     private func services(for productId: String) -> String {
         switch productId {
         case SubscriptionManager.yearlyProductID:
-            return "365 recordings · 15 profiles · AI skill chat"
+            return "365 recordings · 15 profiles · AI chat"
         case SubscriptionManager.monthlyProductID:
-            return "30 recordings · 15 profiles · AI skill chat"
+            return "30 recordings · 15 profiles · AI chat"
         case SubscriptionManager.weeklyProductID:
-            return "7 recordings · 5 profiles · AI skill chat"
+            return "7 recordings · 5 profiles · AI chat"
         default:
             return ""
         }
@@ -231,13 +234,15 @@ private struct ProductCard: View {
                         Text(services)
                             .font(.system(size: 12))
                             .foregroundColor(.white.opacity(0.45))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
                             .padding(.top, 2)
                     }
                 }
 
                 Spacer()
 
-                if manager.isLoading {
+                if manager.loadingProductId == product.id {
                     ProgressView().tint(.white).scaleEffect(0.9)
                 } else {
                     Text("Subscribe")
