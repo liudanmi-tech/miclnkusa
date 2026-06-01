@@ -200,6 +200,17 @@ private struct ProductCard: View {
     let onPurchase: () -> Void
     @ObservedObject private var manager: SubscriptionManager = .shared
 
+    private var periodLabel: String {
+        guard let period = product.subscription?.subscriptionPeriod else { return "" }
+        switch period.unit {
+        case .day:   return period.value == 1 ? "/ day"   : "/ \(period.value) days"
+        case .week:  return period.value == 1 ? "/ week"  : "/ \(period.value) weeks"
+        case .month: return period.value == 1 ? "/ month" : "/ \(period.value) months"
+        case .year:  return period.value == 1 ? "/ year"  : "/ \(period.value) years"
+        @unknown default: return ""
+        }
+    }
+
     var body: some View {
         Button(action: onPurchase) {
             HStack(alignment: .top, spacing: 12) {
@@ -220,7 +231,7 @@ private struct ProductCard: View {
                         }
                     }
 
-                    Text(product.displayPrice)
+                    Text(product.displayPrice + (periodLabel.isEmpty ? "" : " \(periodLabel)"))
                         .font(.system(size: 22, weight: .bold))
                         .foregroundColor(Color(hex: "#F59E0B"))
 

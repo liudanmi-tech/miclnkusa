@@ -215,6 +215,16 @@ struct SubscriptionStatusView: View {
                     .foregroundColor(Color(hex: "#EF4444"))
                     .multilineTextAlignment(.center)
             }
+
+            HStack(spacing: 16) {
+                Link("Privacy Policy", destination: URL(string: "https://yohomie.art/privacy.html")!)
+                    .font(.system(size: 11))
+                    .foregroundColor(.white.opacity(0.55))
+                Link("Terms of Use", destination: URL(string: "https://yohomie.art/terms.html")!)
+                    .font(.system(size: 11))
+                    .foregroundColor(.white.opacity(0.55))
+            }
+            .padding(.top, 4)
         }
     }
 
