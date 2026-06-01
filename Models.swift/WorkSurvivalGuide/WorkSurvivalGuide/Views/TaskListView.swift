@@ -18,8 +18,6 @@ private struct ScrollOffsetPreferenceKey: PreferenceKey {
 
 struct TaskListView: View {
     @ObservedObject private var viewModel = TaskListViewModel.shared
-    @ObservedObject private var deviceManager = BluetoothDeviceManager.shared
-    @State private var showDeviceSheet = false
     @State private var showStylePicker = false
     @AppStorage("image_style") private var selectedImageStyle: String = "ghibli"
     @State private var scrollOffset: CGFloat = 999
@@ -246,9 +244,6 @@ struct TaskListView: View {
             DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
                 withAnimation(.easeInOut(duration: 0.3)) { toastMessage = nil }
             }
-        }
-        .sheet(isPresented: $showDeviceSheet) {
-            DeviceSelectionSheet()
         }
         .sheet(isPresented: $showStylePicker) {
             ImageStylePickerSheet(selectedStyleId: $selectedImageStyle)
