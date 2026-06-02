@@ -12,6 +12,7 @@ struct SubscriptionView: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var manager: SubscriptionManager = .shared
     @State private var loadTimeout = false
+    @State private var isRetrying = false
 
     var body: some View {
         ZStack {
@@ -92,7 +93,12 @@ struct SubscriptionView: View {
             await manager.loadProducts()
             await manager.refreshFromBackend()
             if manager.products.isEmpty {
-                loadTimeout = true
+                // 首次失败后等 2 秒自动重试一次，再判断是否报错
+                try? await Task.sleep(for: .seconds(2))
+                await manager.loadProducts()
+                if manager.products.isEmpty {
+                    loadTimeout = true
+                }
             }
         }
     }
@@ -144,7 +150,7 @@ struct SubscriptionView: View {
     @ViewBuilder
     private var productSection: some View {
         if manager.products.isEmpty {
-            if loadTimeout {
+            if loadTimeout && !isRetrying {
                 VStack(spacing: 12) {
                     Text("Unable to load subscription options.\nPlease check your connection and try again.")
                         .font(.system(size: 14))
@@ -152,8 +158,10 @@ struct SubscriptionView: View {
                         .multilineTextAlignment(.center)
                     Button("Retry") {
                         loadTimeout = false
+                        isRetrying = true
                         Task {
                             await manager.loadProducts()
+                            isRetrying = false
                             if manager.products.isEmpty { loadTimeout = true }
                         }
                     }

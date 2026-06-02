@@ -155,6 +155,14 @@ struct AIAssistantView: View {
         .onAppear {
             vm.initSession()
         }
+        .sheet(isPresented: $vm.showPaywall) {
+            SubscriptionView()
+        }
+        .alert("You've reached the chat limit", isPresented: $vm.showProLimitToast) {
+            Button("OK", role: .cancel) { vm.showProLimitToast = false }
+        } message: {
+            Text("Pro members can have up to 50 conversation turns per recording. Start a new recording to continue chatting.")
+        }
         .onChange(of: selectedPhotoItems) { newItems in
             Task {
                 var loaded: [UIImage] = []

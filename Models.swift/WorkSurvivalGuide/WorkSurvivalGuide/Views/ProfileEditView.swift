@@ -397,28 +397,6 @@ struct ProfileEditView: View {
                             return
                         }
                         
-                        // 档案数量限制（仅创建时校验）
-                        if profile == nil {
-                            let count = ProfileViewModel.shared.profiles.count
-                            if subscriptionManager.isPro {
-                                if count >= 30 {
-                                    showProLimitToast = true
-                                    DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
-                                        showProLimitToast = false
-                                    }
-                                    return
-                                }
-                            } else {
-                                if count >= 30 {
-                                    showProLimitToast = true
-                                    DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
-                                        showProLimitToast = false
-                                    }
-                                    return
-                                }
-                            }
-                        }
-
                         // Self 人数校验：只允许一个 Self
                         if viewModel.relationship == RelationshipType.self_.rawValue {
                             let existingSelf = ProfileViewModel.shared.profiles.filter {
@@ -550,7 +528,7 @@ struct ProfileEditView: View {
                     if showSelfLimitToast {
                         toastLabel(text: "Only one \"Self\" profile can be created.")
                     } else if showProLimitToast {
-                        toastLabel(text: "You've reached the maximum limit of 30 profiles.")
+                        toastLabel(text: "You've reached the maximum number of profiles (15).")
                     }
                 }
                 .padding(.top, 12)

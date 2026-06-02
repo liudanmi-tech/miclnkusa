@@ -106,6 +106,8 @@ final class AIAssistantViewModel: ObservableObject {
     @Published var skillName: String = ""
     @Published var memoryUsed: Bool = false
     @Published var errorMessage: String? = nil
+    @Published var showPaywall: Bool = false       // Free 用户超出轮数 → 弹订阅墙
+    @Published var showProLimitToast: Bool = false // Pro 用户超出轮数 → 友好提示
     /// 本次打开时是否恢复了历史记录
     @Published var isRestored: Bool = false
 
@@ -263,9 +265,18 @@ final class AIAssistantViewModel: ObservableObject {
             },
             onError: { [weak self] err in
                 Task { @MainActor [weak self] in
-                    self?.streamingText = ""
-                    self?.isStreaming = false
-                    self?.errorMessage = err
+                    guard let self else { return }
+                    self.streamingText = ""
+                    self.isStreaming = false
+                    if err == "chat_limit_reached" {
+                        if SubscriptionManager.shared.isPro {
+                            self.showProLimitToast = true
+                        } else {
+                            self.showPaywall = true
+                        }
+                    } else {
+                        self.errorMessage = err
+                    }
                 }
             }
         )
