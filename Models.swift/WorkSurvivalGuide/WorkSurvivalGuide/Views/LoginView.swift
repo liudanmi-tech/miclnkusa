@@ -48,6 +48,7 @@ struct LoginView: View {
                         } onCompletion: { result in
                             viewModel.handleAppleSignIn(result: result)
                         }
+                        .signInWithAppleButtonStyle(.white)
                         .frame(height: 50)
                         .cornerRadius(10)
                         .disabled(viewModel.isLoading)

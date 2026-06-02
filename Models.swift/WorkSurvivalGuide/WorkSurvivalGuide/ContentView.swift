@@ -14,7 +14,9 @@ struct ContentView: View {
     @StateObject private var recordingViewModel = RecordingViewModel()
     @State private var showFilePicker = false
     @State private var showTextInput = false
+    @State private var showSubscriptionStatus = false
     @AppStorage("onboarding_completed") private var onboardingCompleted = false
+    @AppStorage("hasAcceptedTerms") private var hasAcceptedTerms = false
 
     var body: some View {
         Group {
@@ -80,7 +82,7 @@ struct ContentView: View {
                     .ignoresSafeArea(edges: .bottom)
                     .navigationBarHidden(true)
                 }
-                .fullScreenCover(isPresented: .constant(!onboardingCompleted)) {
+                .fullScreenCover(isPresented: .constant(hasAcceptedTerms && !onboardingCompleted)) {
                     OnboardingView()
                 }
                 .onChange(of: onboardingCompleted) { completed in
@@ -136,10 +138,22 @@ struct ContentView: View {
         .sheet(isPresented: $showTextInput) {
             TextInputView()
         }
-        .alert("Monthly Limit Reached", isPresented: $recordingViewModel.showPaywall) {
-            Button("OK", role: .cancel) { recordingViewModel.showPaywall = false }
+        .sheet(isPresented: $recordingViewModel.showPaywall, onDismiss: {
+            if SubscriptionManager.shared.isPro {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    showSubscriptionStatus = true
+                }
+            }
+        }) {
+            SubscriptionView()
+        }
+        .sheet(isPresented: $showSubscriptionStatus) {
+            SubscriptionStatusView()
+        }
+        .alert("Monthly Limit Reached", isPresented: $recordingViewModel.showProLimitAlert) {
+            Button("OK", role: .cancel) { recordingViewModel.showProLimitAlert = false }
         } message: {
-            Text("You've used all your recordings for this month. Your quota resets on the 1st of next month.")
+            Text("You've used all 30 recordings this month. Your quota resets on the 1st of next month. Thanks for being a Pro member!")
         }
         .alert("Upload Failed", isPresented: Binding(
             get: { recordingViewModel.uploadError != nil },

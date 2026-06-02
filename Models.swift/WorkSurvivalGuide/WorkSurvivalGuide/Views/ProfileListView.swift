@@ -15,6 +15,8 @@ struct ProfileListView: View {
     @State private var selectedProfile: Profile?
     @State private var showSettingsSheet = false
     @State private var showSubscription = false
+    @State private var showSubscriptionStatus = false
+    @State private var showProLimitToast = false
     @AppStorage("contentFilterEnabled") private var contentFilterEnabled = true
     @State private var showEmojiTypePicker = false
     @State private var selfEmojiType: String = "self"
@@ -31,7 +33,22 @@ struct ProfileListView: View {
                 // Header区域
                 ProfileHeaderView(
                     onAddTap: {
-                        profileCountBeforeSheet = viewModel.profiles.count
+                        let count = viewModel.profiles.count
+                        if subscriptionManager.isPro {
+                            if count >= 15 {
+                                showProLimitToast = true
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+                                    showProLimitToast = false
+                                }
+                                return
+                            }
+                        } else {
+                            if count >= 2 {
+                                showSubscription = true
+                                return
+                            }
+                        }
+                        profileCountBeforeSheet = count
                         showingCreateProfile = true
                     },
                     onSettingsTap: { showSettingsSheet = true }
@@ -103,6 +120,24 @@ struct ProfileListView: View {
                     .scrollContentBackground(.hidden)
                 }
             }
+            // Pro 档案数量上限 toast
+            if showProLimitToast {
+                VStack {
+                    Text("You've reached the maximum number of profiles (15).")
+                        .font(.system(size: 13, weight: .medium, design: .rounded))
+                        .foregroundColor(.white)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 10)
+                        .background(Color.black.opacity(0.75))
+                        .cornerRadius(10)
+                        .padding(.horizontal, 40)
+                        .padding(.top, 16)
+                    Spacer()
+                }
+                .transition(.opacity)
+                .animation(.easeInOut(duration: 0.3), value: showProLimitToast)
+            }
         }
         .onAppear {
             // 只在数据为空且不在加载中时才加载
@@ -129,7 +164,99 @@ struct ProfileListView: View {
                     .foregroundColor(AppColors.primaryText)
                     .padding(.top, 24)
 
-                // Pro 订阅入口（暂时隐藏，后续版本开放）
+                // 订阅身份入口（3态）
+                if subscriptionManager.isPro {
+                    // Pro 激活 → 订阅状态页
+                    Button(action: {
+                        showSettingsSheet = false
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                            showSubscriptionStatus = true
+                        }
+                    }) {
+                        HStack(spacing: 10) {
+                            Image(systemName: "crown.fill")
+                                .foregroundColor(Color(hex: "#F59E0B"))
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Pro Member 👑")
+                                    .font(AppFonts.cardTitle)
+                                    .foregroundColor(AppColors.primaryText)
+                                Text(subscriptionManager.formattedExpiresAt ?? "Active subscription")
+                                    .font(.system(size: 11, design: .rounded))
+                                    .foregroundColor(AppColors.secondaryText)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .foregroundColor(Color(hex: "#F59E0B"))
+                                .font(.system(size: 14))
+                        }
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 12)
+                        .background(Color(hex: "#F59E0B").opacity(0.10))
+                        .cornerRadius(10)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.horizontal, 24)
+                } else if subscriptionManager.isExpired {
+                    // 已过期 → 订阅状态页（显示过期信息 + 重新订阅）
+                    Button(action: {
+                        showSettingsSheet = false
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                            showSubscriptionStatus = true
+                        }
+                    }) {
+                        HStack(spacing: 10) {
+                            Image(systemName: "crown.fill")
+                                .foregroundColor(Color(hex: "#EF4444"))
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Pro Expired")
+                                    .font(AppFonts.cardTitle)
+                                    .foregroundColor(AppColors.primaryText)
+                                Text("Tap to re-subscribe")
+                                    .font(.system(size: 11, design: .rounded))
+                                    .foregroundColor(Color(hex: "#EF4444").opacity(0.8))
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .foregroundColor(Color(hex: "#EF4444"))
+                                .font(.system(size: 14))
+                        }
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 12)
+                        .background(Color(hex: "#EF4444").opacity(0.10))
+                        .cornerRadius(10)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.horizontal, 24)
+                } else {
+                    // Free 用户 → 订阅升级页
+                    Button(action: {
+                        showSettingsSheet = false
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                            showSubscription = true
+                        }
+                    }) {
+                        HStack(spacing: 10) {
+                            Image(systemName: "crown.fill")
+                                .foregroundColor(Color(hex: "#F59E0B"))
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Go Pro ✨")
+                                    .font(AppFonts.cardTitle)
+                                    .foregroundColor(AppColors.primaryText)
+
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .foregroundColor(Color(hex: "#F59E0B"))
+                                .font(.system(size: 14))
+                        }
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 12)
+                        .background(Color(hex: "#F59E0B").opacity(0.10))
+                        .cornerRadius(10)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.horizontal, 24)
+                }
 
                 // Content Filter 开关
                 HStack(spacing: 10) {
@@ -327,10 +454,19 @@ struct ProfileListView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(AppColors.background)
 
-            } // ZStack
+        } // settings sheet ZStack
         }
-        .sheet(isPresented: $showSubscription) {
+        .sheet(isPresented: $showSubscription, onDismiss: {
+            if subscriptionManager.isPro {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    showSubscriptionStatus = true
+                }
+            }
+        }) {
             SubscriptionView()
+        }
+        .sheet(isPresented: $showSubscriptionStatus) {
+            SubscriptionStatusView()
         }
         .sheet(isPresented: $showEmojiTypePicker, onDismiss: {
             // 立即写入本地（UserDefaults），不依赖 profiles 是否已加载

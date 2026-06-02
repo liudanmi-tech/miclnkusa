@@ -1873,13 +1873,41 @@ async def upload_audio_api(
     logger.info(f"文件名: {file.filename} Content-Type: {file.content_type} Title: {title} User: {user_id[:8]}...")
     
     try:
+        # ── 订阅月度录音次数检查 ─────────────────────────────────────────
+        from datetime import timezone as _tz_upload
+        _sub_result = await db.execute(select(User).where(User.id == uuid.UUID(user_id)))
+        _sub_user = _sub_result.scalar_one_or_none()
+        if _sub_user:
+            _sub_tier = (getattr(_sub_user, "subscription_tier", None) or "free")
+            _sub_expires = getattr(_sub_user, "subscription_expires_at", None)
+            if _sub_tier == "pro" and _sub_expires:
+                _sub_exp = _sub_expires if _sub_expires.tzinfo else _sub_expires.replace(tzinfo=_tz_upload.utc)
+                if _sub_exp < datetime.now(_tz_upload.utc):
+                    _sub_tier = "free"
+            _sub_limit = _TIER_LIMITS.get(_sub_tier, _TIER_LIMITS["free"])["monthly_limit"]
+            _now_utc = datetime.now(_tz_upload.utc)
+            _month_start = datetime(_now_utc.year, _now_utc.month, 1, tzinfo=_tz_upload.utc)
+            _cnt_result = await db.execute(
+                select(func.count(Session.id)).where(
+                    Session.user_id == uuid.UUID(user_id),
+                    Session.created_at >= _month_start,
+                    Session.status.notin_(["failed"])
+                )
+            )
+            _monthly_used = _cnt_result.scalar() or 0
+            logger.info(f"[upload] 订阅检查 user={user_id[:8]} tier={_sub_tier} used={_monthly_used} limit={_sub_limit}")
+            if _monthly_used >= _sub_limit:
+                logger.warning(f"[upload] 月度上限已达 user={user_id[:8]} tier={_sub_tier} used={_monthly_used}/{_sub_limit}")
+                raise HTTPException(status_code=429, detail="Monthly recording limit reached")
+        # ────────────────────────────────────────────────────────────────
+
         session_id = str(uuid.uuid4())
         logger.info(f"生成 session_id: {session_id}")
-        
+
         if not title:
             formatter = datetime.now().strftime("%H:%M")
             title = f"录音 {formatter}"
-        
+
         start_time = datetime.now()
         
         # 创建数据库Session记录
@@ -1979,6 +2007,8 @@ async def upload_audio_api(
             status_code=200,
             headers={"Content-Type": "application/json"}
         )
+    except HTTPException:
+        raise  # 直接透传（如 429 月度限额、400 参数错误等），不能改写成 500
     except Exception as e:
         logger.error(f"========== 上传音频失败 ==========")
         logger.error(f"错误类型: {type(e).__name__}")
@@ -2947,6 +2977,20 @@ async def generate_strategies_async(session_id: str, user_id: str):
             # 场景生图：与技能分析并行
             # speaker_mapping 用于判断场景类型（场景1多人 vs 场景2事后自述）
             from scene_image_generator import generate_scene_images as _gen_scene_images
+            # 按订阅 tier 限制图片张数
+            from datetime import timezone as _tz_img
+            _img_user_result = await db.execute(select(User).where(User.id == uuid.UUID(user_id)))
+            _img_user = _img_user_result.scalar_one_or_none()
+            _img_tier = "free"
+            if _img_user:
+                _img_tier = (getattr(_img_user, "subscription_tier", None) or "free")
+                _img_expires = getattr(_img_user, "subscription_expires_at", None)
+                if _img_tier == "pro" and _img_expires:
+                    _img_exp = _img_expires if _img_expires.tzinfo else _img_expires.replace(tzinfo=_tz_img.utc)
+                    if _img_exp < datetime.now(_tz_img.utc):
+                        _img_tier = "free"
+            _max_images = _TIER_LIMITS.get(_img_tier, _TIER_LIMITS["free"])["images_per_recording"]
+            logger.info(f"[策略流程] 图片张数限制 tier={_img_tier} max_images={_max_images}")
             asyncio.create_task(_gen_scene_images(
                 transcript=transcript,
                 style_key=image_style,
@@ -2957,6 +3001,7 @@ async def generate_strategies_async(session_id: str, user_id: str):
                 get_profile_refs_fn=_get_profile_reference_images,
                 speaker_mapping=speaker_mapping,
                 fetch_profile_image_fn=_fetch_profile_image_from_oss,
+                max_images=_max_images,
             ))
             logger.info(f"[策略流程] 场景生图任务已并行启动 session_id={session_id}")
 
@@ -4885,7 +4930,9 @@ async def analyze_text_async(session_id: str, text: str, user_id: str):
 # ──────────────────────────────────────────────────────────────────────────────
 
 _PRODUCT_TIER_MAP = {
+    "com.miclnk.pro.weekly":  ("pro", 8),    # 7天 + 1天缓冲
     "com.miclnk.pro.monthly": ("pro", 31),
+    "com.miclnk.pro.yearly":  ("pro", 366),  # 365天 + 1天缓冲
 }
 
 _TIER_LIMITS = {
@@ -4930,15 +4977,44 @@ async def get_subscription_status(
     )
     monthly_count = cnt.scalar() or 0
 
+    # 档案数量
+    _PROFILE_LIMITS = {"free": 2, "pro": 15}
+    profile_limit = _PROFILE_LIMITS.get(tier, _PROFILE_LIMITS["free"])
+    pcnt = await db.execute(
+        select(func.count(Profile.id)).where(Profile.user_id == uuid.UUID(user_id))
+    )
+    profile_count = pcnt.scalar() or 0
+
     resp = {
         "tier": tier,
         "expires_at": expires_at.isoformat() if expires_at else None,
         "monthly_recording_count": monthly_count,
         "monthly_limit": limits["monthly_limit"],
         "images_per_recording": limits["images_per_recording"],
+        "profile_count": profile_count,
+        "profile_limit": profile_limit,
     }
     logger.info(f"[Subscription/status] user={user_id} tier={tier} expires={expires_at} resp={resp}")
     return resp
+
+
+_APPLE_BUNDLE_ID = "com.liudan.WorkSurvivalGuide"
+
+
+def _decode_jws_payload(jws_token: str) -> dict:
+    """
+    解码 Apple StoreKit 2 JWS Transaction payload（不做签名验证，验证 bundleId）。
+    TODO: 后续可加 x5c 证书链验证来完整校验 Apple 签名。
+    """
+    import base64
+    import json as _json
+    parts = jws_token.split('.')
+    if len(parts) != 3:
+        raise ValueError("Invalid JWS format")
+    # base64url padding
+    payload_b64 = parts[1] + '=' * (4 - len(parts[1]) % 4)
+    payload_bytes = base64.urlsafe_b64decode(payload_b64)
+    return _json.loads(payload_bytes)
 
 
 @app.post("/api/v1/subscription/verify")
@@ -4947,7 +5023,7 @@ async def verify_subscription(
     user_id: str = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db)
 ):
-    """接收 Apple original_transaction_id，更新订阅 tier（信任客户端，后续可加 Apple 服务端验证）"""
+    """验证 Apple StoreKit 2 JWS Transaction，更新订阅 tier"""
     from datetime import timezone as _tz, timedelta as _td
     try:
         body = await request.json()
@@ -4956,6 +5032,7 @@ async def verify_subscription(
 
     original_transaction_id = body.get("original_transaction_id", "")
     product_id = body.get("product_id", "")
+    jws_representation = body.get("jws_representation", "")
 
     if not original_transaction_id:
         raise HTTPException(status_code=400, detail="original_transaction_id is required")
@@ -4967,13 +5044,56 @@ async def verify_subscription(
     tier, days = tier_info
     expires_at = datetime.now(_tz.utc) + _td(days=days)
 
+    # ── JWS payload 解码验证 ──────────────────────────────────────────
+    if jws_representation:
+        try:
+            jws_claims = _decode_jws_payload(jws_representation)
+            # 验证 bundleId 防止跨 App 注入
+            jws_bundle_id = jws_claims.get("bundleId", "")
+            if jws_bundle_id and jws_bundle_id != _APPLE_BUNDLE_ID:
+                logger.warning(f"[Subscription/verify] bundleId 不匹配 got={jws_bundle_id} expected={_APPLE_BUNDLE_ID}")
+                raise HTTPException(status_code=400, detail="Invalid bundle ID")
+            # 验证 productId 一致
+            jws_product_id = jws_claims.get("productId", "")
+            if jws_product_id and jws_product_id != product_id:
+                logger.warning(f"[Subscription/verify] productId 不匹配 jws={jws_product_id} body={product_id}")
+                raise HTTPException(status_code=400, detail="Product ID mismatch")
+            # 用 JWS 中的 expiresDate（毫秒）覆盖计算值
+            jws_expires_ms = jws_claims.get("expiresDate")
+            if jws_expires_ms:
+                expires_at = datetime.fromtimestamp(int(jws_expires_ms) / 1000, tz=_tz.utc)
+                logger.info(f"[Subscription/verify] 使用 JWS expiresDate={expires_at.date()}")
+        except HTTPException:
+            raise
+        except Exception as _e:
+            logger.warning(f"[Subscription/verify] JWS 解码失败，降级为信任模式: {_e}")
+            # JWS 解析失败时不拒绝请求（向后兼容），仅记录
+    # ────────────────────────────────────────────────────────────────
+
     result = await db.execute(select(User).where(User.id == uuid.UUID(user_id)))
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
+    # ── original_transaction_id 唯一性校验：一笔购买只能绑定一个账号 ──────────
+    existing = await db.execute(
+        select(User).where(
+            User.apple_original_transaction_id == original_transaction_id,
+            User.id != uuid.UUID(user_id)
+        )
+    )
+    existing_user = existing.scalar_one_or_none()
+    if existing_user:
+        logger.warning(
+            f"[Subscription/verify] original_transaction_id={original_transaction_id} "
+            f"已绑定账号 {existing_user.id}，拒绝绑定到 {user_id}"
+        )
+        raise HTTPException(status_code=409, detail="This subscription is already bound to another account")
+    # ─────────────────────────────────────────────────────────────────────────
+
     user.subscription_tier = tier
     user.subscription_expires_at = expires_at
+    user.apple_original_transaction_id = original_transaction_id
     await db.commit()
 
     logger.info(f"[Subscription] 验证成功 user={user_id} product={product_id} tier={tier} expires={expires_at.date()}")

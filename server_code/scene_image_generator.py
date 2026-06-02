@@ -213,6 +213,7 @@ async def generate_scene_images(
     get_profile_refs_fn=None,   # 场景1：传入 _get_profile_reference_images（async）
     speaker_mapping: dict = None,       # {Speaker_0: profile_id, ...}，用于场景类型判断
     fetch_profile_image_fn=None,        # 场景2：传入 _fetch_profile_image_from_oss（sync）
+    max_images: int = 3,        # 按订阅 tier 控制最多生成图片数（Free=1，Pro=3）
 ):
     """
     分析录音场景并并行生成图片，保存到 strategy_analysis.scene_images。
@@ -324,7 +325,7 @@ async def generate_scene_images(
                     logger.warning(f"[场景2 合并调用] JSON 解析失败: {_pe}, raw={raw[:200]}")
                     combined_data = {}
 
-                scenes = combined_data.get("scenes", [])[:3]
+                scenes = combined_data.get("scenes", [])[:max_images]
 
                 # 从合并结果构建 _name_mapping 和 _matched_profiles
                 for transcript_name, profile_name in combined_data.get("name_mapping", {}).items():
@@ -369,7 +370,7 @@ async def generate_scene_images(
                 text = response.text.strip()
                 json_match = re.search(r'\{.*\}', text, re.DOTALL)
                 scenes_data = json.loads(json_match.group()) if json_match else {}
-                scenes = scenes_data.get("scenes", [])[:3]
+                scenes = scenes_data.get("scenes", [])[:max_images]
 
             if not scenes:
                 logger.warning(f"[场景生图] 未提取到场景, session={session_id}")

@@ -16,12 +16,14 @@ class RecordingViewModel: ObservableObject {
     @Published var uploadProgress: Double = 0  // 0~1，1.0 表示已发送完毕，等待服务器响应
     @Published var uploadPhaseDescription: String = "Uploading"  // "Uploading" | "Processing, please wait..."
     @Published var showPaywall: Bool = false
+    @Published var showProLimitAlert: Bool = false
     @Published var uploadError: String? = nil
 
     private let audioRecorder = AudioRecorderService.shared
     private let networkManager = NetworkManager.shared
     private var timer: Timer?
     private var currentRecordingTaskId: String? // 当前录音任务的 ID
+    private var pollingTask: Task<Void, Never>? // 轮询任务引用，用于取消
     
     // 开始录音
     func startRecording() {
@@ -322,15 +324,16 @@ class RecordingViewModel: ObservableObject {
                     self.uploadProgress = 0
                     let nsError = error as NSError
                     if nsError.code == 429 {
-                        // 录音次数已达上限，弹出升级引导
-                        print("⚠️ [RecordingViewModel] 录音次数已达上限，显示订阅页面")
-                        self.showPaywall = true
-                        // 删除本地占位卡片
+                        // 录音次数已达上限
+                        print("⚠️ [RecordingViewModel] 录音次数已达上限")
+                        if SubscriptionManager.shared.isPro {
+                            self.showProLimitAlert = true  // Pro 用户：友好提示
+                        } else {
+                            self.showPaywall = true  // Free 用户：升级弹窗
+                        }
+                        // 取消占位卡片并解锁录音按钮（cancelTask = clearProcessing + deleteTask）
                         if let taskId = self.currentRecordingTaskId {
-                            NotificationCenter.default.post(
-                                name: NSNotification.Name("TaskDeleted"),
-                                object: taskId
-                            )
+                            TaskListViewModel.shared.cancelTask(taskId: taskId)
                         }
                     } else {
                         print("❌ [RecordingViewModel] ========== 上传/分析失败 ==========")
@@ -503,8 +506,13 @@ class RecordingViewModel: ObservableObject {
                 let nsError = error as NSError
                 if nsError.domain == "NetworkError" && nsError.code == 429 {
                     await MainActor.run {
-                        self.showPaywall = true
-                        NotificationCenter.default.post(name: NSNotification.Name("TaskDeleted"), object: taskId)
+                        if SubscriptionManager.shared.isPro {
+                            self.showProLimitAlert = true
+                        } else {
+                            self.showPaywall = true
+                        }
+                        // 取消占位卡片并解锁录音按钮（cancelTask = clearProcessing + deleteTask）
+                        TaskListViewModel.shared.cancelTask(taskId: taskId)
                     }
                 } else {
                     let friendly = Self.friendlyErrorMessage(error)
@@ -538,7 +546,20 @@ class RecordingViewModel: ObservableObject {
         print("🔄 [RecordingViewModel] ========== 开始轮询状态 ==========")
         print("🔄 [RecordingViewModel] sessionId: \(sessionId)")
         
-        Task {
+        pollingTask = Task { [weak self] in
+            // 监听取消通知，用户点 X 取消时终止轮询
+            let cancelObserver = NotificationCenter.default.addObserver(
+                forName: NSNotification.Name("TaskPollingCancelled"),
+                object: nil,
+                queue: .main
+            ) { [weak self] notification in
+                if let cancelledId = notification.object as? String, cancelledId == sessionId {
+                    self?.pollingTask?.cancel()
+                }
+            }
+            defer { NotificationCenter.default.removeObserver(cancelObserver) }
+            guard let self else { return }
+
             // 轮询开始时缓存 Token，避免其他请求（如任务列表刷新）返回 401 时登出导致 Token 被清空、轮询中断
             let cachedToken = KeychainManager.shared.getToken()
             guard let token = cachedToken, !token.isEmpty else {
@@ -552,7 +573,7 @@ class RecordingViewModel: ObservableObject {
                 }
                 return
             }
-            
+
             var pollCount = 0
             let maxPolls = 300  // 最多轮询 300 次（含策略阶段，约 15 分钟；大文件分析可达 13 分钟）
             var archivedPollCount = 0  // 达到 archived 后的轮询次数，用于兼容旧服务端
@@ -669,6 +690,9 @@ class RecordingViewModel: ObservableObject {
                     }
                     
                     pollCount += 1
+                } catch is CancellationError {
+                    print("🚫 [RecordingViewModel] 轮询已取消 sessionId=\(sessionId)")
+                    break
                 } catch {
                     print("❌ [RecordingViewModel] 轮询状态失败:")
                     print("   - 错误类型: \(type(of: error))")
@@ -712,6 +736,10 @@ class RecordingViewModel: ObservableObject {
         print("🖼️ [RecordingViewModel] 等待图片生成 sessionId=\(sessionId)")
         let maxWaits = 160  // 最多等 480 秒 (160 × 3s)，Gemini 生图通过代理约 240s/张
         for i in 0..<maxWaits {
+            guard !Task.isCancelled else {
+                print("🚫 [RecordingViewModel] 图片轮询已取消 sessionId=\(sessionId)")
+                return
+            }
             do {
                 try await Task.sleep(nanoseconds: 3_000_000_000)
                 let imgStatus = try await networkManager.getImageStatus(sessionId: sessionId, authToken: authToken)

@@ -18,8 +18,6 @@ private struct ScrollOffsetPreferenceKey: PreferenceKey {
 
 struct TaskListView: View {
     @ObservedObject private var viewModel = TaskListViewModel.shared
-    @ObservedObject private var deviceManager = BluetoothDeviceManager.shared
-    @State private var showDeviceSheet = false
     @State private var showStylePicker = false
     @AppStorage("image_style") private var selectedImageStyle: String = "ghibli"
     @State private var scrollOffset: CGFloat = 999
@@ -247,9 +245,6 @@ struct TaskListView: View {
                 withAnimation(.easeInOut(duration: 0.3)) { toastMessage = nil }
             }
         }
-        .sheet(isPresented: $showDeviceSheet) {
-            DeviceSelectionSheet()
-        }
         .sheet(isPresented: $showStylePicker) {
             ImageStylePickerSheet(selectedStyleId: $selectedImageStyle)
         }
@@ -425,6 +420,11 @@ struct TaskCardRow: View {
             do {
                 try await NetworkManager.shared.deleteSession(task.id)
                 await TaskListViewModel.shared.cancelTask(taskId: task.id)
+                // 终止 RecordingViewModel 的轮询 Task
+                NotificationCenter.default.post(
+                    name: NSNotification.Name("TaskPollingCancelled"),
+                    object: task.id
+                )
             } catch {
                 print("❌ [TaskCardRow] 取消录音失败: \(error)")
                 await MainActor.run { isCancelling = false }

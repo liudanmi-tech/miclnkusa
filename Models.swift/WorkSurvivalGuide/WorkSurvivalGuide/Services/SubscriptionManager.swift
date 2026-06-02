@@ -14,15 +14,22 @@ class SubscriptionManager: ObservableObject {
     static let shared = SubscriptionManager()
 
     // App Store 产品 ID（与后端 PRODUCT_TIER_MAP 保持一致）
+    static let weeklyProductID    = "com.miclnk.pro.weekly"
     static let monthlyProductID   = "com.miclnk.pro.monthly"
-    static let allProductIDs: Set<String> = [monthlyProductID]
+    static let yearlyProductID    = "com.miclnk.pro.yearly"
+    static let allProductIDs: Set<String> = [weeklyProductID, monthlyProductID, yearlyProductID]
 
     @Published var products: [Product] = []
     @Published var isPro: Bool = false
     @Published var isLoading: Bool = false
+    @Published var loadingProductId: String? = nil
     @Published var purchaseError: String? = nil
     @Published var monthlyLimit: Int = 20
     @Published var usedCount: Int = 0
+    @Published var expiresAt: String? = nil  // ISO8601，从后端同步
+    @Published var profileCount: Int = 0
+    @Published var profileLimit: Int = 2
+    @Published var currentProductId: String? = nil
 
     private var transactionListenerTask: Task<Void, Error>?
 
@@ -52,7 +59,11 @@ class SubscriptionManager: ObservableObject {
         do {
             let storeProducts = try await Product.products(for: Self.allProductIDs)
             self.products = storeProducts
-            print("[SubscriptionManager] 产品加载成功: \(self.products.map(\.id))")
+            print("[SubscriptionManager] 产品加载成功(\(storeProducts.count)个): \(storeProducts.map(\.id))")
+            if storeProducts.count < Self.allProductIDs.count {
+                let missing = Self.allProductIDs.subtracting(Set(storeProducts.map(\.id)))
+                print("[SubscriptionManager] ⚠️ 缺失产品: \(missing)")
+            }
         } catch {
             print("[SubscriptionManager] 产品加载失败: \(error)")
         }
@@ -62,15 +73,19 @@ class SubscriptionManager: ObservableObject {
 
     func purchase(_ product: Product) async {
         isLoading = true
+        loadingProductId = product.id
         purchaseError = nil
-        defer { isLoading = false }
+        defer {
+            isLoading = false
+            loadingProductId = nil
+        }
 
         do {
             let result = try await product.purchase()
             switch result {
             case .success(let verification):
                 let transaction = try checkVerified(verification)
-                await sendToBackend(originalTransactionId: String(transaction.originalID), productId: transaction.productID)
+                await sendToBackend(originalTransactionId: String(transaction.originalID), productId: transaction.productID, jwsRepresentation: verification.jwsRepresentation)
                 await transaction.finish()
             case .userCancelled:
                 break
@@ -98,7 +113,7 @@ class SubscriptionManager: ObservableObject {
         var didRestore = false
         for await result in Transaction.currentEntitlements {
             if let transaction = try? checkVerified(result) {
-                await sendToBackend(originalTransactionId: String(transaction.originalID), productId: transaction.productID)
+                await sendToBackend(originalTransactionId: String(transaction.originalID), productId: transaction.productID, jwsRepresentation: result.jwsRepresentation)
                 await transaction.finish()
                 didRestore = true
             }
@@ -117,13 +132,64 @@ class SubscriptionManager: ObservableObject {
             isPro = status.tier == "pro"
             monthlyLimit = status.monthlyLimit
             usedCount = status.monthlyRecordingCount
+            expiresAt = status.expiresAt
+            profileCount = status.profileCount ?? 0
+            profileLimit = status.profileLimit ?? 2
             saveToCache(tier: status.tier, limit: status.monthlyLimit)
+            if let pid = status.subscriptionProductId, !pid.isEmpty {
+                currentProductId = pid  // 后端是权威来源，不再查 StoreKit 避免被沙盒缓存覆盖
+            } else {
+                await loadCurrentSubscription()  // 后端无记录时降级查本地
+            }
         } catch {
             print("[SubscriptionManager] 刷新订阅状态失败: \(error)")
+            await loadCurrentSubscription()  // 网络失败时降级查本地
         }
     }
 
+    /// 用户曾是 Pro 但当前未激活 (tier=free + expiresAt 有值) → 已到期
+    var isExpired: Bool {
+        guard !isPro, let raw = expiresAt, !raw.isEmpty else { return false }
+        let fmt = ISO8601DateFormatter()
+        fmt.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        var d = fmt.date(from: raw)
+        if d == nil {
+            fmt.formatOptions = [.withInternetDateTime]
+            d = fmt.date(from: raw)
+        }
+        return d != nil   // expiresAt 存在 + isPro=false ⇒ 已过期
+    }
+
     var remainingRecordings: Int { max(0, monthlyLimit - usedCount) }
+
+    /// 将 ISO8601 到期时间格式化为 "Expires Jun 30, 2026"，无数据时返回 nil
+    var formattedExpiresAt: String? {
+        guard let raw = expiresAt else { return nil }
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        var date = formatter.date(from: raw)
+        if date == nil {
+            formatter.formatOptions = [.withInternetDateTime]
+            date = formatter.date(from: raw)
+        }
+        guard let d = date else { return nil }
+        let display = DateFormatter()
+        display.dateFormat = "MMM d, yyyy"
+        return "Renews \(display.string(from: d))"
+    }
+
+    // MARK: - 读取当前激活的订阅产品 ID（StoreKit currentEntitlements）
+
+    func loadCurrentSubscription() async {
+        for await result in Transaction.currentEntitlements {
+            if let transaction = try? checkVerified(result),
+               Self.allProductIDs.contains(transaction.productID) {
+                currentProductId = transaction.productID
+                return
+            }
+        }
+        currentProductId = nil
+    }
 
     // MARK: - Private
 
@@ -132,7 +198,7 @@ class SubscriptionManager: ObservableObject {
             for await result in Transaction.updates {
                 guard let self else { return }
                 if let transaction = try? self.checkVerified(result) {
-                    await self.sendToBackend(originalTransactionId: String(transaction.originalID), productId: transaction.productID)
+                    await self.sendToBackend(originalTransactionId: String(transaction.originalID), productId: transaction.productID, jwsRepresentation: result.jwsRepresentation)
                     await transaction.finish()
                 }
             }
@@ -146,11 +212,12 @@ class SubscriptionManager: ObservableObject {
         }
     }
 
-    private func sendToBackend(originalTransactionId: String, productId: String = "") async {
+    private func sendToBackend(originalTransactionId: String, productId: String = "", jwsRepresentation: String = "") async {
         do {
             try await NetworkManager.shared.verifyAppleTransaction(
                 originalTransactionId: originalTransactionId,
-                productId: productId
+                productId: productId,
+                jwsRepresentation: jwsRepresentation
             )
             await refreshFromBackend()
             print("[SubscriptionManager] ✅ 后端验证成功 isPro=\(isPro)")

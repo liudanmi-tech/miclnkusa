@@ -19,10 +19,11 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from datetime import datetime, timezone
 from pydantic import BaseModel
 
 from database.connection import get_db
-from database.models import AnalysisResult, StrategyAnalysis
+from database.models import AnalysisResult, StrategyAnalysis, User
 from auth.jwt_handler import get_current_user_id
 
 logger = logging.getLogger(__name__)
@@ -279,6 +280,22 @@ async def assistant_chat(
     user_id: str = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db),
 ):
+    # 0. 对话轮数限制（每 session，Free=10轮，Pro=50轮）
+    _CHAT_LIMITS = {"free": 10, "pro": 50}
+    _user_q = await db.execute(select(User).where(User.id == uuid.UUID(user_id)))
+    _user = _user_q.scalar_one_or_none()
+    if _user:
+        _tier = getattr(_user, "subscription_tier", None) or "free"
+        _expires = getattr(_user, "subscription_expires_at", None)
+        if _tier == "pro" and _expires:
+            _exp = _expires if _expires.tzinfo else _expires.replace(tzinfo=timezone.utc)
+            if _exp < datetime.now(timezone.utc):
+                _tier = "free"
+        _max_turns = _CHAT_LIMITS.get(_tier, _CHAT_LIMITS["free"])
+        _used_turns = len(req.history) // 2  # 每轮 = 1条 user + 1条 assistant
+        if _used_turns >= _max_turns:
+            raise HTTPException(status_code=403, detail="chat_limit_reached")
+
     # 1. 取策略分析
     strategy_q = await db.execute(
         select(StrategyAnalysis).where(

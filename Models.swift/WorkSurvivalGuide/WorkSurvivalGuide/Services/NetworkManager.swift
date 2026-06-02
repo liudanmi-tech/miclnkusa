@@ -909,7 +909,20 @@ class NetworkManager {
                     await MainActor.run { onError("Invalid response") }; return
                 }
                 guard http.statusCode == 200 else {
-                    await MainActor.run { onError("Server error: \(http.statusCode)") }; return
+                    if http.statusCode == 403 {
+                        // 读取 body 判断是否为对话轮数超限
+                        var bodyData = Data()
+                        for try await byte in asyncBytes { bodyData.append(byte) }
+                        let body = String(data: bodyData, encoding: .utf8) ?? ""
+                        if body.contains("chat_limit_reached") {
+                            await MainActor.run { onError("chat_limit_reached") }
+                        } else {
+                            await MainActor.run { onError("Server error: 403") }
+                        }
+                    } else {
+                        await MainActor.run { onError("Server error: \(http.statusCode)") }
+                    }
+                    return
                 }
 
                 for try await line in asyncBytes.lines {
@@ -2027,7 +2040,7 @@ class NetworkManager {
         return try JSONDecoder().decode(SubscriptionStatusResponse.self, from: data)
     }
 
-    func verifyAppleTransaction(originalTransactionId: String, productId: String = "") async throws {
+    func verifyAppleTransaction(originalTransactionId: String, productId: String = "", jwsRepresentation: String = "") async throws {
         guard hasValidToken() else {
             throw NSError(domain: "NetworkError", code: 401, userInfo: [NSLocalizedDescriptionKey: "未登录"])
         }
@@ -2035,6 +2048,7 @@ class NetworkManager {
         let url = "\(baseURLForWrite)/subscription/verify"
         var body: [String: Any] = ["original_transaction_id": originalTransactionId]
         if !productId.isEmpty { body["product_id"] = productId }
+        if !jwsRepresentation.isEmpty { body["jws_representation"] = jwsRepresentation }
 
         let dataResponse = await AF.request(
             url,
@@ -2065,6 +2079,9 @@ struct SubscriptionStatusResponse: Codable {
     let monthlyRecordingCount: Int
     let monthlyLimit: Int
     let imagesPerRecording: Int
+    let profileCount: Int?
+    let profileLimit: Int?
+    let subscriptionProductId: String?
 
     enum CodingKeys: String, CodingKey {
         case tier
@@ -2072,6 +2089,9 @@ struct SubscriptionStatusResponse: Codable {
         case monthlyRecordingCount = "monthly_recording_count"
         case monthlyLimit = "monthly_limit"
         case imagesPerRecording = "images_per_recording"
+        case profileCount = "profile_count"
+        case profileLimit = "profile_limit"
+        case subscriptionProductId = "subscription_product_id"
     }
 }
 

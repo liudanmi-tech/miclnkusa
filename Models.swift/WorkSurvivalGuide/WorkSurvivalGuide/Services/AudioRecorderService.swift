@@ -27,14 +27,14 @@ class AudioRecorderService: NSObject, ObservableObject {
     
     override init() {
         super.init()
-        setupAudioSession()
+        // 启动时不激活音频 Session，避免阻塞主线程；录音前在 _startRecording() 中初始化
     }
-    
-    // 配置音频会话（支持蓝牙输入，如智能眼镜）
+
+    // 配置音频会话（录音前调用）
     private func setupAudioSession() {
         do {
             let audioSession = AVAudioSession.sharedInstance()
-            try audioSession.setCategory(.playAndRecord, mode: .default, options: [.allowBluetooth, .defaultToSpeaker])
+            try audioSession.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker])
             try audioSession.setActive(true)
         } catch {
             print("音频会话配置失败: \(error)")
