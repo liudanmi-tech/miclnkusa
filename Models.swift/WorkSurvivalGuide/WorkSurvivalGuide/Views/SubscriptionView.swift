@@ -74,7 +74,7 @@ struct SubscriptionView: View {
                                 Link("Privacy Policy", destination: URL(string: "https://yohomie.art/privacy.html")!)
                                     .font(.system(size: 11))
                                     .foregroundColor(.white.opacity(0.55))
-                                Link("Terms of Use", destination: URL(string: "https://yohomie.art/terms.html")!)
+                                Link("Terms of Use (EULA)", destination: URL(string: "https://yohomie.art/terms.html")!)
                                     .font(.system(size: 11))
                                     .foregroundColor(.white.opacity(0.55))
                             }
@@ -89,16 +89,31 @@ struct SubscriptionView: View {
         .onChange(of: manager.isPro) { newValue in
             if newValue { dismiss() }
         }
+        .interactiveDismissDisabled()
         .task {
+            let taskId = Int.random(in: 1000...9999)  // 区分并发 task 实例
+            print("[SubscriptionView] 📦 task[\(taskId)] 开始，设备:\(UIDevice.current.model) iOS:\(UIDevice.current.systemVersion) cancelled=\(Task.isCancelled)")
             await manager.loadProducts()
+            print("[SubscriptionView] task[\(taskId)] loadProducts 完成 cancelled=\(Task.isCancelled) products=\(manager.products.count)")
             await manager.refreshFromBackend()
-            if manager.products.isEmpty {
-                // 首次失败后等 2 秒自动重试一次，再判断是否报错
+            print("[SubscriptionView] task[\(taskId)] refreshFromBackend 完成 cancelled=\(Task.isCancelled)")
+            // 最多自动重试 3 次（应对 iPadOS sandbox 网络延迟），cancelled 时退出避免无意义重试
+            var retries = 0
+            while manager.products.isEmpty && retries < 3 && !Task.isCancelled {
+                print("[SubscriptionView] task[\(taskId)] 🔄 第\(retries + 1)次重试，等待2秒... cancelled=\(Task.isCancelled)")
                 try? await Task.sleep(for: .seconds(2))
-                await manager.loadProducts()
-                if manager.products.isEmpty {
-                    loadTimeout = true
+                guard !Task.isCancelled else {
+                    print("[SubscriptionView] task[\(taskId)] 睡眠后发现已取消，退出重试")
+                    return
                 }
+                await manager.loadProducts()
+                retries += 1
+            }
+            if manager.products.isEmpty {
+                print("[SubscriptionView] task[\(taskId)] ❌ 全部重试失败，显示错误页")
+                loadTimeout = true
+            } else {
+                print("[SubscriptionView] task[\(taskId)] ✅ 产品加载成功，共\(manager.products.count)个")
             }
         }
     }
@@ -167,8 +182,18 @@ struct SubscriptionView: View {
                     }
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundColor(Color(hex: "#F59E0B"))
+                    // 错误状态下也保持链接可见，确保符合 Guideline 3.1.2(c)
+                    HStack(spacing: 16) {
+                        Link("Privacy Policy", destination: URL(string: "https://yohomie.art/privacy.html")!)
+                            .font(.system(size: 12))
+                            .foregroundColor(.white.opacity(0.5))
+                        Link("Terms of Use (EULA)", destination: URL(string: "https://yohomie.art/terms.html")!)
+                            .font(.system(size: 12))
+                            .foregroundColor(.white.opacity(0.5))
+                    }
+                    .padding(.top, 4)
                 }
-                .frame(height: 100)
+                .frame(minHeight: 100)
             } else {
                 ProgressView()
                     .tint(.white)

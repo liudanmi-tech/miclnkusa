@@ -75,9 +75,6 @@
             ReferencedContainer = "container:WorkSurvivalGuide.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
-      <StoreKitConfigurationFileReference
-         identifier = "../../WorkSurvivalGuide/MicLnk.storekit">
-      </StoreKitConfigurationFileReference>
    </LaunchAction>
    <ProfileAction
       buildConfiguration = "Release"
