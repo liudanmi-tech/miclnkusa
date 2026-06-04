@@ -56,16 +56,81 @@ class SubscriptionManager: ObservableObject {
     // MARK: - 加载 App Store 产品列表（在打开 Paywall 时调用，避免启动时触发 StoreKit 网络请求）
 
     func loadProducts() async {
-        do {
-            let storeProducts = try await Product.products(for: Self.allProductIDs)
-            self.products = storeProducts
-            print("[SubscriptionManager] 产品加载成功(\(storeProducts.count)个): \(storeProducts.map(\.id))")
-            if storeProducts.count < Self.allProductIDs.count {
-                let missing = Self.allProductIDs.subtracting(Set(storeProducts.map(\.id)))
-                print("[SubscriptionManager] ⚠️ 缺失产品: \(missing)")
+        // [诊断] 记录调用时刻 + Task 是否已被取消
+        let t0 = Date()
+        func ts() -> String { String(format: "+%.2fs", Date().timeIntervalSince(t0)) }
+        let cancelledAtEntry = Task.isCancelled
+        print("[SubscriptionManager] 🔍 loadProducts() 开始 cancelled=\(cancelledAtEntry) IDs:\(Self.allProductIDs)")
+
+        // 若调用时 Task 已被取消（iOS 26 重建视图场景），直接退出，不当作错误
+        guard !cancelledAtEntry else {
+            print("[SubscriptionManager] ⚠️ loadProducts() 入口已取消，跳过")
+            return
+        }
+
+        // iOS 26 fix: 显式调用 AppTransaction.shared（用 try await，不用 try?）
+        // iOS 26 要求对 AppTransaction 做显式处理，否则 Product.products(for:) 会直接返回空
+        if #available(iOS 16, *) {
+            do {
+                let appTxResult = try await AppTransaction.shared
+                if case .verified(let appTx) = appTxResult {
+                    print("[SubscriptionManager] \(ts()) ✅ AppTransaction 验证成功 env=\(appTx.environment.rawValue)")
+                } else {
+                    print("[SubscriptionManager] \(ts()) ⚠️ AppTransaction 未验证（沙盒/审核环境下属正常）")
+                }
+            } catch {
+                print("[SubscriptionManager] \(ts()) ⚠️ AppTransaction 失败: \(type(of: error)) \(error) — 继续加载产品")
             }
+        }
+
+        do {
+            // [诊断] 记录 Product.products(for:) 实际耗时，区分"立即空"与"10s超时"
+            var productsCallElapsed: Double = 0
+            var timedOut = false
+
+            let storeProducts: [Product] = try await withThrowingTaskGroup(of: [Product]?.self) { group in
+                let callStart = Date()
+                group.addTask {
+                    try await Product.products(for: Self.allProductIDs)
+                }
+                group.addTask {
+                    try await Task.sleep(nanoseconds: 10_000_000_000) // 10s 超时
+                    return nil  // nil = 超时哨兵
+                }
+                // 先捕获 CancellationError（来自外部取消），与产品加载失败区分
+                do {
+                    guard let first = try await group.next() else { return [] }
+                    productsCallElapsed = Date().timeIntervalSince(callStart)
+                    timedOut = (first == nil)
+                    group.cancelAll()
+                    return first ?? []
+                } catch is CancellationError {
+                    productsCallElapsed = Date().timeIntervalSince(callStart)
+                    print("[SubscriptionManager] \(ts()) ⚠️ withThrowingTaskGroup 被外部取消 elapsed=\(String(format:"%.2f",productsCallElapsed))s")
+                    throw CancellationError()  // 向上传播，让外层 catch 处理
+                }
+            }
+
+            // [诊断] 打印耗时与是否超时
+            if timedOut {
+                print("[SubscriptionManager] \(ts()) ⏱ Product.products() 超时(10s)，返回空 — iOS 26 StoreKit 网络不通或 review 环境无法加载产品")
+            } else {
+                print("[SubscriptionManager] \(ts()) Product.products() 耗时 \(String(format:"%.2f",productsCallElapsed))s，返回 \(storeProducts.count) 个产品")
+            }
+
+            self.products = storeProducts
+            if storeProducts.isEmpty {
+                print("[SubscriptionManager] \(ts()) ⚠️ 产品列表为空 — 所有3个ID均缺失")
+            } else {
+                print("[SubscriptionManager] \(ts()) ✅ 产品加载成功: \(storeProducts.map(\.id))")
+            }
+        } catch is CancellationError {
+            print("[SubscriptionManager] \(ts()) ⚠️ loadProducts() 被取消（视图关闭/重建），非错误，忽略")
+            // 不更新 products，不设错误状态
+        } catch let skError as StoreKitError {
+            print("[SubscriptionManager] \(ts()) ❌ StoreKit错误 — \(skError) | \(skError.localizedDescription)")
         } catch {
-            print("[SubscriptionManager] 产品加载失败: \(error)")
+            print("[SubscriptionManager] \(ts()) ❌ 产品加载失败 — type:\(type(of: error)) desc:\(error.localizedDescription) full:\(error)")
         }
     }
 
