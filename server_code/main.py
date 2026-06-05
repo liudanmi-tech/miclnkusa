@@ -2663,11 +2663,9 @@ async def get_task_detail(
                     dialogues = new_dialogues
                 logger.info(f"[任务详情] session={session_id} 已对 summary/conversation_summary/dialogues 做档案名替换 speaker_names={list(speaker_names.keys())}")
         
-        # 原始录音 URL：OSS 直链 > 本地代理
+        # 原始录音 URL：统一走后端代理（/audio-file），不直接暴露 R2 URL
         _audio_url: Optional[str] = None
-        if getattr(db_session, "audio_url", None):
-            _audio_url = db_session.audio_url
-        elif getattr(db_session, "audio_path", None):
+        if getattr(db_session, "audio_url", None) or getattr(db_session, "audio_path", None):
             _api_base = os.getenv("API_PUBLIC_URL", "http://47.79.254.213").rstrip("/")
             _audio_url = f"{_api_base}/api/v1/tasks/sessions/{session_id}/audio-file"
 
@@ -2816,18 +2814,40 @@ async def serve_session_audio(
             raise HTTPException(status_code=404, detail="任务不存在")
 
         audio_path = getattr(db_session, "audio_path", None)
-        if not audio_path or not os.path.isfile(audio_path):
+        audio_r2_url = getattr(db_session, "audio_url", None)
+
+        if audio_path and os.path.isfile(audio_path):
+            # 本地文件（旧录音）
+            ext = os.path.splitext(audio_path)[1].lower()
+            media_type_map = {".m4a": "audio/mp4", ".mp3": "audio/mpeg", ".wav": "audio/wav", ".aac": "audio/aac", ".ogg": "audio/ogg"}
+            media_type = media_type_map.get(ext, "audio/mpeg")
+            return _FileResponse(
+                path=audio_path,
+                media_type=media_type,
+                headers={"Accept-Ranges": "bytes", "Cache-Control": "no-cache"}
+            )
+        elif audio_r2_url:
+            # R2 存储（新录音）：从 R2 取回后代理返回
+            try:
+                import re as _re
+                _key_match = _re.search(r"/sessions/[^/]+/[^/]+/original\.[a-z0-9]+", audio_r2_url)
+                oss_key = _key_match.group(0).lstrip("/") if _key_match else None
+                if not oss_key or not USE_OSS or s3_client is None:
+                    raise HTTPException(status_code=404, detail="音频文件不存在")
+                obj = s3_client.get_object(Bucket=OSS_BUCKET_NAME, Key=oss_key)
+                audio_data = obj["Body"].read()
+                ext = os.path.splitext(oss_key)[1].lower()
+                media_type_map = {".m4a": "audio/mp4", ".mp3": "audio/mpeg", ".wav": "audio/wav", ".aac": "audio/aac", ".ogg": "audio/ogg"}
+                media_type = media_type_map.get(ext, "audio/mpeg")
+                return Response(content=audio_data, media_type=media_type,
+                                headers={"Accept-Ranges": "bytes", "Cache-Control": "no-cache"})
+            except HTTPException:
+                raise
+            except Exception as e:
+                logger.error(f"R2 音频获取失败: {e}")
+                raise HTTPException(status_code=500, detail="音频服务失败")
+        else:
             raise HTTPException(status_code=404, detail="音频文件不存在")
-
-        ext = os.path.splitext(audio_path)[1].lower()
-        media_type_map = {".m4a": "audio/mp4", ".mp3": "audio/mpeg", ".wav": "audio/wav", ".aac": "audio/aac", ".ogg": "audio/ogg"}
-        media_type = media_type_map.get(ext, "audio/mpeg")
-
-        return _FileResponse(
-            path=audio_path,
-            media_type=media_type,
-            headers={"Accept-Ranges": "bytes", "Cache-Control": "no-cache"}
-        )
     except HTTPException:
         raise
     except Exception as e:
