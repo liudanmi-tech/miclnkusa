@@ -22,16 +22,14 @@ logger = logging.getLogger(__name__)
 # ──────────────────────────────────────────────────────────────────────────────
 # 常量
 # ──────────────────────────────────────────────────────────────────────────────
-GEMINI_MODEL = "gemini-2.0-flash-exp"
+GEMINI_MODEL = "gemini-2.5-flash-native-audio-latest"
 GEMINI_AUDIO_MIME = "audio/pcm;rate=16000"
 SESSION_RENEW_SECONDS = 14 * 60     # 14 分钟触发续期（Gemini Live 上限 15 分钟）
 AUDIO_BUFFER_MAXLEN = 200           # 约 96 KB PCM，应对 1-3s 建连延迟
 
-TRANSCRIPTION_SYSTEM_PROMPT = """你是一个实时会话转录助手。你会收到通过麦克风采集的对话音频。
-请实时转录对话内容，识别不同说话人（Speaker_1, Speaker_2 等）。
-每段完整的话结束时，输出严格单行 JSON（不包含任何其他内容）：
-{"speaker": "Speaker_1", "text": "说话内容"}
-如无法区分说话人，统一使用 Speaker_1。只输出 JSON，不输出解释。"""
+# native-audio 模型仅支持 AUDIO 输出，转录通过 input_audio_transcription 获取
+# 系统提示用于引导模型对话行为，转录本身由 input_audio_transcription 独立完成
+TRANSCRIPTION_SYSTEM_PROMPT = """你是一个安静的实时对话助手。请不要主动发言，等待用户说话。"""
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -70,6 +68,9 @@ class GeminiProxySession:
         # Turn 计数（续期后不重置，保持全局连续）
         self._global_turn_index = 0
 
+        # input_audio_transcription 流式累积缓冲
+        self._input_transcription_buffer: str = ""
+
         # 会话计时（用于触发续期）
         self._session_start_mono: Optional[float] = None
 
@@ -82,8 +83,12 @@ class GeminiProxySession:
     # ── 连接管理 ──────────────────────────────────────────────────────────────
 
     def _make_config(self) -> types.LiveConnectConfig:
+        # native-audio 模型仅支持 AUDIO 输出；通过 input_audio_transcription 获取文本转录
         return types.LiveConnectConfig(
-            response_modalities=["TEXT"],
+            response_modalities=["AUDIO"],
+            input_audio_transcription=types.AudioTranscriptionConfig(
+                language_codes=["zh-CN", "en-US"],
+            ),
             system_instruction=types.Content(
                 parts=[types.Part(text=TRANSCRIPTION_SYSTEM_PROMPT)]
             ),
@@ -178,15 +183,40 @@ class GeminiProxySession:
     def _parse_response(self, response) -> Optional[TranscribedTurn]:
         """
         解析 Gemini Live 响应。
-        只在 turn_complete=True 时提取文本，解析我们约定的 JSON 格式。
+        native-audio 模型通过 input_audio_transcription 返回文本转录：
+          - server_content.input_transcription.text  → 流式累积
+          - server_content.input_transcription.finished = True → 发出一条 Turn
+        model_turn 中的 AUDIO inline_data 直接忽略。
         """
         try:
             sc = getattr(response, "server_content", None)
             if sc is None:
                 return None
-            if not getattr(sc, "turn_complete", False):
-                return None  # 流式中间帧，等待 turn_complete
 
+            # ── 优先处理 input_audio_transcription ──────────────────────────────
+            it = getattr(sc, "input_transcription", None)
+            if it is not None:
+                chunk = getattr(it, "text", "") or ""
+                finished = getattr(it, "finished", False) or False
+                if chunk:
+                    self._input_transcription_buffer += chunk
+                if finished and self._input_transcription_buffer.strip():
+                    turn_text = self._input_transcription_buffer.strip()
+                    self._input_transcription_buffer = ""
+                    idx = self._global_turn_index
+                    self._global_turn_index += 1
+                    logger.debug(f"[GeminiProxy] 转录完成 idx={idx} text={turn_text[:40]}")
+                    # TODO: 多说话人识别（当前统一标为 Speaker_1）
+                    return TranscribedTurn(
+                        speaker_label="Speaker_1",
+                        text=turn_text,
+                        turn_index=idx,
+                    )
+                return None
+
+            # ── 兜底：model_turn TEXT（旧模型兼容，native-audio 不会走到这里）──
+            if not getattr(sc, "turn_complete", False):
+                return None
             model_turn = getattr(sc, "model_turn", None)
             if model_turn is None:
                 return None
@@ -196,20 +226,15 @@ class GeminiProxySession:
             ).strip()
             if not raw_text:
                 return None
-
-            # 解析 JSON 格式
             try:
                 data = json.loads(raw_text)
                 speaker_label = str(data.get("speaker", "Speaker_1"))
                 turn_text = str(data.get("text", "")).strip()
             except (json.JSONDecodeError, AttributeError):
-                # 非 JSON 输出，整体当作 Speaker_1
                 speaker_label = "Speaker_1"
                 turn_text = raw_text
-
             if not turn_text:
                 return None
-
             idx = self._global_turn_index
             self._global_turn_index += 1
             return TranscribedTurn(
