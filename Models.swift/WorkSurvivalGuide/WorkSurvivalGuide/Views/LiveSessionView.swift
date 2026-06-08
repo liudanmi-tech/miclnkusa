@@ -2,15 +2,61 @@
 //  LiveSessionView.swift
 //  WorkSurvivalGuide
 //
-//  Live Mode 实时录制界面（Step 10 C+D）
+//  Live Mode 实时录制界面
 //
-//  流程：
-//    .onAppear → createLiveSession → startSession(WS) + connect(SSE)
-//    实时展示：AI 建议气泡 + 转录气泡列表 + 计时器 + 眼镜状态
-//    停止：Alert 确认 → stopSession + endLiveSession → SpeakerConfirmationSheet → 处理中遮罩 → onCompleted
+//  UI 结构（对应 conversation detail mockup）：
+//    ┌─────────────────────────────────────────┐
+//    │  Header：眼镜状态 / 计时器 / REC 指示   │
+//    ├─────────────────────────────────────────┤
+//    │  Summary（segment_context，有内容才显示）│
+//    ├─────────────────────────────────────────┤
+//    │  Chat 流（ChatItem 列表）                │
+//    │    .turn      → 左/右气泡               │
+//    │    .suggestion → 内联 AI tip            │
+//    │    .skillCards → 内联技能卡片组          │
+//    ├─────────────────────────────────────────┤
+//    │  Stop bar                               │
+//    └─────────────────────────────────────────┘
 //
 
 import SwiftUI
+
+// MARK: - Chat Item Models（file-private）
+
+private enum ChatItem: Identifiable {
+    case turn(LiveTurnItem)
+    case suggestion(SuggestionData)
+    case skillCards(SkillBatchData)
+
+    var id: String {
+        switch self {
+        case .turn(let t):       return "t-\(t.id)"
+        case .suggestion(let d): return "s-\(d.id)"
+        case .skillCards(let d): return "k-\(d.id)"
+        }
+    }
+}
+
+private struct SuggestionData: Identifiable {
+    let id = UUID()
+    let text: String
+    let emotion: String
+}
+
+private struct SkillCardData: Identifiable {
+    let id = UUID()
+    let skillId: String
+    let skillName: String
+    let category: String
+    let confidence: Double
+    let advice: String
+    let reminder: String
+}
+
+private struct SkillBatchData: Identifiable {
+    let id = UUID()
+    let cards: [SkillCardData]
+}
 
 // MARK: - Main View
 
@@ -25,9 +71,9 @@ struct LiveSessionView: View {
     @ObservedObject private var sseClient   = LiveSSEClient.shared
 
     // ── Session 生命周期 ────────────────────────────────────────────────────
-    @State private var sessionId:   String?
-    @State private var isStarting:  Bool   = true
-    @State private var startError:  String?
+    @State private var sessionId:  String?
+    @State private var isStarting: Bool   = true
+    @State private var startError: String?
 
     // ── 停止录音流程 ────────────────────────────────────────────────────────
     @State private var showStopAlert:      Bool = false
@@ -36,10 +82,11 @@ struct LiveSessionView: View {
     @State private var showSpeakerConfirm: Bool = false
     @State private var showProcessingDone: Bool = false
 
-    // ── AI 建议（SSE suggestion 事件）──────────────────────────────────────
-    @State private var suggestionText: String = ""
-    @State private var emotionTag:     String = ""
-    @State private var showSuggestion: Bool   = false
+    // ── 聊天内容 ────────────────────────────────────────────────────────────
+    @State private var chatItems:      [ChatItem] = []
+    @State private var segmentContext: String     = ""
+
+    // MARK: - body
 
     var body: some View {
         ZStack {
@@ -89,14 +136,13 @@ struct LiveSessionView: View {
         VStack(spacing: 0) {
             headerBar
 
-            if showSuggestion && !suggestionText.isEmpty {
-                suggestionBubble
-                    .transition(.move(edge: .top).combined(with: .opacity))
-                    .animation(.spring(response: 0.4), value: showSuggestion)
+            if !segmentContext.isEmpty {
+                summarySection
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+                    .animation(.easeInOut(duration: 0.3), value: segmentContext.isEmpty)
             }
 
-            transcriptArea
-
+            chatArea
             stopBar
         }
     }
@@ -105,7 +151,6 @@ struct LiveSessionView: View {
 
     private var headerBar: some View {
         HStack(spacing: 16) {
-            // 眼镜 / 麦克风状态
             HStack(spacing: 6) {
                 Circle()
                     .fill(liveManager.isGlassesAvailable ? Color.green : Color.orange)
@@ -117,26 +162,20 @@ struct LiveSessionView: View {
 
             Spacer()
 
-            // 计时器
             Text(formatElapsed(liveManager.elapsedSeconds))
                 .font(.system(size: 18, weight: .semibold, design: .monospaced))
                 .foregroundColor(.white)
 
             Spacer()
 
-            // 录制状态指示
             HStack(spacing: 4) {
                 if liveManager.sessionState == .active {
-                    Circle()
-                        .fill(Color.red)
-                        .frame(width: 8, height: 8)
+                    Circle().fill(Color.red).frame(width: 8, height: 8)
                     Text("REC")
                         .font(.system(size: 12, weight: .bold))
                         .foregroundColor(.red)
                 } else {
-                    ProgressView()
-                        .scaleEffect(0.6)
-                        .tint(.white)
+                    ProgressView().scaleEffect(0.6).tint(.white)
                 }
             }
             .frame(width: 52, alignment: .trailing)
@@ -146,68 +185,51 @@ struct LiveSessionView: View {
         .background(Color(white: 0.07))
     }
 
-    // MARK: - AI 建议气泡
+    // MARK: - Segment Summary 区域
 
-    private var suggestionBubble: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Text(emotionTag.isEmpty ? "💡" : emotionTag)
-                .font(.system(size: 22))
-
-            VStack(alignment: .leading, spacing: 3) {
-                Text("AI 建议")
+    private var summarySection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 5) {
+                Image(systemName: "text.alignleft")
                     .font(.system(size: 10, weight: .semibold))
-                    .foregroundColor(Color(hex: "#00D4FF").opacity(0.85))
-                Text(suggestionText)
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundColor(.white)
-                    .lineLimit(3)
-                    .fixedSize(horizontal: false, vertical: true)
+                    .foregroundColor(.white.opacity(0.4))
+                Text("Summary")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.4))
+                    .textCase(.uppercase)
             }
-
-            Spacer()
+            Text(segmentContext)
+                .font(.system(size: 13))
+                .foregroundColor(.white.opacity(0.82))
+                .lineLimit(4)
+                .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(12)
-        .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(Color(hex: "#001824"))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .stroke(Color(hex: "#00D4FF").opacity(0.30), lineWidth: 1)
-                )
-        )
         .padding(.horizontal, 16)
-        .padding(.top, 10)
+        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(white: 0.10))
     }
 
-    // MARK: - 转录气泡列表
+    // MARK: - Chat 区域
 
-    private var transcriptArea: some View {
+    private var chatArea: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(spacing: 8) {
-                    if liveManager.transcript.isEmpty {
-                        VStack(spacing: 12) {
-                            Image(systemName: "waveform.and.mic")
-                                .font(.system(size: 40))
-                                .foregroundColor(.white.opacity(0.12))
-                            Text("等待对话开始…")
-                                .font(.system(size: 14))
-                                .foregroundColor(.white.opacity(0.25))
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.top, 60)
+                LazyVStack(spacing: 10) {
+                    if chatItems.isEmpty {
+                        emptyState
                     } else {
-                        ForEach(liveManager.transcript) { turn in
-                            TurnBubble(turn: turn)
-                                .id(turn.id)
+                        ForEach(chatItems) { item in
+                            chatItemView(item)
+                                .id(item.id)
                         }
                     }
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 14)
             }
-            .onChange(of: liveManager.transcript.count) { _ in
-                if let last = liveManager.transcript.last {
+            .onChange(of: chatItems.count) { _ in
+                if let last = chatItems.last {
                     withAnimation(.easeOut(duration: 0.25)) {
                         proxy.scrollTo(last.id, anchor: .bottom)
                     }
@@ -216,7 +238,36 @@ struct LiveSessionView: View {
         }
     }
 
-    // MARK: - 底部停止按钮栏
+    @ViewBuilder
+    private func chatItemView(_ item: ChatItem) -> some View {
+        switch item {
+        case .turn(let turn):
+            TurnBubble(turn: turn)
+        case .suggestion(let data):
+            InlineSuggestionBubble(data: data)
+        case .skillCards(let batch):
+            VStack(spacing: 6) {
+                ForEach(batch.cards) { card in
+                    SkillCardView(card: card)
+                }
+            }
+        }
+    }
+
+    private var emptyState: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "waveform.and.mic")
+                .font(.system(size: 40))
+                .foregroundColor(.white.opacity(0.12))
+            Text("等待对话开始…")
+                .font(.system(size: 14))
+                .foregroundColor(.white.opacity(0.25))
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.top, 60)
+    }
+
+    // MARK: - 底部停止栏
 
     private var stopBar: some View {
         VStack(spacing: 0) {
@@ -337,14 +388,45 @@ struct LiveSessionView: View {
     }
 
     private func setupSSECallbacks() {
-        LiveSSEClient.shared.onSuggestion = { [weak liveManager] payload in
-            let text    = payload["text"]       as? String ?? ""
+        // 转录 turn（来自 WebSocket）→ 追加到 chatItems
+        LiveSessionManager.shared.onTranscript = { item in
+            chatItems.append(.turn(item))
+        }
+
+        // AI 实时建议（来自 SSE suggestion）→ 追加内联 tip
+        LiveSSEClient.shared.onSuggestion = { payload in
+            let text    = payload["text"]        as? String ?? ""
             let emotion = payload["emotion_tag"] as? String ?? ""
             guard !text.isEmpty else { return }
-            withAnimation(.spring(response: 0.4)) {
-                suggestionText = text
-                emotionTag     = emotion
-                showSuggestion = true
+            chatItems.append(.suggestion(SuggestionData(text: text, emotion: emotion)))
+        }
+
+        // 技能匹配结果（来自 SSE analysis_ready）→ 追加内联技能卡片
+        LiveSSEClient.shared.onAnalysisReady = { payload in
+            guard let rawCards = payload["skill_cards"] as? [[String: Any]],
+                  !rawCards.isEmpty else { return }
+            let cards = rawCards.compactMap { d -> SkillCardData? in
+                guard let sid  = d["skill_id"]   as? String,
+                      let name = d["skill_name"]  as? String else { return nil }
+                return SkillCardData(
+                    skillId:    sid,
+                    skillName:  name,
+                    category:   d["category"]   as? String ?? "",
+                    confidence: d["confidence"] as? Double ?? 0,
+                    advice:     d["advice"]     as? String ?? "",
+                    reminder:   d["reminder"]   as? String ?? ""
+                )
+            }
+            guard !cards.isEmpty else { return }
+            chatItems.append(.skillCards(SkillBatchData(cards: cards)))
+        }
+
+        // Segment 摘要更新（来自 SSE segment_context）→ 更新顶部 Summary
+        LiveSSEClient.shared.onSegmentContext = { payload in
+            let text = payload["text"] as? String ?? ""
+            guard !text.isEmpty else { return }
+            withAnimation(.easeInOut(duration: 0.3)) {
+                segmentContext = text
             }
         }
     }
@@ -364,9 +446,8 @@ struct LiveSessionView: View {
                     showSpeakerConfirm = true
                 }
             } catch {
-                // end 失败也允许用户离开
                 await MainActor.run {
-                    isStopping        = false
+                    isStopping         = false
                     showProcessingDone = true
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
                         onCompleted()
@@ -385,9 +466,7 @@ struct LiveSessionView: View {
     }
 
     private func formatElapsed(_ seconds: Int) -> String {
-        let m = seconds / 60
-        let s = seconds % 60
-        return String(format: "%02d:%02d", m, s)
+        String(format: "%02d:%02d", seconds / 60, seconds % 60)
     }
 }
 
@@ -418,7 +497,7 @@ private struct TurnBubble: View {
                     .background(
                         RoundedRectangle(cornerRadius: 16, style: .continuous)
                             .fill(isMe
-                                  ? Color(hex: "#0A3D6B")
+                                  ? Color(white: 0.20)
                                   : Color(white: 0.16))
                     )
                     .frame(maxWidth: .infinity, alignment: isMe ? .trailing : .leading)
@@ -435,5 +514,116 @@ private struct TurnBubble: View {
             return "说话人\(letters[n - 1])"
         }
         return turn.speakerLabel
+    }
+}
+
+// MARK: - 内联 AI 建议气泡
+
+private struct InlineSuggestionBubble: View {
+
+    let data: SuggestionData
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            // AI 头像
+            ZStack {
+                Circle()
+                    .fill(Color(white: 0.22))
+                    .frame(width: 28, height: 28)
+                Text("AI")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundColor(.white.opacity(0.7))
+            }
+
+            HStack(alignment: .top, spacing: 6) {
+                if !data.emotion.isEmpty {
+                    Text(data.emotion)
+                        .font(.system(size: 13))
+                }
+                Text(data.text)
+                    .font(.system(size: 13))
+                    .foregroundColor(.white.opacity(0.82))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(Color(white: 0.18))
+            )
+
+            Spacer(minLength: 48)
+        }
+    }
+}
+
+// MARK: - 内联技能卡片
+
+private struct SkillCardView: View {
+
+    let card: SkillCardData
+
+    private var accentColor: Color {
+        let lc = card.category.lowercased()
+        if lc.contains("social")  || lc.contains("沟通") { return Color(hex: "#4A9EFF") }
+        if lc.contains("language")|| lc.contains("语言") { return Color(hex: "#34C759") }
+        if lc.contains("emotion") || lc.contains("情绪") { return Color(hex: "#BF5AF2") }
+        if lc.contains("negotiat")|| lc.contains("谈判") { return Color(hex: "#FF9500") }
+        return Color(hex: "#00D4FF")
+    }
+
+    private var iconName: String {
+        let lc = card.category.lowercased()
+        if lc.contains("social")  || lc.contains("沟通") { return "person.2.fill" }
+        if lc.contains("language")|| lc.contains("语言") { return "globe" }
+        if lc.contains("emotion") || lc.contains("情绪") { return "heart.fill" }
+        if lc.contains("negotiat")|| lc.contains("谈判") { return "arrow.left.arrow.right" }
+        return "lightbulb.fill"
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 0) {
+            // 左侧彩色竖条
+            Rectangle()
+                .fill(accentColor)
+                .frame(width: 3)
+
+            HStack(alignment: .top, spacing: 10) {
+                // 图标
+                ZStack {
+                    Circle()
+                        .fill(accentColor.opacity(0.15))
+                        .frame(width: 32, height: 32)
+                    Image(systemName: iconName)
+                        .font(.system(size: 14))
+                        .foregroundColor(accentColor)
+                }
+                .padding(.top, 1)
+
+                // 文字内容
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Skill: \(card.skillName)")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(.white)
+                    if !card.advice.isEmpty {
+                        Text("Advice: \(card.advice)")
+                            .font(.system(size: 12))
+                            .foregroundColor(.white.opacity(0.72))
+                    }
+                    if !card.reminder.isEmpty {
+                        Text("Reminder: \(card.reminder)")
+                            .font(.system(size: 12))
+                            .foregroundColor(.white.opacity(0.72))
+                    }
+                }
+
+                Spacer()
+            }
+            .padding(.leading, 10)
+            .padding(.trailing, 12)
+            .padding(.vertical, 10)
+        }
+        .background(Color(white: 0.14))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }
