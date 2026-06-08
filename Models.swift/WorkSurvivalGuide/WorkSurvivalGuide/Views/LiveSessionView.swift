@@ -4,24 +4,19 @@
 //
 //  Live Mode 实时录制界面
 //
-//  UI 结构（对应 conversation detail mockup）：
-//    ┌─────────────────────────────────────────┐
-//    │  Header：眼镜状态 / 计时器 / REC 指示   │
-//    ├─────────────────────────────────────────┤
-//    │  Summary（segment_context，有内容才显示）│
-//    ├─────────────────────────────────────────┤
-//    │  Chat 流（ChatItem 列表）                │
-//    │    .turn      → 左/右气泡               │
-//    │    .suggestion → 内联 AI tip            │
-//    │    .skillCards → 内联技能卡片组          │
-//    ├─────────────────────────────────────────┤
-//    │  Stop bar                               │
-//    └─────────────────────────────────────────┘
+//  架构说明：
+//    - turn 展示直接读 liveManager.transcript（@ObservedObject→@Published 链，100% 响应）
+//    - SSE 事件（建议/技能卡/摘要）用独立 @State 数组存储
+//    - displayItems: 计算属性按 turnIndex 边界将 SSE 事件插入 turn 流
+//    - 不再有 chatItems 中间层，消除同步失效问题
+//
+//  UI 结构：
+//    Header → Summary（有内容才显示）→ Chat 流 → Stop bar
 //
 
 import SwiftUI
 
-// MARK: - Chat Item Models（file-private）
+// MARK: - Chat Item Models
 
 private enum ChatItem: Identifiable {
     case turn(LiveTurnItem)
@@ -30,49 +25,51 @@ private enum ChatItem: Identifiable {
 
     var id: String {
         switch self {
-        case .turn(let t):       return "t-\(t.id)"
-        case .suggestion(let d): return "s-\(d.id)"
-        case .skillCards(let d): return "k-\(d.id)"
+        case .turn(let t):        return "t-\(t.id)"
+        case .suggestion(let d):  return "s-\(d.id)"
+        case .skillCards(let d):  return "k-\(d.id)"
         }
     }
 }
 
 private struct SuggestionData: Identifiable {
-    let id = UUID()
-    let text: String
-    let emotion: String
+    let id        = UUID()
+    let text:       String
+    let emotion:    String
+    let afterTurn:  Int     // 在第几条 turn 之后插入（turn_index）
 }
 
 private struct SkillCardData: Identifiable {
-    let id = UUID()
-    let skillId: String
-    let skillName: String
-    let category: String
+    let id         = UUID()
+    let skillId:    String
+    let skillName:  String
+    let category:   String
     let confidence: Double
-    let advice: String
-    let reminder: String
+    let advice:     String
+    let reminder:   String
 }
 
 private struct SkillBatchData: Identifiable {
-    let id = UUID()
-    let cards: [SkillCardData]
+    let id         = UUID()
+    let cards:      [SkillCardData]
+    let afterTurn:  Int     // 在第几条 turn 之后插入（batch_end turn_index）
 }
 
 // MARK: - Main View
 
 struct LiveSessionView: View {
 
-    /// 完成后回调（Speaker 确认完成后调用，调用方负责 dismiss）
     let onCompleted: () -> Void
 
     @Environment(\.dismiss) private var dismiss
 
+    // liveManager.transcript 是 @Published，@ObservedObject 保证变更触发重渲
     @ObservedObject private var liveManager = LiveSessionManager.shared
     @ObservedObject private var sseClient   = LiveSSEClient.shared
 
     // ── Session 生命周期 ────────────────────────────────────────────────────
     @State private var sessionId:  String?
-    @State private var isStarting: Bool   = true
+    @State private var isStarting: Bool    = true
     @State private var startError: String?
 
     // ── 停止录音流程 ────────────────────────────────────────────────────────
@@ -82,9 +79,39 @@ struct LiveSessionView: View {
     @State private var showSpeakerConfirm: Bool = false
     @State private var showProcessingDone: Bool = false
 
-    // ── 聊天内容 ────────────────────────────────────────────────────────────
-    @State private var chatItems:      [ChatItem] = []
-    @State private var segmentContext: String     = ""
+    // ── SSE 事件存储（不含 turn，turn 来自 liveManager.transcript）───────────
+    @State private var suggestionItems:  [SuggestionData]  = []
+    @State private var skillBatchItems:  [SkillBatchData]  = []
+    @State private var segmentContext:   String            = ""
+
+    // ── 合并展示列表（computed，每次 body 渲染自动更新）─────────────────────
+    private var displayItems: [ChatItem] {
+        var result: [ChatItem] = []
+        var suggIdx  = 0
+        var skillIdx = 0
+
+        for turn in liveManager.transcript {
+            result.append(.turn(turn))
+            // 插入在该 turn 之后的建议
+            while suggIdx < suggestionItems.count
+                    && suggestionItems[suggIdx].afterTurn <= turn.turnIndex {
+                result.append(.suggestion(suggestionItems[suggIdx]))
+                suggIdx += 1
+            }
+            // 插入在该 turn 之后的技能批次
+            while skillIdx < skillBatchItems.count
+                    && skillBatchItems[skillIdx].afterTurn <= turn.turnIndex {
+                result.append(.skillCards(skillBatchItems[skillIdx]))
+                skillIdx += 1
+            }
+        }
+
+        // 把还没插入的 SSE 尾部事件追加到末尾
+        while suggIdx  < suggestionItems.count  { result.append(.suggestion(suggestionItems[suggIdx]));  suggIdx  += 1 }
+        while skillIdx < skillBatchItems.count  { result.append(.skillCards(skillBatchItems[skillIdx])); skillIdx += 1 }
+
+        return result
+    }
 
     // MARK: - body
 
@@ -104,19 +131,8 @@ struct LiveSessionView: View {
                 processingOverlay
             }
         }
-        .onAppear { startLiveSession() }
+        .onAppear  { startLiveSession() }
         .onDisappear { cleanupIfNeeded() }
-        // 监听 @Published transcript（@ObservedObject 响应式）→ 同步新 turn 到 chatItems
-        // 比存 singleton 回调更可靠：SwiftUI 保证 @Published→onChange 在主线程触发重渲
-        .onChange(of: liveManager.transcript.count) { _ in
-            let seenIds = Set(chatItems.compactMap { item -> UUID? in
-                if case .turn(let t) = item { return t.id }
-                return nil
-            })
-            for turn in liveManager.transcript where !seenIds.contains(turn.id) {
-                chatItems.append(.turn(turn))
-            }
-        }
         .alert("结束录音", isPresented: $showStopAlert) {
             Button("结束", role: .destructive) { beginStopFlow() }
             Button("取消", role: .cancel) {}
@@ -149,8 +165,6 @@ struct LiveSessionView: View {
 
             if !segmentContext.isEmpty {
                 summarySection
-                    .transition(.opacity.combined(with: .move(edge: .top)))
-                    .animation(.easeInOut(duration: 0.3), value: segmentContext.isEmpty)
             }
 
             chatArea
@@ -196,7 +210,7 @@ struct LiveSessionView: View {
         .background(Color(white: 0.07))
     }
 
-    // MARK: - Segment Summary 区域
+    // MARK: - Summary 区域（有 segment_context 才显示）
 
     private var summarySection: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -227,23 +241,35 @@ struct LiveSessionView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 10) {
-                    if chatItems.isEmpty {
+                    if liveManager.transcript.isEmpty && suggestionItems.isEmpty && skillBatchItems.isEmpty {
                         emptyState
                     } else {
-                        ForEach(chatItems) { item in
+                        ForEach(displayItems) { item in
                             chatItemView(item)
                                 .id(item.id)
                         }
                     }
+                    // 滚动锚点
+                    Color.clear.frame(height: 1).id("chat-bottom")
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 14)
             }
-            .onChange(of: chatItems.count) { _ in
-                if let last = chatItems.last {
-                    withAnimation(.easeOut(duration: 0.25)) {
-                        proxy.scrollTo(last.id, anchor: .bottom)
-                    }
+            // transcript 新增 turn 时自动滚到底
+            .onChange(of: liveManager.transcript.count) { _ in
+                withAnimation(.easeOut(duration: 0.2)) {
+                    proxy.scrollTo("chat-bottom", anchor: .bottom)
+                }
+            }
+            // SSE 事件新增时也滚到底
+            .onChange(of: suggestionItems.count) { _ in
+                withAnimation(.easeOut(duration: 0.2)) {
+                    proxy.scrollTo("chat-bottom", anchor: .bottom)
+                }
+            }
+            .onChange(of: skillBatchItems.count) { _ in
+                withAnimation(.easeOut(duration: 0.2)) {
+                    proxy.scrollTo("chat-bottom", anchor: .bottom)
                 }
             }
         }
@@ -318,9 +344,7 @@ struct LiveSessionView: View {
 
     private var startingView: some View {
         VStack(spacing: 16) {
-            ProgressView()
-                .scaleEffect(1.4)
-                .tint(Color(hex: "#00D4FF"))
+            ProgressView().scaleEffect(1.4).tint(Color(hex: "#00D4FF"))
             Text("正在连接…")
                 .font(.system(size: 15))
                 .foregroundColor(.white.opacity(0.55))
@@ -349,15 +373,11 @@ struct LiveSessionView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    // MARK: - 处理中遮罩
-
     private var processingOverlay: some View {
         ZStack {
             Color.black.opacity(0.88).ignoresSafeArea()
             VStack(spacing: 16) {
-                ProgressView()
-                    .scaleEffect(1.5)
-                    .tint(Color(hex: "#00D4FF"))
+                ProgressView().scaleEffect(1.5).tint(Color(hex: "#00D4FF"))
                 Text("正在生成分析报告…")
                     .font(.system(size: 16, weight: .medium))
                     .foregroundColor(.white)
@@ -398,22 +418,26 @@ struct LiveSessionView: View {
         }
     }
 
+    /// 只设置 SSE 事件回调。Turn 展示直接读 liveManager.transcript，无需回调。
     private func setupSSECallbacks() {
-        // AI 实时建议（来自 SSE suggestion）→ 追加内联 tip
-        LiveSSEClient.shared.onSuggestion = { payload in
-            let text    = payload["text"]        as? String ?? ""
-            let emotion = payload["emotion_tag"] as? String ?? ""
+        // 快速建议（每 3 turn）→ 插入对话流
+        LiveSSEClient.shared.onSuggestion = { [self] payload in
+            let text      = payload["text"]        as? String ?? ""
+            let emotion   = payload["emotion_tag"] as? String ?? ""
+            let turnIndex = payload["turn_index"]  as? Int    ?? max(0, liveManager.transcript.count - 1)
             guard !text.isEmpty else { return }
-            chatItems.append(.suggestion(SuggestionData(text: text, emotion: emotion)))
+            suggestionItems.append(SuggestionData(text: text, emotion: emotion, afterTurn: turnIndex))
         }
 
-        // 技能匹配结果（来自 SSE analysis_ready）→ 追加内联技能卡片
-        LiveSSEClient.shared.onAnalysisReady = { payload in
+        // 技能匹配结果（每 10 turn）→ 插入对话流
+        LiveSSEClient.shared.onAnalysisReady = { [self] payload in
             guard let rawCards = payload["skill_cards"] as? [[String: Any]],
                   !rawCards.isEmpty else { return }
+            let range     = payload["turn_range"] as? [Int] ?? []
+            let afterTurn = range.last ?? max(0, liveManager.transcript.count - 1)
             let cards = rawCards.compactMap { d -> SkillCardData? in
-                guard let sid  = d["skill_id"]   as? String,
-                      let name = d["skill_name"]  as? String else { return nil }
+                guard let sid  = d["skill_id"]  as? String,
+                      let name = d["skill_name"] as? String else { return nil }
                 return SkillCardData(
                     skillId:    sid,
                     skillName:  name,
@@ -424,10 +448,10 @@ struct LiveSessionView: View {
                 )
             }
             guard !cards.isEmpty else { return }
-            chatItems.append(.skillCards(SkillBatchData(cards: cards)))
+            skillBatchItems.append(SkillBatchData(cards: cards, afterTurn: afterTurn))
         }
 
-        // Segment 摘要更新（来自 SSE segment_context）→ 更新顶部 Summary
+        // Segment 摘要（每 10 turn 改写）→ 更新顶部 Summary
         LiveSSEClient.shared.onSegmentContext = { payload in
             let text = payload["text"] as? String ?? ""
             guard !text.isEmpty else { return }
@@ -481,14 +505,13 @@ struct LiveSessionView: View {
 private struct TurnBubble: View {
 
     let turn: LiveTurnItem
-
     private var isMe: Bool { turn.speaker == "user" }
 
     var body: some View {
         HStack(alignment: .bottom, spacing: 0) {
-            if isMe { Spacer(minLength: 48) }
+            if isMe { Spacer(minLength: 60) }
 
-            VStack(alignment: isMe ? .trailing : .leading, spacing: 4) {
+            VStack(alignment: isMe ? .trailing : .leading, spacing: 3) {
                 if !isMe {
                     Text(displayLabel)
                         .font(.system(size: 10, weight: .medium))
@@ -502,14 +525,12 @@ private struct TurnBubble: View {
                     .padding(.vertical, 9)
                     .background(
                         RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .fill(isMe
-                                  ? Color(white: 0.20)
-                                  : Color(white: 0.16))
+                            .fill(isMe ? Color(white: 0.20) : Color(white: 0.16))
                     )
                     .frame(maxWidth: .infinity, alignment: isMe ? .trailing : .leading)
             }
 
-            if !isMe { Spacer(minLength: 48) }
+            if !isMe { Spacer(minLength: 60) }
         }
     }
 
@@ -531,20 +552,16 @@ private struct InlineSuggestionBubble: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
-            // AI 头像
             ZStack {
-                Circle()
-                    .fill(Color(white: 0.22))
-                    .frame(width: 28, height: 28)
+                Circle().fill(Color(white: 0.22)).frame(width: 28, height: 28)
                 Text("AI")
                     .font(.system(size: 9, weight: .bold))
                     .foregroundColor(.white.opacity(0.7))
             }
 
-            HStack(alignment: .top, spacing: 6) {
+            HStack(alignment: .top, spacing: 5) {
                 if !data.emotion.isEmpty {
-                    Text(data.emotion)
-                        .font(.system(size: 13))
+                    Text(data.emotion).font(.system(size: 13))
                 }
                 Text(data.text)
                     .font(.system(size: 13))
@@ -558,7 +575,7 @@ private struct InlineSuggestionBubble: View {
                     .fill(Color(white: 0.18))
             )
 
-            Spacer(minLength: 48)
+            Spacer(minLength: 60)
         }
     }
 }
@@ -589,13 +606,11 @@ private struct LiveSkillCardView: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 0) {
-            // 左侧彩色竖条
             Rectangle()
                 .fill(accentColor)
                 .frame(width: 3)
 
             HStack(alignment: .top, spacing: 10) {
-                // 图标
                 ZStack {
                     Circle()
                         .fill(accentColor.opacity(0.15))
@@ -606,7 +621,6 @@ private struct LiveSkillCardView: View {
                 }
                 .padding(.top, 1)
 
-                // 文字内容
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Skill: \(card.skillName)")
                         .font(.system(size: 13, weight: .semibold))
