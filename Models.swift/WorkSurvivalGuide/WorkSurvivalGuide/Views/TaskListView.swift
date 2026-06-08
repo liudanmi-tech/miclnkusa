@@ -22,6 +22,7 @@ struct TaskListView: View {
     @AppStorage("image_style") private var selectedImageStyle: String = "ghibli"
     @State private var scrollOffset: CGFloat = 999
     @State private var toastMessage: String? = nil
+    @State private var showLiveSession = false
     
     /// 是否已上滑（卡片上边缘接触到顶部区域后再切换为毛玻璃）
     /// 内容顶部 global minY < 0 表示卡片已滑入 header 下方
@@ -153,7 +154,19 @@ struct TaskListView: View {
                     .foregroundColor(AppColors.headerText)
                 
                 Spacer()
-                
+
+                // Live 录音按钮（电话图标）
+                Button(action: { showLiveSession = true }) {
+                    Image(systemName: "phone.fill")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundColor(AppColors.headerText)
+                        .frame(width: 36, height: 36)
+                        .background(Color.white.opacity(0.15))
+                        .clipShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .padding(.trailing, 8)
+
                 Button(action: {
                     showStylePicker = true
                     if TourManager.shared.currentStep == .styleButton {
@@ -247,6 +260,12 @@ struct TaskListView: View {
         }
         .sheet(isPresented: $showStylePicker) {
             ImageStylePickerSheet(selectedStyleId: $selectedImageStyle)
+        }
+        .fullScreenCover(isPresented: $showLiveSession) {
+            LiveSessionView {
+                // 完成后刷新列表（后处理已在后台运行）
+                viewModel.refreshTasks()
+            }
         }
     }
 }
