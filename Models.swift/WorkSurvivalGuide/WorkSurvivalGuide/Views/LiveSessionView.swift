@@ -248,7 +248,7 @@ struct LiveSessionView: View {
         case .skillCards(let batch):
             VStack(spacing: 6) {
                 ForEach(batch.cards) { card in
-                    SkillCardView(card: card)
+                    LiveSkillCardView(card: card)
                 }
             }
         }
@@ -559,25 +559,25 @@ private struct InlineSuggestionBubble: View {
 
 // MARK: - 内联技能卡片
 
-private struct SkillCardView: View {
+private struct LiveSkillCardView: View {
 
     let card: SkillCardData
 
     private var accentColor: Color {
         let lc = card.category.lowercased()
-        if lc.contains("social")  || lc.contains("沟通") { return Color(hex: "#4A9EFF") }
-        if lc.contains("language")|| lc.contains("语言") { return Color(hex: "#34C759") }
+        if lc.contains("social") || lc.contains("沟通") { return Color(hex: "#4A9EFF") }
+        if lc.contains("language") || lc.contains("语言") { return Color(hex: "#34C759") }
         if lc.contains("emotion") || lc.contains("情绪") { return Color(hex: "#BF5AF2") }
-        if lc.contains("negotiat")|| lc.contains("谈判") { return Color(hex: "#FF9500") }
+        if lc.contains("negotiat") || lc.contains("谈判") { return Color(hex: "#FF9500") }
         return Color(hex: "#00D4FF")
     }
 
     private var iconName: String {
         let lc = card.category.lowercased()
-        if lc.contains("social")  || lc.contains("沟通") { return "person.2.fill" }
-        if lc.contains("language")|| lc.contains("语言") { return "globe" }
+        if lc.contains("social") || lc.contains("沟通") { return "person.2.fill" }
+        if lc.contains("language") || lc.contains("语言") { return "globe" }
         if lc.contains("emotion") || lc.contains("情绪") { return "heart.fill" }
-        if lc.contains("negotiat")|| lc.contains("谈判") { return "arrow.left.arrow.right" }
+        if lc.contains("negotiat") || lc.contains("谈判") { return "arrow.left.arrow.right" }
         return "lightbulb.fill"
     }
 
