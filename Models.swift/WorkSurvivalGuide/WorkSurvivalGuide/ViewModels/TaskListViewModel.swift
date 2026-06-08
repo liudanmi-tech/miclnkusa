@@ -60,7 +60,7 @@ class TaskListViewModel: ObservableObject {
         let cutoff = Date().addingTimeInterval(-processingTimeoutSeconds)
         // 找最近的非终态 session（6 分钟内）
         let active = tasks.first {
-            ![TaskStatus.archived, .failed, .burned].contains($0.status)
+            ![TaskStatus.archived, .completed, .failed, .burned].contains($0.status)
             && $0.startTime > cutoff
         }
         if let active {
@@ -253,7 +253,7 @@ class TaskListViewModel: ObservableObject {
             print("✅ [TaskListViewModel] 任务已插入到列表顶部")
         }
         // 终态（完成/失败）→ 解锁录音按钮
-        if [TaskStatus.archived, .failed, .burned].contains(updatedTask.status) {
+        if [TaskStatus.archived, .completed, .failed, .burned].contains(updatedTask.status) {
             clearProcessing(for: updatedTask.id)
         }
     }
@@ -272,7 +272,7 @@ class TaskListViewModel: ObservableObject {
             print("⚠️ [TaskListViewModel] 未找到要更新的任务")
         }
         // 终态 → 解锁
-        if [TaskStatus.archived, .failed, .burned].contains(updatedTask.status) {
+        if [TaskStatus.archived, .completed, .failed, .burned].contains(updatedTask.status) {
             clearProcessing(for: updatedTask.id)
         }
     }
@@ -405,7 +405,7 @@ class TaskListViewModel: ObservableObject {
     private func resumePendingImagePolling() {
         let now = Date()
         let pending = tasks.filter {
-            $0.status == .archived
+            ($0.status == .archived || $0.status == .completed)
             && $0.coverImageUrl == nil
             && now.timeIntervalSince($0.startTime) < 15 * 60
         }
@@ -455,7 +455,8 @@ class TaskListViewModel: ObservableObject {
     private func loadMissingSummaries() {
         // 找出所有archived状态且没有summary的任务
         let tasksNeedingSummary = tasks.filter { task in
-            task.status == .archived && (task.summary == nil || task.summary?.isEmpty == true)
+            (task.status == .archived || task.status == .completed)
+            && (task.summary == nil || task.summary?.isEmpty == true)
         }
         
         guard !tasksNeedingSummary.isEmpty else {

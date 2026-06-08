@@ -183,7 +183,7 @@ struct TaskCardView: View {
             return Color(hex: "#1E3A5F").opacity(0.9)
         case .analyzing:
             return Color(hex: "#4A3F00").opacity(0.9)
-        case .archived:
+        case .archived, .completed:
             return isGeneratingImages ? Color(hex: "#4A3F00").opacity(0.9) : Color(white: 0.15)
         case .burned, .failed:
             return Color(hex: "#4A1C1C").opacity(0.9)
@@ -201,7 +201,7 @@ struct TaskCardView: View {
                 Image(systemName: "waveform")
                     .font(.system(size: 36))
                     .foregroundColor(Color(hex: "#FBBF24"))
-            case .archived:
+            case .archived, .completed:
                 if isGeneratingImages {
                     ProgressView()
                         .tint(Color(hex: "#FBBF24"))
@@ -223,7 +223,7 @@ struct TaskCardView: View {
             return "Recording"
         case .analyzing:
             return task.progressDescription ?? "Analyzing"
-        case .archived:
+        case .archived, .completed:
             return isGeneratingImages ? "Generating image" : ""
         case .burned:
             return "Burned"
@@ -238,7 +238,7 @@ struct TaskCardView: View {
             return Color(hex: "#60A5FA")
         case .analyzing:
             return Color(hex: "#FBBF24")
-        case .archived:
+        case .archived, .completed:
             return isGeneratingImages ? Color(hex: "#FBBF24") : Color.white.opacity(0.6)
         case .burned, .failed:
             return Color(hex: "#F87171")

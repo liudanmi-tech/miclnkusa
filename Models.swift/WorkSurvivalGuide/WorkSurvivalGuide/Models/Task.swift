@@ -12,6 +12,7 @@ enum TaskStatus: String, Codable {
     case recording = "recording"    // 录制中
     case analyzing = "analyzing"    // 分析中
     case archived = "archived"       // 已归档
+    case completed = "completed"    // Live session 结束（等同 archived，服务端用此值）
     case burned = "burned"          // 已焚毁
     case failed = "failed"          // 分析失败
 }
