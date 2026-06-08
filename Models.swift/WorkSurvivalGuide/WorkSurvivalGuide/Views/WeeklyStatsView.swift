@@ -1038,11 +1038,30 @@ struct WeeklySessionRow: View {
 
             // 卡片标题 + 日期
             VStack(alignment: .leading, spacing: 4) {
-                Text(session.title ?? "Untitled")
-                    .font(.system(size: 16, weight: .semibold, design: .rounded))
-                    .foregroundColor(isHighlighted ? Color(hex: "#FB923C") : .white)
-                    .lineLimit(2)
-                    .animation(.easeInOut(duration: 0.3), value: isHighlighted)
+                // Step 11: Live processing 时显示 LIVE badge
+                let isLiveProcessing = session.session_type == "live"
+                    && session.summary_status == "processing"
+
+                HStack(spacing: 6) {
+                    if isLiveProcessing {
+                        HStack(spacing: 4) {
+                            ProgressView().scaleEffect(0.55).tint(.white)
+                            Text("LIVE")
+                                .font(.system(size: 9, weight: .black))
+                                .foregroundColor(.white)
+                        }
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 3)
+                        .background(Color.red.opacity(0.80))
+                        .cornerRadius(5)
+                    }
+                    // card_title 优先（后处理 AI 标题），否则用 title
+                    Text(session.card_title ?? session.title ?? "Untitled")
+                        .font(.system(size: 16, weight: .semibold, design: .rounded))
+                        .foregroundColor(isHighlighted ? Color(hex: "#FB923C") : .white)
+                        .lineLimit(2)
+                        .animation(.easeInOut(duration: 0.3), value: isHighlighted)
+                }
 
                 HStack(spacing: 6) {
                     Text(formattedDate)
@@ -1050,9 +1069,15 @@ struct WeeklySessionRow: View {
                         .foregroundColor(.white.opacity(0.4))
                     Text("·")
                         .foregroundColor(.white.opacity(0.2))
-                    Text(WeeklyStatsViewModel.categoryName(for: session.scene_category ?? ""))
-                        .font(.system(size: 11))
-                        .foregroundColor(WeeklyStatsViewModel.categoryColor(for: session.scene_category ?? "").opacity(0.9))
+                    if isLiveProcessing {
+                        Text("分析中…")
+                            .font(.system(size: 11))
+                            .foregroundColor(.white.opacity(0.35))
+                    } else {
+                        Text(WeeklyStatsViewModel.categoryName(for: session.scene_category ?? ""))
+                            .font(.system(size: 11))
+                            .foregroundColor(WeeklyStatsViewModel.categoryColor(for: session.scene_category ?? "").opacity(0.9))
+                    }
                 }
             }
 
@@ -1134,7 +1159,11 @@ struct WeeklySessionRow: View {
 // MARK: - WeeklySession → TaskItem conversion
 
 private extension WeeklySession {
+    /// Step 11: Live processing 中的卡片不可点击（返回 nil）
     func toTaskItem() -> TaskItem? {
+        // 后处理未完成时不允许进入详情
+        if session_type == "live" && summary_status == "processing" { return nil }
+
         let isoFull = ISO8601DateFormatter()
         isoFull.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         let isoBasic = ISO8601DateFormatter()
@@ -1147,7 +1176,7 @@ private extension WeeklySession {
 
         return TaskItem(
             id: session_id,
-            title: title ?? "Untitled",
+            title: card_title ?? title ?? "Untitled",
             startTime: date,
             endTime: nil,
             duration: duration_sec,
@@ -1156,7 +1185,7 @@ private extension WeeklySession {
             emotionScore: mood_score,
             speakerCount: nil,
             summary: nil,
-            cardTitle: title,
+            cardTitle: card_title ?? title,
             coverImageUrl: thumbnail_url,
             progressDescription: nil
         )

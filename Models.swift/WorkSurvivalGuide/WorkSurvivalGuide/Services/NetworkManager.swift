@@ -2168,5 +2168,213 @@ struct WeeklySession: Codable, Identifiable {
     let top_skill_id: String?
     let top_skill_confidence: Double?
     let thumbnail_url: String?
+    // Step 11: Live Mode 卡片状态字段
+    let session_type: String?      // "live" | "recorded" | nil
+    let summary_status: String?    // "processing" | "completed" | "failed" | nil
+    let card_title: String?        // 后处理完成后的 AI 标题
+}
+
+// MARK: - Live Mode Models
+
+/// Step 8: Speaker 确认弹窗数据项（对应 live_speaker_mappings 行）
+struct SpeakerMappingItem: Codable {
+    let speakerLabel: String
+    let profileId: String?
+    let profileName: String?
+    let confidence: Double?
+    let method: String?
+    let sampleTexts: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case speakerLabel = "speaker_label"
+        case profileId    = "profile_id"
+        case profileName  = "profile_name"
+        case confidence, method
+        case sampleTexts  = "sample_texts"
+    }
+}
+
+struct LiveSessionCreateRequest: Codable {
+    let title: String?
+}
+
+struct LiveSessionCreateResponse: Codable {
+    let session_id: String
+    let session_type: String
+    let status: String
+    let created_at: String?
+}
+
+struct LiveSessionEndResponse: Codable {
+    let session_id: String
+    let session_type: String
+    let total_turns: Int
+    let duration_seconds: Int?
+    let summary_status: String
+    let image_status: String
+    let skills_status: String
+    let speaker_mappings: [SpeakerMappingItem]?  // Step 8: nil 时视为空列表
+}
+
+struct LiveSummaryStatusResponse: Codable {
+    let summary_status: String       // "processing" | "completed" | "failed"
+    let image_status: String         // "processing" | "partial" | "completed" | "failed"
+    let skills_status: String        // "processing" | "completed"
+    let card_title: String?
+    let summary: String?
+    let cover_image_url: String?
+    let total_images_expected: Int
+    let total_images_completed: Int
+    let total_images_failed: Int
+}
+
+// MARK: - Live Mode API（追加到 NetworkManager，不改原有方法）
+
+extension NetworkManager {
+
+    /// 创建 Live Session
+    func createLiveSession(title: String? = nil) async throws -> LiveSessionCreateResponse {
+        let token = getAuthToken()
+        guard !token.isEmpty else {
+            Task { @MainActor in AuthManager.shared.logout() }
+            throw NSError(domain: "NetworkError", code: 401,
+                          userInfo: [NSLocalizedDescriptionKey: "请先登录"])
+        }
+
+        let url = "\(baseURLForWrite)/live/sessions"
+        let body: [String: Any?] = ["title": title]
+        let bodyData = try JSONSerialization.data(withJSONObject: body.compactMapValues { $0 })
+
+        var request = URLRequest(url: URL(string: url)!)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.httpBody = bodyData
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+            throw NSError(domain: "NetworkError", code: statusCode,
+                          userInfo: [NSLocalizedDescriptionKey: "创建 Live Session 失败（\(statusCode)）"])
+        }
+        return try JSONDecoder().decode(LiveSessionCreateResponse.self, from: data)
+    }
+
+    /// 结束 Live Session
+    func endLiveSession(sessionId: String) async throws -> LiveSessionEndResponse {
+        let token = getAuthToken()
+        guard !token.isEmpty else {
+            Task { @MainActor in AuthManager.shared.logout() }
+            throw NSError(domain: "NetworkError", code: 401,
+                          userInfo: [NSLocalizedDescriptionKey: "请先登录"])
+        }
+
+        let url = "\(baseURLForWrite)/live/sessions/\(sessionId)/end"
+        var request = URLRequest(url: URL(string: url)!)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+            throw NSError(domain: "NetworkError", code: statusCode,
+                          userInfo: [NSLocalizedDescriptionKey: "结束 Live Session 失败（\(statusCode)）"])
+        }
+        return try JSONDecoder().decode(LiveSessionEndResponse.self, from: data)
+    }
+
+    /// 轮询后处理进度（每 4 秒调用，summary_status == "completed" 时卡片变可点击）
+    func getLiveSummaryStatus(sessionId: String) async throws -> LiveSummaryStatusResponse {
+        let token = getAuthToken()
+        guard !token.isEmpty else {
+            throw NSError(domain: "NetworkError", code: 401,
+                          userInfo: [NSLocalizedDescriptionKey: "请先登录"])
+        }
+
+        let url = "\(baseURLForRead)/live/sessions/\(sessionId)/summary-status"
+        var request = URLRequest(url: URL(string: url)!)
+        request.httpMethod = "GET"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+            throw NSError(domain: "NetworkError", code: statusCode,
+                          userInfo: [NSLocalizedDescriptionKey: "获取状态失败（\(statusCode)）"])
+        }
+        return try JSONDecoder().decode(LiveSummaryStatusResponse.self, from: data)
+    }
+
+    // MARK: - Step 8: Speaker 确认 API
+
+    /// 情况 B：确认系统推断的 Speaker 身份（confidence=1.0 覆盖）
+    func confirmSpeaker(sessionId: String, speakerLabel: String, profileId: String) async throws {
+        let token = getAuthToken()
+        guard !token.isEmpty else {
+            throw NSError(domain: "NetworkError", code: 401,
+                          userInfo: [NSLocalizedDescriptionKey: "请先登录"])
+        }
+        let url = "\(baseURLForWrite)/live/sessions/\(sessionId)/confirm-speaker"
+        let body = ["speaker_label": speakerLabel, "profile_id": profileId]
+        var request = URLRequest(url: URL(string: url)!)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let (_, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+            throw NSError(domain: "NetworkError", code: code,
+                          userInfo: [NSLocalizedDescriptionKey: "确认失败（\(code)）"])
+        }
+    }
+
+    /// 情况 A/B 修改：用户选择了不同档案
+    func updateSpeaker(sessionId: String, speakerLabel: String,
+                       oldProfileId: String?, newProfileId: String) async throws {
+        let token = getAuthToken()
+        guard !token.isEmpty else {
+            throw NSError(domain: "NetworkError", code: 401,
+                          userInfo: [NSLocalizedDescriptionKey: "请先登录"])
+        }
+        let url = "\(baseURLForWrite)/live/sessions/\(sessionId)/update-speaker"
+        var body: [String: Any] = ["speaker_label": speakerLabel, "new_profile_id": newProfileId]
+        if let old = oldProfileId { body["old_profile_id"] = old }
+        var request = URLRequest(url: URL(string: url)!)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let (_, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+            throw NSError(domain: "NetworkError", code: code,
+                          userInfo: [NSLocalizedDescriptionKey: "修改失败（\(code)）"])
+        }
+    }
+
+    /// 记录声纹录入意愿（不做实际录入，仅标记 voiceprint_intent）
+    func voiceprintIntent(sessionId: String, speakerLabel: String,
+                          profileId: String, intent: Bool = true) async throws {
+        let token = getAuthToken()
+        guard !token.isEmpty else {
+            throw NSError(domain: "NetworkError", code: 401,
+                          userInfo: [NSLocalizedDescriptionKey: "请先登录"])
+        }
+        let url = "\(baseURLForWrite)/live/sessions/\(sessionId)/voiceprint-intent"
+        let body: [String: Any] = ["speaker_label": speakerLabel, "profile_id": profileId, "intent": intent]
+        var request = URLRequest(url: URL(string: url)!)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let (_, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+            throw NSError(domain: "NetworkError", code: code,
+                          userInfo: [NSLocalizedDescriptionKey: "记录失败（\(code)）"])
+        }
+    }
 }
 
