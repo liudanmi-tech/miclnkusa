@@ -51,6 +51,20 @@ GEMINI_FLASH_MODEL = os.getenv("GEMINI_FLASH_MODEL", "gemini-2.0-flash")
 GEMINI_TEXT_MODEL  = os.getenv("GEMINI_TEXT_MODEL",  "gemini-2.5-flash")
 GEMINI_API_KEY     = os.getenv("GEMINI_API_KEY", "")
 
+# 技能卡片 advice/reminder 生成 prompt（与异步分析同批次，单次调用）
+_SKILL_ADVICE_PROMPT = """\
+以下是最近的对话记录（user=我，other=对方）：
+
+{transcript}
+
+针对以下匹配的职场技能，为「我（user）」生成具体的行动建议和注意提醒：
+{skills_list}
+
+以 JSON 数组输出，每个技能对应一个对象（顺序与上方一致）：
+[{{"skill_id":"...","advice":"针对本次对话的具体建议（30字内）","reminder":"需要注意的风险或提醒（20字内）"}}]
+
+只输出 JSON 数组，不含其他内容。"""
+
 # 快速建议 prompt（严格要求单行 JSON，< 2s）
 # {context_section} = Layer 2 running_context 前缀（有则注入，无则空串）
 _QUICK_PROMPT = """\
@@ -326,18 +340,54 @@ async def _run_async_analysis(
                     .values(matched_skills=skills_for_db)
                 )
 
-            # 8. 构建 skill_cards（SSE payload，精简版）
+            # 8. 为 skill_cards 生成 advice / reminder（单次 Gemini 调用）
+            advice_map: dict[str, dict] = {}
+            top_skills = skills_for_db[:3]
+            if top_skills:
+                try:
+                    skills_list = "\n".join(
+                        f"{i+1}. skill_id={s['skill_id']} name={s['skill_name']} category={s['category']}"
+                        for i, s in enumerate(top_skills)
+                    )
+                    advice_prompt = _SKILL_ADVICE_PROMPT.format(
+                        transcript="\n".join(f"{t.speaker}: {t.text}" for t in turns),
+                        skills_list=skills_list,
+                    )
+                    advice_client = genai_sdk.Client(api_key=GEMINI_API_KEY)
+                    advice_resp = await asyncio.to_thread(
+                        advice_client.models.generate_content,
+                        model=GEMINI_FLASH_MODEL,
+                        contents=advice_prompt,
+                    )
+                    advice_raw = (advice_resp.text or "").strip()
+                    # 提取 JSON 数组
+                    arr_start = advice_raw.find("[")
+                    arr_end   = advice_raw.rfind("]") + 1
+                    if arr_start >= 0 and arr_end > arr_start:
+                        for item in json.loads(advice_raw[arr_start:arr_end]):
+                            sid = item.get("skill_id", "")
+                            if sid:
+                                advice_map[sid] = {
+                                    "advice":   item.get("advice", ""),
+                                    "reminder": item.get("reminder", ""),
+                                }
+                except Exception as adv_exc:
+                    logger.warning(f"[TurnProc] advice 生成失败 session={session_id[:8]}: {adv_exc}")
+
+            # 9. 构建 skill_cards（SSE payload，含 advice / reminder）
             skill_cards = [
                 {
                     "skill_id":   s["skill_id"],
                     "skill_name": s["skill_name"],
                     "category":   s["category"],
                     "confidence": s["confidence"],
+                    "advice":     advice_map.get(s["skill_id"], {}).get("advice", ""),
+                    "reminder":   advice_map.get(s["skill_id"], {}).get("reminder", ""),
                 }
-                for s in skills_for_db[:3]  # iOS 展示最多 3 个
+                for s in top_skills
             ]
 
-            # 9. 写 live_events（SSE H-1 重放）
+            # 10. 写 live_events（SSE H-1 重放）
             payload = {
                 "type":          "analysis_ready",
                 "skill_cards":   skill_cards,
@@ -354,7 +404,7 @@ async def _run_async_analysis(
             event_id = live_event.id
             await db.commit()
 
-            # 10. 推送 SSE
+            # 11. 推送 SSE
             live_pubsub.push_event(
                 session_id=session_id,
                 event_id=event_id,

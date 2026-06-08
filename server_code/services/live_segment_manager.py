@@ -23,7 +23,8 @@ from google import genai as genai_sdk
 from sqlalchemy import select, update
 
 from database.connection import AsyncSessionLocal
-from database.models import LiveSegment, LiveTurn
+from database.models import LiveEvent, LiveSegment, LiveTurn
+from services import live_pubsub
 
 logger = logging.getLogger(__name__)
 
@@ -152,7 +153,26 @@ async def _rewrite_running_context(session_id: str) -> None:
                 .where(LiveSegment.id == segment.id)
                 .values(running_context=new_context)
             )
+
+            # 6. 写 live_events（供 SSE H-1 重放）
+            ctx_payload = {"type": "segment_context", "text": new_context}
+            live_event = LiveEvent(
+                session_id=uuid.UUID(session_id),
+                event_type="segment_context",
+                payload=ctx_payload,
+            )
+            db.add(live_event)
+            await db.flush()
+            event_id = live_event.id
             await db.commit()
+
+            # 7. 推送 SSE
+            live_pubsub.push_event(
+                session_id=session_id,
+                event_id=event_id,
+                event_type="segment_context",
+                payload=ctx_payload,
+            )
             logger.info(
                 f"[SegmentMgr] running_context 改写完成 session={session_id[:8]} "
                 f"segment_idx={segment.segment_index} turns={len(turns)} "
