@@ -106,6 +106,17 @@ struct LiveSessionView: View {
         }
         .onAppear { startLiveSession() }
         .onDisappear { cleanupIfNeeded() }
+        // 监听 @Published transcript（@ObservedObject 响应式）→ 同步新 turn 到 chatItems
+        // 比存 singleton 回调更可靠：SwiftUI 保证 @Published→onChange 在主线程触发重渲
+        .onChange(of: liveManager.transcript.count) { _ in
+            let seenIds = Set(chatItems.compactMap { item -> UUID? in
+                if case .turn(let t) = item { return t.id }
+                return nil
+            })
+            for turn in liveManager.transcript where !seenIds.contains(turn.id) {
+                chatItems.append(.turn(turn))
+            }
+        }
         .alert("结束录音", isPresented: $showStopAlert) {
             Button("结束", role: .destructive) { beginStopFlow() }
             Button("取消", role: .cancel) {}
@@ -388,11 +399,6 @@ struct LiveSessionView: View {
     }
 
     private func setupSSECallbacks() {
-        // 转录 turn（来自 WebSocket）→ 追加到 chatItems
-        LiveSessionManager.shared.onTranscript = { item in
-            chatItems.append(.turn(item))
-        }
-
         // AI 实时建议（来自 SSE suggestion）→ 追加内联 tip
         LiveSSEClient.shared.onSuggestion = { payload in
             let text    = payload["text"]        as? String ?? ""
