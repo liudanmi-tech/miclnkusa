@@ -33,6 +33,7 @@ from database.models import (
     Session as DbSession,
     LiveTurn,
     LiveEvent,
+    Skill,
 )
 from services import live_pubsub
 from services import live_segment_manager
@@ -245,6 +246,96 @@ async def _run_quick_suggestion(session_id: str, turn_index: int) -> None:
         )
 
 
+# ── 内置技能分类和匹配（skills.router 不可用时的 fallback）──────────────────────
+
+async def _classify_scene_fallback(transcript: list, client) -> dict:
+    """Gemini Flash 场景分类，自包含实现，不依赖 skills.router"""
+    lines = "\n".join(
+        f"{t.get('speaker', '?')}: {t.get('text', '')}" for t in transcript[-10:]
+    )
+    prompt = (
+        "分析以下对话，识别场景类别。\n\n"
+        f"对话：\n{lines}\n\n"
+        "只输出JSON，不含其他内容：\n"
+        '{"primary_scene":"workplace","confidence":0.8}\n'
+        "primary_scene 取值：workplace / family / education / social / other"
+    )
+    resp = await asyncio.to_thread(
+        client.models.generate_content,
+        model=GEMINI_FLASH_MODEL,
+        contents=prompt,
+    )
+    raw = (resp.text or "").strip()
+    try:
+        s = raw.find("{")
+        e = raw.rfind("}") + 1
+        if s >= 0 and e > s:
+            return json.loads(raw[s:e])
+    except Exception:
+        pass
+    return {"primary_scene": "workplace", "confidence": 0.6}
+
+
+async def _match_skills_fallback(
+    scene_result: dict,
+    transcript: list,
+    db,
+) -> list:
+    """查 skills 表 + Gemini Flash 匹配 top-3 技能，自包含实现，不依赖 skills.router"""
+    primary_scene = scene_result.get("primary_scene", "workplace")
+
+    # 1. 从 DB 取已启用技能（最多 20 个）
+    skills_result = await db.execute(
+        select(Skill)
+        .where(Skill.enabled == True)
+        .order_by(Skill.priority.desc())
+        .limit(20)
+    )
+    skills = skills_result.scalars().all()
+    if not skills:
+        logger.warning("[TurnProc] skills 表为空，跳过技能匹配")
+        return []
+
+    # 2. Gemini Flash 匹配
+    skills_list = "\n".join(
+        f"{i+1}. skill_id={s.skill_id} name={s.name} category={s.category}"
+        + (f" desc={s.description[:60]}" if s.description else "")
+        for i, s in enumerate(skills)
+    )
+    lines = "\n".join(
+        f"{t.get('speaker', '?')}: {t.get('text', '')}" for t in transcript
+    )
+    prompt = (
+        f"对话场景={primary_scene}，以下是最近对话：\n{lines}\n\n"
+        f"从以下技能中选出最匹配的3个（按相关性排序）：\n{skills_list}\n\n"
+        "只输出JSON数组，不含其他内容：\n"
+        '[{"skill_id":"...","skill_name":"...","category":"...","score":85}]'
+    )
+    _client = genai_sdk.Client(api_key=GEMINI_API_KEY)
+    resp = await asyncio.to_thread(
+        _client.models.generate_content,
+        model=GEMINI_FLASH_MODEL,
+        contents=prompt,
+    )
+    raw = (resp.text or "").strip()
+    try:
+        s = raw.find("[")
+        e = raw.rfind("]") + 1
+        if s >= 0 and e > s:
+            matched = json.loads(raw[s:e])
+            skill_map = {sk.skill_id: sk for sk in skills}
+            for m in matched:
+                sid = m.get("skill_id", "")
+                if sid in skill_map:
+                    sk = skill_map[sid]
+                    m.setdefault("skill_name", sk.name)
+                    m.setdefault("category", sk.category)
+            return matched[:3]
+    except Exception:
+        pass
+    return []
+
+
 # ── 异步路径（Async Path）────────────────────────────────────────────────────
 
 async def _run_async_analysis(
@@ -257,10 +348,16 @@ async def _run_async_analysis(
     并推送 SSE analysis_ready（含 skill_cards）。
     脚本生成（visual[]）在 Step 9 后处理时完成。
     """
+    # 优先使用 skills.router（生产环境），不可用时 fallback 到内置实现
     try:
-        # 延迟导入：skills.router 只在服务端存在
-        from skills.router import classify_scene, match_skills
+        from skills.router import classify_scene as _classify_fn
+        from skills.router import match_skills as _match_fn
+    except ImportError:
+        logger.warning("[TurnProc] skills.router 不可用，使用内置技能匹配")
+        _classify_fn = None
+        _match_fn = None
 
+    try:
         async with AsyncSessionLocal() as db:
             # 1. 取本批次 turns
             result = await db.execute(
@@ -293,24 +390,28 @@ async def _run_async_analysis(
             user_id_val = session_result.scalar_one_or_none()
             user_id     = str(user_id_val) if user_id_val else None
 
-            # 4. 场景分类（sync，包装到线程）
-            # 注：skills/router.py 未部署时，上方 from skills.router import 已抛 ImportError，此处不会执行
+            # 4. 场景分类
             _client = genai_sdk.Client(api_key=GEMINI_API_KEY)
-            text_model = _client
-            scene_result = await asyncio.to_thread(classify_scene, transcript, text_model)
+            if _classify_fn is not None:
+                scene_result = await asyncio.to_thread(_classify_fn, transcript, _client)
+            else:
+                scene_result = await _classify_scene_fallback(transcript, _client)
             primary_scene = scene_result.get("primary_scene", "")
             logger.info(
                 f"[TurnProc] 场景分类 session={session_id[:8]} "
                 f"batch={batch_start}-{batch_end} scene={primary_scene}"
             )
 
-            # 5. 技能匹配（async）
-            matched_skills: list[dict] = await match_skills(
-                scene_result=scene_result,
-                db=db,
-                transcript=transcript,
-                user_id=user_id,
-            )
+            # 5. 技能匹配
+            if _match_fn is not None:
+                matched_skills: list[dict] = await _match_fn(
+                    scene_result=scene_result,
+                    db=db,
+                    transcript=transcript,
+                    user_id=user_id,
+                )
+            else:
+                matched_skills = await _match_skills_fallback(scene_result, transcript, db)
             logger.info(
                 f"[TurnProc] 技能匹配 session={session_id[:8]} "
                 f"skills={[s.get('skill_id') for s in matched_skills[:3]]}"
@@ -322,7 +423,7 @@ async def _run_async_analysis(
                     "skill_id":   s.get("skill_id", ""),
                     "skill_name": s.get("skill_name", ""),
                     "category":   s.get("category", ""),
-                    "confidence": round(float(s.get("score", 0)) / 100, 2),
+                    "confidence": round(float(s.get("score") or 0) / 100, 2),
                 }
                 for s in matched_skills
                 if s.get("skill_id")
@@ -417,8 +518,6 @@ async def _run_async_analysis(
                 f"skills={len(skill_cards)}"
             )
 
-    except ImportError:
-        logger.error("[TurnProc] skills.router 未找到，异步分析跳过")
     except Exception as exc:
         logger.error(
             f"[TurnProc] 异步分析异常 session={session_id[:8]} "

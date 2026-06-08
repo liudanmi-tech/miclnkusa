@@ -34,12 +34,12 @@ GEMINI_FLASH_MODEL = os.getenv("GEMINI_FLASH_MODEL", "gemini-2.0-flash")
 GEMINI_API_KEY     = os.getenv("GEMINI_API_KEY", "")
 
 _CONTEXT_REWRITE_PROMPT = """\
-以下是一段对话记录（user=我，other=对方）：
+{old_context_section}\
+【最新对话（user=我，other=对方）】：
 
 {turns_text}
 
-{old_context_section}\
-请输出不超过 300 token 的摘要，重点保留：关键决策、未解决分歧、情绪转折点、人物立场变化。旧的细节可以归并压缩。
+请将以上内容合并压缩为不超过 300 token 的新摘要，重点保留：关键决策、未解决分歧、情绪转折点、人物立场变化。旧细节可归并压缩。
 
 只输出摘要文本，不含其他内容。"""
 
@@ -111,23 +111,23 @@ async def _rewrite_running_context(session_id: str) -> None:
                 logger.warning(f"[SegmentMgr] 无活跃 Segment session={session_id[:8]}")
                 return
 
-            # 2. 取该 Segment 全部 turns（按时序）
+            # 2. 只取最近 20 条 turns（增量滚动压缩，固定输入量 ~1300 token，不随对话长度增长）
             turns_result = await db.execute(
                 select(LiveTurn)
                 .where(LiveTurn.segment_id == segment.id)
-                .order_by(LiveTurn.turn_index.asc())
+                .order_by(LiveTurn.turn_index.desc())
+                .limit(20)
             )
-            turns = turns_result.scalars().all()
+            turns = list(reversed(turns_result.scalars().all()))
             if not turns:
-                # Segment 尚无关联 turns（段刚建，还未写入）
                 logger.debug(f"[SegmentMgr] Segment 暂无 turns session={session_id[:8]}")
                 return
 
-            # 3. 构建 prompt
+            # 3. 构建 prompt（旧摘要 + 最新 20 条 → 新摘要，输入量恒定）
             turns_text = "\n".join(f"{t.speaker}: {t.text}" for t in turns)
             old_ctx = segment.running_context or ""
             old_section = (
-                f"当前已有摘要（可压缩）：\n{old_ctx}\n\n"
+                f"【已有摘要】\n{old_ctx}\n\n"
                 if old_ctx else ""
             )
             prompt = _CONTEXT_REWRITE_PROMPT.format(
@@ -175,7 +175,7 @@ async def _rewrite_running_context(session_id: str) -> None:
             )
             logger.info(
                 f"[SegmentMgr] running_context 改写完成 session={session_id[:8]} "
-                f"segment_idx={segment.segment_index} turns={len(turns)} "
+                f"segment_idx={segment.segment_index} window_turns={len(turns)} "
                 f"chars={len(new_context)}"
             )
 
