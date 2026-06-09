@@ -14,8 +14,27 @@ struct AudioSelectionView: View {
     @Binding var selectedStartTime: Double?
     @Binding var selectedEndTime: Double?
     @Binding var selectedAudioUrl: String?
+    let profileId: String?
     let onSelectionComplete: (String?, String?, Double?, Double?, String?) -> Void
-    
+
+    init(
+        selectedSessionId: Binding<String?>,
+        selectedSegmentId: Binding<String?>,
+        selectedStartTime: Binding<Double?>,
+        selectedEndTime: Binding<Double?>,
+        selectedAudioUrl: Binding<String?>,
+        profileId: String? = nil,
+        onSelectionComplete: @escaping (String?, String?, Double?, Double?, String?) -> Void
+    ) {
+        self._selectedSessionId = selectedSessionId
+        self._selectedSegmentId = selectedSegmentId
+        self._selectedStartTime = selectedStartTime
+        self._selectedEndTime = selectedEndTime
+        self._selectedAudioUrl = selectedAudioUrl
+        self.profileId = profileId
+        self.onSelectionComplete = onSelectionComplete
+    }
+
     @StateObject private var taskListViewModel = TaskListViewModel.shared
     @State private var selectedSession: TaskItem?
     @State private var selectedSpeaker: String?
@@ -23,7 +42,9 @@ struct AudioSelectionView: View {
     @State private var isLoadingSegments = false
     @State private var currentStep: SelectionStep = .session
     @State private var isExtractingSegment = false
+    @State private var isEnrolling = false
     @State private var extractError: String?
+    @State private var selectedSegmentIds: Set<String> = []
     
     enum SelectionStep {
         case session    // 第一步：选择对话记录
@@ -129,42 +150,62 @@ struct AudioSelectionView: View {
                                 }
                                 
                             case .segment:
-                                // 第三步：选择音频片段
+                                // 第三步：选择音频片段（多选）
                                 VStack(alignment: .leading, spacing: 16) {
-                                    Text("Select Audio Clip")
+                                    Text("Select Audio Clips")
                                         .font(.system(size: 20, weight: .bold, design: .rounded))
                                         .foregroundColor(AppColors.headerText)
                                         .padding(.horizontal, 24)
-                                    
+
+                                    Text("Select one or more clips to combine for voiceprint")
+                                        .font(.system(size: 13, design: .rounded))
+                                        .foregroundColor(.gray)
+                                        .padding(.horizontal, 24)
+
                                     ForEach(audioSegments.filter { $0.speaker == selectedSpeaker }) { segment in
+                                        let isSelected = selectedSegmentIds.contains(segment.id)
                                         Button(action: {
-                                            selectSegment(segment)
+                                            if isSelected {
+                                                selectedSegmentIds.remove(segment.id)
+                                            } else {
+                                                selectedSegmentIds.insert(segment.id)
+                                            }
                                         }) {
-                                            VStack(alignment: .leading, spacing: 8) {
-                                                HStack {
-                                                    Text(segment.content)
-                                                        .font(.system(size: 14, design: .rounded))
-                                                        .foregroundColor(Color.black)
-                                                        .lineLimit(2)
+                                            HStack(spacing: 12) {
+                                                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                                                    .font(.system(size: 22))
+                                                    .foregroundColor(isSelected ? .blue : Color.gray.opacity(0.4))
 
-                                                    Spacer()
-
-                                                    Text(segment.durationString)
+                                                VStack(alignment: .leading, spacing: 8) {
+                                                    HStack {
+                                                        Text(segment.content)
+                                                            .font(.system(size: 14, design: .rounded))
+                                                            .foregroundColor(Color.black)
+                                                            .lineLimit(2)
+                                                        Spacer()
+                                                        Text(segment.durationString)
+                                                            .font(.system(size: 12, design: .rounded))
+                                                            .foregroundColor(Color.black.opacity(0.5))
+                                                    }
+                                                    Text("\(formatTime(segment.startTime)) - \(formatTime(segment.endTime))")
                                                         .font(.system(size: 12, design: .rounded))
                                                         .foregroundColor(Color.black.opacity(0.5))
                                                 }
-
-                                                Text("\(formatTime(segment.startTime)) - \(formatTime(segment.endTime))")
-                                                    .font(.system(size: 12, design: .rounded))
-                                                    .foregroundColor(Color.black.opacity(0.5))
                                             }
                                             .padding()
-                                            .background(Color(hex: "#FFFAF5"))
+                                            .background(isSelected ? Color.blue.opacity(0.08) : Color(hex: "#FFFAF5"))
                                             .cornerRadius(12)
+                                            .overlay(
+                                                RoundedRectangle(cornerRadius: 12)
+                                                    .stroke(isSelected ? Color.blue.opacity(0.4) : Color.clear, lineWidth: 1.5)
+                                            )
                                         }
                                         .padding(.horizontal, 24)
-                                        .disabled(isExtractingSegment)
+                                        .disabled(isExtractingSegment || isEnrolling)
                                     }
+
+                                    // 底部占位，防止内容被 Confirm 按钮遮住
+                                    Color.clear.frame(height: 80)
                                 }
                             }
                         }
@@ -172,7 +213,31 @@ struct AudioSelectionView: View {
                         .padding(.bottom, 40)
                     }
                 }
-                if isExtractingSegment {
+                // 多选 Confirm 按钮（浮在底部）
+                if currentStep == .segment && !selectedSegmentIds.isEmpty {
+                    VStack {
+                        Spacer()
+                        Button(action: confirmSelection) {
+                            HStack(spacing: 8) {
+                                if isExtractingSegment || isEnrolling {
+                                    ProgressView().tint(.white).scaleEffect(0.85)
+                                }
+                                Text(isEnrolling ? "Enrolling..." : "Confirm (\(selectedSegmentIds.count) selected)")
+                                    .font(.system(size: 16, weight: .semibold, design: .rounded))
+                                    .foregroundColor(.white)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding()
+                            .background(Color.blue)
+                            .cornerRadius(14)
+                        }
+                        .padding(.horizontal, 24)
+                        .padding(.bottom, 32)
+                        .disabled(isExtractingSegment || isEnrolling)
+                    }
+                }
+
+                if isExtractingSegment && !isEnrolling {
                     Color.black.opacity(0.3)
                         .ignoresSafeArea()
                     ProgressView("Extracting audio...")
@@ -202,11 +267,13 @@ struct AudioSelectionView: View {
                         Button("Back") {
                             if currentStep == .segment {
                                 currentStep = .speaker
+                                selectedSegmentIds = []
                             } else if currentStep == .speaker {
                                 currentStep = .session
                                 selectedSession = nil
                                 selectedSpeaker = nil
                                 audioSegments = []
+                                selectedSegmentIds = []
                             }
                         }
                     }
@@ -220,6 +287,81 @@ struct AudioSelectionView: View {
         }
     }
     
+    /// 多选确认：提取所有选中片段的 URL，若 profileId 可用则合并声纹注册
+    private func confirmSelection() {
+        let segmentsToProcess = audioSegments
+            .filter { selectedSegmentIds.contains($0.id) && $0.speaker == selectedSpeaker }
+        guard !segmentsToProcess.isEmpty else { return }
+
+        isExtractingSegment = true
+        extractError = nil
+
+        Task {
+            var collectedUrls: [String] = []
+            var firstSegment: AudioSegment? = nil
+            var firstSegmentId: String? = nil
+
+            for segment in segmentsToProcess {
+                let hasValidUrl = segment.audioUrl.map { $0.hasPrefix("http") } ?? false
+                if hasValidUrl, let url = segment.audioUrl {
+                    collectedUrls.append(url)
+                    if firstSegment == nil { firstSegment = segment; firstSegmentId = segment.id }
+                } else {
+                    do {
+                        let response = try await NetworkManager.shared.extractAudioSegment(
+                            sessionId: segment.sessionId,
+                            startTime: segment.startTime,
+                            endTime: segment.endTime,
+                            speaker: segment.speaker
+                        )
+                        collectedUrls.append(response.audioUrl)
+                        if firstSegment == nil { firstSegment = segment; firstSegmentId = response.segmentId }
+                    } catch {
+                        await MainActor.run {
+                            isExtractingSegment = false
+                            extractError = "Failed to extract clip: \(error.localizedDescription)"
+                        }
+                        return
+                    }
+                }
+            }
+
+            await MainActor.run { isExtractingSegment = false }
+
+            // 多 URL + profileId → 合并声纹注册
+            if collectedUrls.count > 1, let pid = profileId {
+                await MainActor.run { isEnrolling = true }
+                do {
+                    try await NetworkManager.shared.enrollVoiceprintMulti(
+                        profileId: pid,
+                        audioUrls: collectedUrls
+                    )
+                } catch {
+                    // 注册失败不阻止选择流程，下方仍回传第一个 URL
+                }
+                await MainActor.run { isEnrolling = false }
+            }
+
+            // 回传第一个 URL 供父视图显示，然后关闭
+            let seg = firstSegment ?? segmentsToProcess[0]
+            await MainActor.run {
+                selectedSessionId = seg.sessionId
+                selectedSegmentId = firstSegmentId ?? seg.id
+                selectedStartTime = seg.startTime
+                selectedEndTime = seg.endTime
+                selectedAudioUrl = collectedUrls.first
+                onSelectionComplete(
+                    seg.sessionId,
+                    firstSegmentId ?? seg.id,
+                    seg.startTime,
+                    seg.endTime,
+                    collectedUrls.first
+                )
+                presentationMode.wrappedValue.dismiss()
+            }
+        }
+    }
+
     /// 选择片段：若尚无 audioUrl 则先调用后端提取，再回传并关闭
     private func selectSegment(_ segment: AudioSegment) {
         let hasValidUrl = segment.audioUrl.map { $0.hasPrefix("http") } ?? false

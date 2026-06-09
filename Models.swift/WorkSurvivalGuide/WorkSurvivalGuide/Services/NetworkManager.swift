@@ -1873,6 +1873,31 @@ class NetworkManager {
         return decoded
     }
 
+    /// 多 URL 合并声纹注册（POST /api/v1/profiles/{id}/enroll-voiceprint）
+    func enrollVoiceprintMulti(profileId: String, audioUrls: [String]) async throws {
+        let parameters: [String: Any] = ["audio_urls": audioUrls]
+        let dataResponse = await AF.request(
+            "\(baseURLForWrite)/profiles/\(profileId)/enroll-voiceprint",
+            method: .post,
+            parameters: parameters,
+            encoding: JSONEncoding.default,
+            headers: [
+                "Content-Type": "application/json",
+                "Authorization": "Bearer \(getAuthToken())"
+            ],
+            requestModifier: { $0.timeoutInterval = 180 }
+        )
+        .serializingData()
+        .response
+        let statusCode = dataResponse.response?.statusCode ?? 0
+        guard statusCode >= 200 && statusCode < 300 else {
+            let body = dataResponse.data.flatMap { try? JSONDecoder().decode(FastAPIErrorResponse.self, from: $0) }
+            throw NSError(domain: "NetworkError", code: statusCode,
+                          userInfo: [NSLocalizedDescriptionKey: body?.detail ?? "声纹注册失败 (HTTP \(statusCode))"])
+        }
+        print("✅ [NetworkManager] 多 URL 声纹注册成功 profileId=\(profileId)")
+    }
+
     // MARK: - Custom Skills API
 
     /// 生成自定义技能预览（AI 生成 Markdown，不存储）

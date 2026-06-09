@@ -227,7 +227,8 @@ def cut_audio_segment(local_path: str, start_sec: float, end_sec: float) -> byte
         raise ValueError("start_time 必须小于 end_time")
     duration_sec = end_sec - start_sec
     ext = os.path.splitext(local_path)[1].lower() or ".m4a"
-    out_fmt = "mp4" if ext in (".m4a", ".mp4") else "mp3"
+    # mp4/m4a 需要可 seek 的输出，不能用 pipe:1；改用 adts（ADTS AAC 可流式输出）
+    out_fmt = "adts" if ext in (".m4a", ".mp4") else "mp3"
     # -ss 放 -i 前可加速 seek；-t 限制时长；-acodec copy 不可靠（不同编码），改用重新编码保证兼容
     cmd = [
         "ffmpeg", "-y",
@@ -265,12 +266,53 @@ def upload_segment_bytes(
     ext: str = ".m4a",
 ) -> str:
     """
-    将片段字节上传到 OSS，返回可访问的 URL。不设置 x-oss-object-acl，避免 "Put public object acl is not allowed"。
-    OSS 失败时抛出异常，供上层转为 503（客户端无法使用本地路径）。
+    将片段字节上传到存储后端，返回可访问的 URL。
+    优先使用 R2（Cloudflare，S3 兼容），回退到阿里云 OSS。
+    失败时抛出异常，供上层转为 503。
     """
     import time
     t0 = time.time()
     logger.info("[upload_segment] 开始: size=%d user=%s session=%s", len(segment_bytes), user_id, session_id)
+
+    oss_key = f"sessions/{user_id}/{session_id}/segments/{segment_id}{ext}"
+    content_type = "audio/mp4" if ext == ".m4a" else "application/octet-stream"
+
+    # ── 优先 R2（S3 兼容，boto3）──────────────────────────────────────────────
+    r2_ak  = os.getenv("R2_ACCESS_KEY_ID")
+    r2_sk  = os.getenv("R2_SECRET_ACCESS_KEY")
+    r2_ep  = os.getenv("R2_ENDPOINT_URL")
+    r2_bkt = os.getenv("R2_BUCKET_NAME")
+    r2_pub = os.getenv("R2_PUBLIC_URL", "").rstrip("/")
+    if all([r2_ak, r2_sk, r2_ep, r2_bkt]):
+        try:
+            import boto3
+            from botocore.config import Config as _BotoCoreConfig
+            client = boto3.client(
+                "s3",
+                region_name="auto",
+                endpoint_url=r2_ep,
+                aws_access_key_id=r2_ak,
+                aws_secret_access_key=r2_sk,
+                config=_BotoCoreConfig(
+                    request_checksum_calculation="when_required",
+                    response_checksum_validation="when_required",
+                ),
+            )
+            client.put_object(
+                Bucket=r2_bkt,
+                Key=oss_key,
+                Body=segment_bytes,
+                ContentType=content_type,
+            )
+            logger.info("[upload_segment] R2 成功: key=%s size=%d 耗时=%.2fs", oss_key, len(segment_bytes), time.time() - t0)
+            if r2_pub:
+                return f"{r2_pub}/{oss_key}"
+            return f"{r2_ep.rstrip('/')}/{r2_bkt}/{oss_key}"
+        except Exception as e:
+            logger.exception("[upload_segment] R2 失败: %s", e)
+            raise
+
+    # ── 回退 OSS（阿里云，oss2）──────────────────────────────────────────────
     if _USE_OSS:
         try:
             import oss2
@@ -282,20 +324,15 @@ def upload_segment_bytes(
                 raise ValueError("OSS 配置不完整")
             auth = oss2.Auth(ak, sk)
             bucket = oss2.Bucket(auth, ep, bucket_name)
-            oss_key = f"sessions/{user_id}/{session_id}/segments/{segment_id}{ext}"
-            # 仅设置 Content-Type，不设置 x-oss-object-acl（阿里云禁止时会导致 403）
-            headers = {"Content-Type": "audio/mp4" if ext == ".m4a" else "application/octet-stream"}
+            headers = {"Content-Type": content_type}
             bucket.put_object(oss_key, segment_bytes, headers=headers)
             logger.info("[upload_segment] OSS 成功: key=%s size=%d 耗时=%.2fs", oss_key, len(segment_bytes), time.time() - t0)
             if _OSS_CDN_DOMAIN:
                 return f"https://{_OSS_CDN_DOMAIN}/{oss_key}"
-            if ep.startswith("http"):
-                base = ep.rstrip("/")
-            else:
-                base = f"https://{bucket_name}.{ep}"
+            base = ep.rstrip("/") if ep.startswith("http") else f"https://{bucket_name}.{ep}"
             return f"{base}/{oss_key}"
         except Exception as e:
             logger.exception("[upload_segment] OSS 失败: %s", e)
             raise
-    # OSS 未启用时，本地路径对客户端不可用，应视为配置错误
-    raise ValueError("OSS 未启用，无法上传片段；客户端需要可访问的 URL")
+
+    raise ValueError("存储未配置（需要 R2_* 或 OSS_* 环境变量）")

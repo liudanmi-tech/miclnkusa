@@ -172,6 +172,18 @@ app.include_router(audio_segments_router)
 from api.assistant import router as assistant_router
 app.include_router(assistant_router, prefix="/api/v1")
 
+# 注册 Live Mode Session 管理路由
+from api.live_sessions import router as live_sessions_router
+app.include_router(live_sessions_router)
+
+# 注册 Live Mode 音频代理 WebSocket 路由
+from api.live_audio import router as live_audio_router
+app.include_router(live_audio_router)
+
+# 注册 Live Mode SSE 事件流路由
+from api.live_sse import router as live_sse_router
+app.include_router(live_sse_router)
+
 # 导入数据库相关
 from database.connection import get_db, init_db, close_db
 from database.models import User, Session, AnalysisResult, StrategyAnalysis, Skill, SkillExecution, Profile
@@ -1789,6 +1801,7 @@ class TaskDetailResponse(BaseModel):
     duration: int
     tags: List[str] = []
     status: str
+    session_type: Optional[str] = None  # "live" | "review" | None
     error_message: Optional[str] = None  # 分析失败时的错误信息
     emotion_score: Optional[int] = None
     speaker_count: Optional[int] = None
@@ -2519,19 +2532,70 @@ async def get_task_detail(
         if not db_session:
             raise HTTPException(status_code=404, detail="任务不存在")
         
+        # Live session 分支：直接从 live_turns 表构建 dialogues
+        if getattr(db_session, "session_type", None) == "live":
+            from database.models import LiveTurn as LiveTurnModel
+            turns_result = await db.execute(
+                select(LiveTurnModel)
+                .where(LiveTurnModel.session_id == uuid.UUID(session_id))
+                .order_by(LiveTurnModel.turn_index)
+            )
+            live_turns = turns_result.scalars().all()
+            live_dialogues = [
+                {
+                    "speaker": t.speaker_label or t.speaker,
+                    "content": t.text,
+                    "tone": "",
+                    "timestamp": None,
+                    "is_me": t.speaker == "user",
+                    "suggestion": t.suggestion or "",
+                }
+                for t in live_turns
+            ]
+            _audio_url: Optional[str] = None
+            if getattr(db_session, "audio_url", None) or getattr(db_session, "audio_path", None):
+                _api_base = os.getenv("API_PUBLIC_URL", "http://47.79.254.213").rstrip("/")
+                _audio_url = f"{_api_base}/api/v1/tasks/sessions/{session_id}/audio-file"
+
+            detail = TaskDetailResponse(
+                session_id=str(db_session.id),
+                title=db_session.title or "",
+                start_time=db_session.start_time.isoformat() if db_session.start_time else "",
+                end_time=db_session.end_time.isoformat() if db_session.end_time else None,
+                duration=db_session.duration or 0,
+                tags=db_session.tags or [],
+                status=db_session.status or "unknown",
+                session_type="live",
+                emotion_score=db_session.emotion_score,
+                speaker_count=db_session.speaker_count,
+                dialogues=live_dialogues,
+                risks=[],
+                summary=None,
+                audio_url=_audio_url,
+                created_at=db_session.created_at.isoformat() if db_session.created_at else "",
+                updated_at=db_session.updated_at.isoformat() if db_session.updated_at else ""
+            )
+            from datetime import datetime
+            return APIResponse(
+                code=200,
+                message="success",
+                data=detail.dict(),
+                timestamp=datetime.now().isoformat()
+            )
+
         # 查询分析结果
         analysis_result_query = await db.execute(
             select(AnalysisResult).where(AnalysisResult.session_id == uuid.UUID(session_id))
         )
         analysis_result = analysis_result_query.scalar_one_or_none()
-        
+
         dialogues = []
         risks = []
         summary = None
         speaker_mapping = None
         speaker_names = None
         conversation_summary = None
-        
+
         if analysis_result:
             dialogues = analysis_result.dialogues if isinstance(analysis_result.dialogues, list) else []
             risks = analysis_result.risks or []
@@ -2677,6 +2741,7 @@ async def get_task_detail(
             duration=db_session.duration or 0,
             tags=db_session.tags or [],
             status=db_session.status or "unknown",
+            session_type=getattr(db_session, "session_type", None),
             error_message=getattr(db_session, "error_message", None) or None,
             emotion_score=db_session.emotion_score,
             speaker_count=db_session.speaker_count,

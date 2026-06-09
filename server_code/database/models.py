@@ -2,7 +2,7 @@
 数据库模型定义
 使用SQLAlchemy ORM定义所有表结构
 """
-from sqlalchemy import Column, String, Integer, Boolean, DateTime, ForeignKey, Text, ARRAY, JSON, Float, UniqueConstraint
+from sqlalchemy import Column, String, Integer, Boolean, DateTime, ForeignKey, Text, ARRAY, JSON, Float, UniqueConstraint, BigInteger
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -54,10 +54,32 @@ class Session(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
+    # ── Live Mode 专用字段 ──────────────────────────────────────────────────────
+    session_type          = Column(String(20), default="review", server_default="review")  # 'review' | 'live'
+    card_title            = Column(String(100))        # Gemini 生成的 30 字标题（Live Mode post-processing）
+    live_summary          = Column(Text)               # Gemini 生成的 200 字总结
+    summary_status        = Column(String(20))         # processing | completed | failed
+    skills_status         = Column(String(20))         # processing | completed
+    cover_image_url       = Column(Text)               # 第一张成功生成的图片 URL
+    total_images_expected  = Column(Integer, default=0)
+    total_images_completed = Column(Integer, default=0)
+    total_images_failed    = Column(Integer, default=0)
+    gemini_token          = Column(Text)               # Gemini Live 续期 token（H-4 原子切换）
+    gemini_token_updated  = Column(DateTime(timezone=True))
+    ws_disconnected_at    = Column(DateTime(timezone=True))  # H-3 孤儿 Session 检测
+    ended_at              = Column(DateTime(timezone=True))
+    abandon_reason        = Column(String(100))        # 'timeout' | 'new_session' | 'manual'
+
     # 关系
     user = relationship("User", back_populates="sessions")
     analysis_result = relationship("AnalysisResult", back_populates="session", uselist=False, cascade="all, delete-orphan")
     strategy_analysis = relationship("StrategyAnalysis", back_populates="session", uselist=False, cascade="all, delete-orphan")
+    live_segments     = relationship("LiveSegment", back_populates="session", cascade="all, delete-orphan", order_by="LiveSegment.segment_index")
+    live_turns        = relationship("LiveTurn", back_populates="session", cascade="all, delete-orphan", order_by="LiveTurn.turn_index")
+    live_events       = relationship("LiveEvent", back_populates="session", cascade="all, delete-orphan")
+    live_speaker_mappings = relationship("LiveSpeakerMapping", back_populates="session", cascade="all, delete-orphan")
+    live_summary_task = relationship("LiveSummaryTask", back_populates="session", uselist=False, cascade="all, delete-orphan")
+    live_panel_batches = relationship("LivePanelBatch", back_populates="session", cascade="all, delete-orphan")
 
 
 class AnalysisResult(Base):
@@ -170,6 +192,8 @@ class Profile(Base):
     audio_end_time = Column(Integer)  # 音频片段结束时间（秒）
     audio_url = Column(String(500))  # 音频片段URL
     emoji_type = Column(String(50), server_default='self')  # 情绪 emoji 风格: self | dog | cat
+    voice_embedding = Column(ARRAY(Float), nullable=True)   # Resemblyzer 256维 d-vector
+    voice_embedding_updated_at = Column(DateTime(timezone=True), nullable=True)  # embedding 最后更新时间
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -285,3 +309,120 @@ class KgSkill(Base):
     person_ids     = Column(ARRAY(UUID(as_uuid=True)))     # 本次对话涉及的人物 id 列表
     summary        = Column(Text)                          # 应用场景摘要（可选）
     applied_at     = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Live Mode 模型（Meta 眼镜实时录音）
+# ══════════════════════════════════════════════════════════════════════════════
+
+class LiveSegment(Base):
+    """实时录音分段表 — 每段独立上下文"""
+    __tablename__ = "live_segments"
+
+    id               = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    session_id       = Column(UUID(as_uuid=True), ForeignKey("sessions.id", ondelete="CASCADE"), nullable=False, index=True)
+    segment_index    = Column(Integer, nullable=False)
+    start_turn_index = Column(Integer, nullable=False, default=0)
+    end_turn_index   = Column(Integer)                          # NULL = 当前活跃 Segment
+    running_context  = Column(Text)                             # Task A 每 10 turns 重写的摘要
+    scene_title      = Column(String(200))
+    status           = Column(String(20), nullable=False, default="active")  # active | closed
+    split_reason     = Column(String(50))                       # silence|speaker_change|background|manual
+    image_urls       = Column(JSONB, nullable=False, default=list)
+    skill_results    = Column(JSONB, nullable=False, default=list)
+    created_at       = Column(DateTime(timezone=True), server_default=func.now())
+    closed_at        = Column(DateTime(timezone=True))
+
+    __table_args__ = (UniqueConstraint("session_id", "segment_index", name="uq_live_segment"),)
+
+    session = relationship("Session", back_populates="live_segments")
+    turns   = relationship("LiveTurn", back_populates="segment", cascade="all, delete-orphan")
+    batches = relationship("LivePanelBatch", back_populates="segment", cascade="all, delete-orphan")
+
+
+class LiveTurn(Base):
+    """实时录音逐条对话表"""
+    __tablename__ = "live_turns"
+
+    id             = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    session_id     = Column(UUID(as_uuid=True), ForeignKey("sessions.id", ondelete="CASCADE"), nullable=False, index=True)
+    turn_index     = Column(Integer, nullable=False)
+    speaker        = Column(String(20), nullable=False)         # 'user' | 'other'
+    speaker_label  = Column(String(50), index=True)             # 'Speaker_1' / 'Speaker_2'（Gemini diarization）
+    text           = Column(Text, nullable=False)
+    timestamp_ms   = Column(BigInteger)
+    segment_id     = Column(UUID(as_uuid=True), ForeignKey("live_segments.id", ondelete="SET NULL"))
+    matched_skills = Column(JSONB, nullable=False, default=list)  # [{skill_id, skill_name, category, confidence}]
+    suggestion     = Column(Text)                               # 本 turn 的 Gemini 实时建议
+    context_3b     = Column(Text)                               # 注入的 3B 历史事件片段（Task B）
+    created_at     = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (UniqueConstraint("session_id", "turn_index", name="uq_live_turn"),)
+
+    session = relationship("Session", back_populates="live_turns")
+    segment = relationship("LiveSegment", back_populates="turns")
+
+
+class LiveEvent(Base):
+    """SSE 事件持久化表 — 用于断线 Last-Event-ID 重放（H-1）"""
+    __tablename__ = "live_events"
+
+    id         = Column(BigInteger, primary_key=True, autoincrement=True)
+    session_id = Column(UUID(as_uuid=True), ForeignKey("sessions.id", ondelete="CASCADE"), nullable=False, index=True)
+    event_type = Column(String(50), nullable=False)  # suggestion|skill_match|speaker_result|segment_split|warning|session_renewed
+    payload    = Column(JSONB, nullable=False, default=dict)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+    session = relationship("Session", back_populates="live_events")
+
+
+class LiveSpeakerMapping(Base):
+    """Speaker 识别结果持久化表（M-2）"""
+    __tablename__ = "live_speaker_mappings"
+
+    session_id    = Column(UUID(as_uuid=True), ForeignKey("sessions.id", ondelete="CASCADE"), nullable=False, primary_key=True)
+    speaker_label = Column(String(50), nullable=False, primary_key=True)  # 'Speaker_1', 'Speaker_2'
+    profile_id    = Column(UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="SET NULL"))
+    confidence    = Column(Float, nullable=False, default=0.0)  # 0.0-1.0
+    method        = Column(String(30), nullable=False, default="llm")  # llm|rule|voiceprint|user_confirmed
+    updated_at    = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    session = relationship("Session", back_populates="live_speaker_mappings")
+    profile = relationship("Profile", foreign_keys=[profile_id])
+
+
+class LiveSummaryTask(Base):
+    """后台处理任务持久化表 — 服务重启恢复用（H-2）"""
+    __tablename__ = "live_summary_tasks"
+
+    id          = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    session_id  = Column(UUID(as_uuid=True), ForeignKey("sessions.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
+    status      = Column(String(20), nullable=False, default="pending")  # pending|running|completed|failed
+    started_at  = Column(DateTime(timezone=True))
+    heartbeat   = Column(DateTime(timezone=True))               # 每 30s 更新；stale >5min 触发恢复
+    retry_count = Column(Integer, nullable=False, default=0)
+    error_msg   = Column(Text)
+    created_at  = Column(DateTime(timezone=True), server_default=func.now())
+
+    session = relationship("Session", back_populates="live_summary_task")
+
+
+class LivePanelBatch(Base):
+    """逐 Scene 图片生成任务追踪表（H-2）"""
+    __tablename__ = "live_panel_batches"
+
+    id                = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    session_id        = Column(UUID(as_uuid=True), ForeignKey("sessions.id", ondelete="CASCADE"), nullable=False, index=True)
+    segment_id        = Column(UUID(as_uuid=True), ForeignKey("live_segments.id", ondelete="CASCADE"))
+    scene_index       = Column(Integer, nullable=False, default=0)   # 全局排序后的 scene 编号（0-based）
+    scene_description = Column(Text)                                 # Gemini 提取的场景描述
+    status            = Column(String(20), nullable=False, default="pending")  # pending|running|completed|failed|skipped
+    image_url         = Column(Text)                                 # 生成成功后的 R2 URL
+    task_started_at   = Column(DateTime(timezone=True))
+    task_heartbeat    = Column(DateTime(timezone=True))
+    retry_count       = Column(Integer, nullable=False, default=0)
+    error_msg         = Column(Text)
+    created_at        = Column(DateTime(timezone=True), server_default=func.now())
+
+    session = relationship("Session", back_populates="live_panel_batches")
+    segment = relationship("LiveSegment", back_populates="batches")

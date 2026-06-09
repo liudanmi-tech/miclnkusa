@@ -21,6 +21,50 @@ from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 声纹注册后台任务
+# ──────────────────────────────────────────────────────────────────────────────
+
+async def _enroll_voiceprint_task(profile_id: str, audio_url: str) -> None:
+    """
+    下载档案音频、计算 Resemblyzer embedding、写回 profiles.voice_embedding。
+    fire-and-forget，不影响接口响应。
+    """
+    from services.voiceprint_service import compute_embedding_from_url
+    from database.connection import AsyncSessionLocal
+
+    logger.info(f"[声纹注册] 开始 profile_id={profile_id[:8]} url={audio_url[:60]}")
+    embedding = await asyncio.to_thread(compute_embedding_from_url, audio_url)
+    if not embedding:
+        logger.warning(f"[声纹注册] embedding 计算失败 profile_id={profile_id[:8]}")
+        return
+
+    try:
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(
+                select(Profile).where(Profile.id == uuid.UUID(profile_id))
+            )
+            profile = result.scalar_one_or_none()
+            if profile:
+                profile.voice_embedding = embedding
+                profile.voice_embedding_updated_at = datetime.now(timezone.utc)
+                await db.commit()
+                logger.info(f"[声纹注册] ✅ 完成 profile_id={profile_id[:8]}")
+    except Exception as e:
+        logger.exception(f"[声纹注册] 写 DB 失败 profile_id={profile_id[:8]}: {e}")
+
+
+def _trigger_voiceprint_enrollment(profile_id: str, audio_url: Optional[str]) -> None:
+    """若档案有音频，触发后台声纹注册任务"""
+    if not audio_url:
+        return
+    asyncio.create_task(
+        _enroll_voiceprint_task(profile_id, audio_url),
+        name=f"vp_enroll_{profile_id[:8]}",
+    )
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # 情绪头像生成（千人千面）
 # 触发时机：upload_profile_photo 成功后 fire-and-forget
@@ -329,8 +373,8 @@ async def create_profile(
     db.add(profile)
     await db.commit()
     _invalidate_profiles_cache(user_id)
-    # 移除不必要的refresh，created_at和updated_at由数据库自动生成，但对象中已有值
-    # await db.refresh(profile)  # 已移除，减少一次数据库查询
+    # 声纹注册（有 audio_url 时后台异步触发）
+    _trigger_voiceprint_enrollment(str(profile.id), profile.audio_url)
 
     return ProfileResponse(
         id=str(profile.id),
@@ -387,6 +431,7 @@ async def update_profile(
         profile.audio_start_time = int(profile_data.audio_start_time)
     if profile_data.audio_end_time is not None:
         profile.audio_end_time = int(profile_data.audio_end_time)
+    audio_url_changed = profile_data.audio_url is not None and profile_data.audio_url != profile.audio_url
     if profile_data.audio_url is not None:
         profile.audio_url = profile_data.audio_url
     if profile_data.emoji_type is not None:
@@ -397,6 +442,9 @@ async def update_profile(
 
     await db.commit()
     _invalidate_profiles_cache(user_id)
+    # 声纹重新注册（audio_url 有变动时触发）
+    if audio_url_changed:
+        _trigger_voiceprint_enrollment(str(profile.id), profile.audio_url)
     logger.info(f"[档案更新] ✅ 成功 profile_id={profile_id} photo_url={profile.photo_url}")
     # 刷新对象以获取最新的updated_at（由数据库自动更新）
     await db.refresh(profile)
@@ -469,6 +517,62 @@ async def get_profile_audio(
     except Exception as e:
         logger.error(f"[档案音频] 生成预签名 URL 失败 profile_id={profile_id}: {e}")
         raise HTTPException(status_code=502, detail=f"无法获取音频: {str(e)[:120]}")
+
+
+class EnrollVoiceprintRequest(BaseModel):
+    audio_urls: List[str]
+
+
+@router.post("/{profile_id}/enroll-voiceprint", summary="多音频合并声纹注册")
+async def enroll_voiceprint_multi(
+    profile_id: str,
+    request: EnrollVoiceprintRequest,
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    接受多个音频 URL，计算每段的 Resemblyzer embedding 后取平均值，
+    更新 profiles.voice_embedding。
+    用于 iOS「多片段合并声纹录入」场景。
+    """
+    if not request.audio_urls:
+        raise HTTPException(status_code=400, detail="audio_urls 不能为空")
+
+    result = await db.execute(
+        select(Profile).where(
+            Profile.id == uuid.UUID(profile_id),
+            Profile.user_id == uuid.UUID(user_id),
+        )
+    )
+    profile = result.scalar_one_or_none()
+    if not profile:
+        raise HTTPException(status_code=404, detail="档案不存在")
+
+    from services.voiceprint_service import compute_embedding_from_url
+    import numpy as np
+
+    embeddings = []
+    for url in request.audio_urls:
+        emb = await asyncio.to_thread(compute_embedding_from_url, url)
+        if emb:
+            embeddings.append(emb)
+        else:
+            logger.warning(f"[声纹注册] 跳过无效 URL profile_id={profile_id[:8]} url={url[:60]}")
+
+    if not embeddings:
+        raise HTTPException(status_code=422, detail="所有音频均无法计算声纹，请确认 resemblyzer 已安装且音频有效")
+
+    avg_embedding = np.mean(np.array(embeddings, dtype=np.float32), axis=0).tolist()
+
+    profile.voice_embedding = avg_embedding
+    profile.voice_embedding_updated_at = datetime.now(timezone.utc)
+    await db.commit()
+
+    logger.info(
+        f"[声纹注册] ✅ 多 URL 合并完成 profile_id={profile_id[:8]} "
+        f"count={len(embeddings)}/{len(request.audio_urls)}"
+    )
+    return {"status": "ok", "count": len(embeddings)}
 
 
 def _parse_memory(raw: str) -> dict:

@@ -548,6 +548,7 @@ struct ProfileEditView: View {
                     selectedStartTime: $viewModel.audioStartTime,
                     selectedEndTime: $viewModel.audioEndTime,
                     selectedAudioUrl: $viewModel.audioUrl,
+                    profileId: profile?.id,
                     onSelectionComplete: { sessionId, segmentId, startTime, endTime, audioUrl in
                         viewModel.audioSessionId = sessionId
                         viewModel.audioSegmentId = segmentId

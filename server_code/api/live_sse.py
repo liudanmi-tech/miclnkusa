@@ -93,6 +93,11 @@ async def _sse_generator(
     async for chunk in _replay_missed_events(session_id, last_event_id):
         yield chunk
 
+    # iOS URLSession.bytes(for:) 对小块 HTTP 响应有内部缓冲阈值（约 4-16 KB），
+    # 不发送足够数据则不向 AsyncBytes 交付任何行，导致 SSE 事件全部堆积到连接关闭时才处理。
+    # 连接建立后立即发送 4 KB padding comment，强制 iOS 刷新缓冲区，开始实时接收后续事件。
+    yield ": " + " " * 4096 + "\n\n"
+
     # Step 2: 订阅内存 pubsub
     queue = live_pubsub.subscribe(session_id)
     logger.info(f"[SSE] 客户端连接 session={session_id[:8]} last_id={last_event_id}")
