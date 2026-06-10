@@ -192,8 +192,10 @@ class Profile(Base):
     audio_end_time = Column(Integer)  # 音频片段结束时间（秒）
     audio_url = Column(String(500))  # 音频片段URL
     emoji_type = Column(String(50), server_default='self')  # 情绪 emoji 风格: self | dog | cat
-    voice_embedding = Column(ARRAY(Float), nullable=True)   # Resemblyzer 256维 d-vector
-    voice_embedding_updated_at = Column(DateTime(timezone=True), nullable=True)  # embedding 最后更新时间
+    voice_embedding = Column(ARRAY(Float), nullable=True)        # ECAPA-TDNN 192维（英文/通用）
+    voice_embedding_updated_at = Column(DateTime(timezone=True), nullable=True)
+    voice_embedding_zh = Column(ARRAY(Float), nullable=True)     # CAM++ 192维（中文专用）
+    voice_embedding_zh_updated_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
