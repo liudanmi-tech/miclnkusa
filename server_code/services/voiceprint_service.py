@@ -219,6 +219,10 @@ def _get_encoder_zh():
     if _encoder_zh is not None:
         return _encoder_zh
     try:
+        # torchaudio 2.0+ 移除了 set_audio_backend，wespeaker 代码里还用到，打补丁兼容
+        import torchaudio as _ta
+        if not hasattr(_ta, 'set_audio_backend'):
+            _ta.set_audio_backend = lambda x: None
         import wespeaker
         _encoder_zh = wespeaker.load_model('chinese')
         _encoder_zh_available = True
