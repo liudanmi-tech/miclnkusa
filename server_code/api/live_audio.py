@@ -187,18 +187,29 @@ async def audio_stream_websocket(
     - 上行：iOS 发送 PCM binary frames → 转发到 Gemini Live
     - 下行：Gemini Live 转录结果 → 写 DB + 推 JSON 消息给 iOS
     """
+    # ── [DIAG-WS-1] WS 连接尝试 ──
+    logger.info(f"[LiveAudio][DIAG-WS-1] WS 连接尝试 session={session_id[:8]} token={'存在' if token else '缺失'}")
+
     # ── 鉴权 ──
     user_id = _user_id_from_token(token)
     if not user_id:
+        logger.warning(f"[LiveAudio][DIAG-WS-1] JWT 验证失败，WS 关闭 4001 session={session_id[:8]}")
         await websocket.close(code=4001)
         return
+
+    logger.info(f"[LiveAudio][DIAG-WS-1] JWT 验证通过 user={user_id[:8]} session={session_id[:8]}")
 
     # ── Session 归属校验 ──
     session = await _get_live_session(session_id, user_id, db)
     if session is None:
+        logger.warning(f"[LiveAudio][DIAG-WS-1] Session 不存在或无权，WS 关闭 4003 session={session_id[:8]}")
         await websocket.close(code=4003)
         return
     if session.session_type != "live" or session.status not in ("active", "completed"):
+        logger.warning(
+            f"[LiveAudio][DIAG-WS-1] Session 类型/状态不符，关闭 4003 "
+            f"session={session_id[:8]} type={session.session_type} status={session.status}"
+        )
         await websocket.close(code=4003)
         return
 
@@ -280,13 +291,31 @@ async def _ios_to_gemini(
     持续从 iOS WS 接收 binary 帧（PCM 16-bit 16kHz mono），
     转发到 Deepgram；同时写入声纹 PCM 缓冲。
     """
+    frame_count = 0
+    total_bytes = 0
     try:
         while True:
             data = await websocket.receive_bytes()
+            frame_count += 1
+            total_bytes += len(data)
             await proxy.send_audio(data)
             voiceprint_matcher.append_pcm(session_id, data)   # 声纹缓冲
+            # [DIAG-PCM-2] 第1帧 + 每 100 帧（约 10s）打一次日志
+            if frame_count == 1:
+                logger.info(
+                    f"[LiveAudio][DIAG-PCM-2] 第1帧PCM到达 session={session_id[:8]} "
+                    f"frame_bytes={len(data)}"
+                )
+            elif frame_count % 100 == 0:
+                logger.info(
+                    f"[LiveAudio][DIAG-PCM-2] PCM流入 session={session_id[:8]} "
+                    f"frames={frame_count} total={total_bytes/32000:.1f}s"
+                )
     except WebSocketDisconnect:
-        logger.info("[LiveAudio] iOS WS 断连（上行任务退出）")
+        logger.info(
+            f"[LiveAudio] iOS WS 断连（上行任务退出）session={session_id[:8]} "
+            f"total_frames={frame_count} total_audio={total_bytes/32000:.1f}s"
+        )
     except Exception as e:
         logger.error(f"[LiveAudio] _ios_to_gemini 异常: {e}")
 
@@ -325,6 +354,13 @@ async def _gemini_to_ios(
             )
             await db.commit()
 
+            # [DIAG-VP-3] 声纹匹配触发日志
+            logger.info(
+                f"[LiveAudio][DIAG-VP-3] 触发声纹匹配 session={session_id[:8]} "
+                f"turn={turn.turn_index} speaker={turn.speaker_label} "
+                f"start={turn.start_sec:.2f}s end={turn.end_sec:.2f}s "
+                f"dur={(turn.end_sec - turn.start_sec):.2f}s"
+            )
             # 声纹匹配（fire-and-forget，不阻塞主流程）
             asyncio.create_task(
                 voiceprint_matcher.match_turn(
@@ -334,6 +370,7 @@ async def _gemini_to_ios(
                     end_sec=turn.end_sec,
                     user_id=user_id,
                     push_event_fn=live_pubsub.push_event,
+                    turn_text=turn.text or "",
                 ),
                 name=f"vp_match_{session_id[:8]}_{turn.turn_index}",
             )

@@ -1,8 +1,12 @@
 """
 声纹匹配器：PCM 缓冲 + 两阶段说话人识别。
 
-Stage 1：是否是「自己」（1:1，每条 >= 1.5s 的 turn 都跑）
-Stage 2：是哪个人（1:N，每条 >= 2.0s 的 turn 都跑，需 2 票确认）
+embedding 模型：ECAPA-TDNN（speechbrain/spkrec-ecapa-voxceleb，192维）
+  同一说话人跨场景相似度：0.75–0.92
+  不同说话人相似度：    0.20–0.55
+
+Stage 1：是否是「自己」（1:1，每条 >= 1.0s 的 turn 都跑）
+Stage 2：是哪个人（1:N，每条 >= 1.5s 的 turn 都跑，需 2 票确认）
 
 数据结构全部在内存，按 session_id 隔离，会话结束后调用 cleanup() 释放。
 """
@@ -26,11 +30,11 @@ PCM_BUFFER_MAX_BYTES = BYTES_PER_SEC * PCM_BUFFER_SECS
 STAGE1_MIN_DURATION = 1.0    # Stage 1 最短有效时长（秒）
 STAGE2_MIN_DURATION = 1.5    # Stage 2 最短有效时长（秒）
 
-STAGE1_CONFIRM_THRESHOLD = 0.75    # Stage 1 直接确认阈值
-STAGE1_REJECT_THRESHOLD = 0.50     # Stage 1 低于此视为「不是我」
+STAGE1_CONFIRM_THRESHOLD = 0.60    # Stage 1 直接确认阈值（ECAPA-TDNN 中文跨域场景调低）
+STAGE1_REJECT_THRESHOLD = 0.38     # Stage 1 低于此视为「不是我」
 
-STAGE2_STRONG_THRESHOLD = 0.78     # Stage 2 单 turn 强匹配阈值
-STAGE2_VOTE_THRESHOLD = 0.65       # Stage 2 进入投票的最低分
+STAGE2_STRONG_THRESHOLD = 0.58     # Stage 2 单 turn 强匹配阈值
+STAGE2_VOTE_THRESHOLD = 0.50       # Stage 2 进入投票的最低分
 STAGE2_VOTE_MARGIN = 0.05          # 最高分与次高分的最小差距
 STAGE2_VOTES_NEEDED = 2            # 投票确认所需票数
 
@@ -92,6 +96,9 @@ _confirmed: Dict[str, Dict[str, str]] = defaultdict(dict)
 _stage1_uncertain: Dict[str, Dict[str, int]] = defaultdict(lambda: defaultdict(int))
 STAGE1_MAX_UNCERTAIN = 5
 
+# 每个 speaker 最近一条 turn 的 embedding（用于诊断 intra-session 相似度）
+_last_embedding: Dict[str, Dict[str, List[float]]] = defaultdict(dict)
+
 
 def get_or_create_buffer(session_id: str) -> PCMBuffer:
     if session_id not in _pcm_buffers:
@@ -101,7 +108,15 @@ def get_or_create_buffer(session_id: str) -> PCMBuffer:
 
 def append_pcm(session_id: str, chunk: bytes) -> None:
     """由 live_audio._ios_to_gemini 每帧调用"""
-    get_or_create_buffer(session_id).append(chunk)
+    buf = get_or_create_buffer(session_id)
+    buf.append(chunk)
+    # [DIAG-PCM-2] 每累计 1s 音频（32000 bytes）打一次 debug，每 10s 打一次 info
+    total_secs = buf._total_written / BYTES_PER_SEC
+    if buf._total_written % (BYTES_PER_SEC * 10) < len(chunk):
+        logger.info(
+            f"[VoiceprintMatcher][DIAG-PCM-2] PCMBuffer 累计 session={session_id[:8]} "
+            f"total={total_secs:.1f}s buf_retained={len(buf._buf)/BYTES_PER_SEC:.1f}s"
+        )
 
 
 def cleanup(session_id: str) -> None:
@@ -110,6 +125,7 @@ def cleanup(session_id: str) -> None:
     _vote_counts.pop(session_id, None)
     _confirmed.pop(session_id, None)
     _stage1_uncertain.pop(session_id, None)
+    _last_embedding.pop(session_id, None)
     logger.info(f"[VoiceprintMatcher] cleanup session={session_id[:8]}")
 
 
@@ -122,7 +138,8 @@ async def match_turn(
     start_sec: float,
     end_sec: float,
     user_id: str,
-    push_event_fn,   # Callable(session_id, event_type, payload) → None
+    push_event_fn,          # Callable(session_id, event_type, payload) → None
+    turn_text: str = "",    # Gemini transcript，用于语言检测路由
 ) -> None:
     """
     fire-and-forget：由 live_audio._gemini_to_ios 在 turn 落库后调用。
@@ -130,33 +147,116 @@ async def match_turn(
     每次调用创建独立 DB Session，避免与主 WS handler 共享会话的并发问题。
     """
     duration = end_sec - start_sec
+    logger.info(
+        f"[VoiceprintMatcher][DIAG-VP-4] match_turn 进入 session={session_id[:8]} "
+        f"speaker={speaker_label} start={start_sec:.2f}s end={end_sec:.2f}s dur={duration:.2f}s"
+    )
+
     if duration < STAGE1_MIN_DURATION:
-        logger.debug(f"[VoiceprintMatcher] turn 太短 ({duration:.1f}s)，跳过 session={session_id[:8]}")
+        logger.warning(
+            f"[VoiceprintMatcher][DIAG-VP-4] ⚠ turn 太短 ({duration:.2f}s < {STAGE1_MIN_DURATION}s)，跳过"
+            f" session={session_id[:8]}"
+        )
         return
 
     if speaker_label in _confirmed.get(session_id, {}):
+        logger.info(
+            f"[VoiceprintMatcher][DIAG-VP-4] speaker={speaker_label} 已确认，跳过"
+            f" session={session_id[:8]}"
+        )
         return  # 已识别，跳过
 
-    # 提取 PCM
+    # [DIAG-VP-5] 提取 PCM
     buf = _pcm_buffers.get(session_id)
     if buf is None:
+        logger.warning(
+            f"[VoiceprintMatcher][DIAG-VP-5] ❌ PCMBuffer 不存在！session={session_id[:8]} "
+            f"（音频帧从未到达或已 cleanup）"
+        )
         return
+    logger.info(
+        f"[VoiceprintMatcher][DIAG-VP-5] PCMBuffer 存在 session={session_id[:8]} "
+        f"total={buf._total_written/BYTES_PER_SEC:.1f}s buf_len={len(buf._buf)/BYTES_PER_SEC:.1f}s"
+    )
     pcm = buf.extract(start_sec, end_sec)
     if not pcm:
-        logger.debug(f"[VoiceprintMatcher] PCM 数据已裁剪，跳过 session={session_id[:8]}")
+        buf_base_sec = (buf._total_written - len(buf._buf)) / BYTES_PER_SEC
+        logger.warning(
+            f"[VoiceprintMatcher][DIAG-VP-5] ❌ PCM 提取失败 session={session_id[:8]} "
+            f"请求范围=[{start_sec:.2f}s, {end_sec:.2f}s] "
+            f"缓冲有效区=[{buf_base_sec:.2f}s, {buf._total_written/BYTES_PER_SEC:.2f}s]"
+        )
+        return
+    logger.info(
+        f"[VoiceprintMatcher][DIAG-VP-5] ✅ PCM 提取成功 session={session_id[:8]} "
+        f"pcm_bytes={len(pcm)} ({len(pcm)/BYTES_PER_SEC:.2f}s)"
+    )
+
+    # [NODE-2] VAD 静音剥离
+    from services.voiceprint_service import (
+        strip_silence_vad, compute_embedding_from_bytes,
+        compute_embedding_zh, detect_language,
+    )
+    voiced_pcm, speech_ratio = await asyncio.to_thread(strip_silence_vad, pcm)
+    logger.info(
+        f"[VoiceprintMatcher][VAD] session={session_id[:8]} speaker={speaker_label} "
+        f"raw={len(pcm)/BYTES_PER_SEC:.2f}s voiced={len(voiced_pcm)/BYTES_PER_SEC:.2f}s "
+        f"ratio={speech_ratio*100:.0f}%"
+    )
+    if speech_ratio < 0.20 and len(voiced_pcm) < len(pcm):
+        logger.warning(
+            f"[VoiceprintMatcher][VAD] ⚠ ratio={speech_ratio*100:.0f}% 静音过多，跳过匹配"
+            f" session={session_id[:8]} speaker={speaker_label}"
+        )
         return
 
-    # 在线程池中计算 embedding（避免阻塞 asyncio）
-    from services.voiceprint_service import compute_embedding_from_bytes
-    embedding = await asyncio.to_thread(compute_embedding_from_bytes, pcm)
-    if embedding is None:
-        return  # resemblyzer 未安装或计算失败
+    # [NODE-3] 语言检测（基于 transcript 文本）
+    lang = detect_language(turn_text)
+    logger.info(
+        f"[VoiceprintMatcher][LANG] session={session_id[:8]} turn_text={repr(turn_text[:30])} "
+        f"→ lang={lang}"
+    )
 
-    # 使用独立 Session（避免与 WS handler 的 Session 并发冲突）
+    # [NODE-4] 按语言路由 embedding 计算
+    # zh → CAM++（中文专用）；其他 → ECAPA-TDNN（英文/通用）
+    # 两个模型 embedding 空间不同，不可混用
+    logger.info(f"[VoiceprintMatcher][DIAG-VP-6] 开始计算 turn embedding session={session_id[:8]} lang={lang}")
+    if lang == "zh":
+        embedding = await asyncio.to_thread(compute_embedding_zh, voiced_pcm)
+    else:
+        embedding = await asyncio.to_thread(compute_embedding_from_bytes, voiced_pcm)
+    if embedding is None:
+        logger.warning(
+            f"[VoiceprintMatcher][DIAG-VP-6] ❌ turn embedding 计算失败 session={session_id[:8]} "
+            f"（Resemblyzer 未安装或 PCM 太短）"
+        )
+        return  # resemblyzer 未安装或计算失败
+    logger.info(
+        f"[VoiceprintMatcher][DIAG-VP-6] ✅ turn embedding 计算完成 session={session_id[:8]} "
+        f"dim={len(embedding)}"
+    )
+
+    # [DIAG-VP-6b] 与同 session 同 speaker 上一条 turn 的 intra-session 相似度
+    from services.voiceprint_service import cosine_similarity as _cos_sim
+    prev_emb = _last_embedding.get(session_id, {}).get(speaker_label)
+    if prev_emb is not None:
+        intra_score = _cos_sim(embedding, prev_emb)
+        logger.info(
+            f"[VoiceprintMatcher][DIAG-VP-6b] intra-session 相似度 session={session_id[:8]} "
+            f"speaker={speaker_label} score={intra_score:.3f} "
+            f"{'✅ 同人' if intra_score > 0.65 else '⚠ 低'}"
+        )
+    _last_embedding[session_id][speaker_label] = embedding
+
+    # [DIAG-VP-7] 使用独立 Session 加载档案 embeddings（按语言选字段）
     from database.connection import AsyncSessionLocal
     async with AsyncSessionLocal() as db:
-        # 查档案 embeddings
-        self_emb, other_embs = await _load_profile_embeddings(user_id, db)
+        self_emb, other_embs = await _load_profile_embeddings_v2(user_id, lang, db)
+        logger.info(
+            f"[VoiceprintMatcher][DIAG-VP-7] 档案加载 session={session_id[:8]} "
+            f"self_emb={'✅' if self_emb else '❌无self档案'} "
+            f"other_embs={len(other_embs)}个"
+        )
 
         # ── Stage 1：是否是我 ─────────────────────────────────────────────────────
         result = await _stage1(session_id, speaker_label, embedding, self_emb)
@@ -376,6 +476,61 @@ async def _load_profile_embeddings(
         if not emb:
             continue
         rel = (p.relationship_type or "").lower()
+        if rel in ("自己", "self", "myself", "me"):
+            self_emb = (str(p.id), emb)
+        else:
+            other_embs.append((str(p.id), emb))
+
+    return self_emb, other_embs
+
+
+async def _load_profile_embeddings_v2(
+    user_id: str,
+    lang: str,
+    db,
+) -> Tuple[Optional[Tuple[str, List[float]]], List[Tuple[str, List[float]]]]:
+    """
+    按语言选择对应 embedding 字段：
+      lang=="zh" → 优先 voice_embedding_zh，NULL 时降级到 voice_embedding
+      其他        → voice_embedding
+
+    日志：
+      [MATCH] lang=zh field=voice_embedding_zh score=...
+      [MATCH] lang=zh field=voice_embedding_zh NULL, fallback→voice_embedding
+    """
+    import uuid
+    from sqlalchemy import select
+    from database.models import Profile
+
+    result = await db.execute(
+        select(Profile).where(
+            Profile.user_id == uuid.UUID(user_id),
+        )
+    )
+    profiles = result.scalars().all()
+
+    self_emb = None
+    other_embs = []
+
+    for p in profiles:
+        # 按语言选字段
+        if lang == "zh" and p.voice_embedding_zh is not None:
+            emb = p.voice_embedding_zh
+            field = "voice_embedding_zh"
+        elif lang == "zh" and p.voice_embedding_zh is None and p.voice_embedding is not None:
+            emb = p.voice_embedding
+            field = "voice_embedding(zh fallback)"
+        else:
+            emb = p.voice_embedding
+            field = "voice_embedding"
+
+        if not emb:
+            continue
+
+        rel = (p.relationship_type or "").lower()
+        logger.debug(
+            f"[VoiceprintMatcher][MATCH] profile={p.name} lang={lang} field={field}"
+        )
         if rel in ("自己", "self", "myself", "me"):
             self_emb = (str(p.id), emb)
         else:

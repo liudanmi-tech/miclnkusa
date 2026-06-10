@@ -5,7 +5,7 @@ import os
 import time
 from typing import List, Optional, Dict, Tuple, Any
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 import uuid
@@ -573,6 +573,69 @@ async def enroll_voiceprint_multi(
         f"count={len(embeddings)}/{len(request.audio_urls)}"
     )
     return {"status": "ok", "count": len(embeddings)}
+
+
+@router.post("/{profile_id}/enroll-voiceprint-pcm", summary="用实时 PCM 直接注册声纹")
+async def enroll_voiceprint_from_pcm(
+    profile_id: str,
+    request: Request,
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    接受 Content-Type: application/octet-stream 的原始 PCM 二进制数据。
+    格式：16kHz 16-bit mono signed little-endian（与 live session WebSocket 相同）。
+    用于从 iOS 实时麦克风录音注册声纹，解决 M4A 录音与实时 PCM 音频域不同的问题。
+    """
+    pcm_bytes = await request.body()
+    if not pcm_bytes:
+        raise HTTPException(status_code=400, detail="PCM 数据不能为空")
+
+    pcm_secs = len(pcm_bytes) / 32000
+    if pcm_secs < 1.0:
+        raise HTTPException(status_code=400, detail=f"PCM 太短 ({pcm_secs:.2f}s < 1.0s)，请录制至少 1 秒")
+
+    result = await db.execute(
+        select(Profile).where(
+            Profile.id == uuid.UUID(profile_id),
+            Profile.user_id == uuid.UUID(user_id),
+        )
+    )
+    profile = result.scalar_one_or_none()
+    if not profile:
+        raise HTTPException(status_code=404, detail="档案不存在")
+
+    from services.voiceprint_service import (
+        compute_enrollment_embedding,
+        compute_enrollment_embedding_zh,
+    )
+
+    # ECAPA-TDNN embedding（英文/通用）
+    embedding = await asyncio.to_thread(compute_enrollment_embedding, pcm_bytes)
+    if not embedding:
+        raise HTTPException(status_code=422, detail="无法从 PCM 计算声纹，请确认 ECAPA-TDNN 已安装且音频有效")
+
+    profile.voice_embedding = embedding
+    profile.voice_embedding_updated_at = datetime.now(timezone.utc)
+
+    # CAM++ embedding（中文专用，fire-and-forget 写入，不影响主流程）
+    embedding_zh = await asyncio.to_thread(compute_enrollment_embedding_zh, pcm_bytes)
+    if embedding_zh:
+        profile.voice_embedding_zh = embedding_zh
+        profile.voice_embedding_zh_updated_at = datetime.now(timezone.utc)
+        logger.info(f"[声纹注册-PCM] CAM++ zh embedding 写入 dim={len(embedding_zh)}")
+    else:
+        logger.info("[声纹注册-PCM] CAM++ 不可用，跳过 voice_embedding_zh（中文匹配将 fallback 到 ECAPA）")
+
+    await db.commit()
+
+    nonzero = sum(1 for v in embedding if v != 0)
+    logger.info(
+        f"[声纹注册-PCM] ✅ 完成 profile_id={profile_id[:8]} "
+        f"pcm={pcm_secs:.2f}s dim={len(embedding)} nonzero={nonzero} "
+        f"zh={'✅' if embedding_zh else '⚠fallback'}"
+    )
+    return {"status": "ok", "dim": len(embedding), "nonzero": nonzero, "duration_sec": round(pcm_secs, 2)}
 
 
 def _parse_memory(raw: str) -> dict:
