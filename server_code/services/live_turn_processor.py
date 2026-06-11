@@ -33,6 +33,8 @@ from database.models import (
     Session as DbSession,
     LiveTurn,
     LiveEvent,
+    LiveSpeakerMapping,
+    Profile,
     Skill,
 )
 from services import live_pubsub
@@ -42,9 +44,12 @@ logger = logging.getLogger(__name__)
 
 # ── 常量 ──────────────────────────────────────────────────────────────────────
 
-QUICK_TRIGGER_TURNS  = 3         # 每累积 N turn 触发快速建议
-QUICK_TRIGGER_SECS   = 20.0      # 或距上次超过 N 秒
+QUICK_TRIGGER_SECS   = 20.0      # 距上次超过 N 秒则触发（超时兜底，防长时间沉默漏触发）
 ASYNC_TRIGGER_TURNS  = 10        # 每累积 N turn 触发异步分析（turn_index = 9,19,29...）
+
+# 自适应触发间隔：urgency_level → turn 间隔
+# 0=平静(4条)，1=警觉(3条)，2=危急(1条，每条都触发)
+URGENCY_INTERVALS: dict[int, int] = {0: 4, 1: 3, 2: 1}
 
 # 快速建议：轻量模型，< 2s 目标
 GEMINI_FLASH_MODEL = os.getenv("GEMINI_FLASH_MODEL", "gemini-2.0-flash")
@@ -68,15 +73,20 @@ _SKILL_ADVICE_PROMPT = """\
 
 # 快速建议 prompt（严格要求单行 JSON，< 2s）
 # {context_section} = Layer 2 running_context 前缀（有则注入，无则空串）
+# {speaker_section} = 已知说话人角色（声纹匹配后注入，无则空串）
 _QUICK_PROMPT = """\
-你是实时对话辅助助手。{context_section}以下是对话最近几句（user=我，other=对方）：
+你是实时对话辅助助手。{context_section}{speaker_section}以下是对话最近几句（user=我）：
 
 {transcript}
 
-分析对方当前情绪，给出1条简短沟通建议。
+请分析并输出严格单行JSON，不含其他内容：
+{{"relevant_to_user":true,"urgency_level":0,"speech_act":"neutral","text":"建议（20字内）","emotion_tag":"情绪标签（含emoji）","skill_hint":"技能关键词"}}
 
-输出严格单行JSON，不含其他内容：
-{{"text":"建议（20字内）","emotion_tag":"情绪标签（含emoji）","skill_hint":"技能关键词"}}"""
+字段说明：
+- relevant_to_user: 这段对话是否与 user 直接相关（true=相关，false=背景噪音/其他人间的对话与user无关）
+- urgency_level: 0=平静 1=警觉（对方在追问/施压） 2=危急（质疑/命令我，需立即应对）
+- speech_act: neutral / question_to_me / challenge / command / affirm
+- text: 给 user 的沟通建议（20字内），relevant_to_user=false 时输出空串"""
 
 # ── 内存状态（per session，服务重启自动重置）──────────────────────────────────
 
@@ -86,8 +96,10 @@ _state: Dict[str, Dict[str, Any]] = {}
 def _get_state(session_id: str) -> Dict[str, Any]:
     if session_id not in _state:
         _state[session_id] = {
-            "last_quick_turn_index": -QUICK_TRIGGER_TURNS,  # 首条 turn 即触发
+            "last_quick_turn_index": -URGENCY_INTERVALS[0],  # 首条 turn 即触发（用平静 interval 初始化）
             "last_quick_mono": 0.0,
+            "last_urgency_level": 0,   # 当前模式：0=平静 / 1=警觉 / 2=危急
+            "calm_streak": 0,          # 连续 urgency=0 次数（用于降级：需连续 3 次）
         }
     return _state[session_id]
 
@@ -112,13 +124,27 @@ def on_turn_received(session_id: str, turn_index: int) -> None:
     state = _get_state(session_id)
     now   = loop.time()
 
-    # ── 快速路径检查 ──────────────────────────────────────────────────────
-    turns_since = turn_index - state["last_quick_turn_index"]
-    secs_since  = now - state["last_quick_mono"]
+    # ── 快速路径检查（动态 interval，基于上次 urgency_level）─────────────
+    last_urgency = state.get("last_urgency_level", 0)
+    interval     = URGENCY_INTERVALS.get(last_urgency, 4)
+    turns_since  = turn_index - state["last_quick_turn_index"]
+    secs_since   = now - state["last_quick_mono"]
 
-    if turns_since >= QUICK_TRIGGER_TURNS or secs_since >= QUICK_TRIGGER_SECS:
+    logger.debug(
+        f"[DIAG-ADAPT-1] on_turn_received session={session_id[:8]} "
+        f"turn={turn_index} urgency={last_urgency} interval={interval} "
+        f"turns_since={turns_since} secs_since={secs_since:.1f}s"
+    )
+
+    if turns_since >= interval or secs_since >= QUICK_TRIGGER_SECS:
         state["last_quick_turn_index"] = turn_index
         state["last_quick_mono"]       = now
+        trigger_reason = "turns" if turns_since >= interval else "timeout"
+        logger.info(
+            f"[DIAG-ADAPT-2] 触发快速建议 session={session_id[:8]} "
+            f"turn={turn_index} urgency={last_urgency} interval={interval} "
+            f"reason={trigger_reason}"
+        )
         loop.create_task(
             _run_quick_suggestion(session_id, turn_index),
             name=f"quick_{session_id[:8]}_{turn_index}",
@@ -139,12 +165,14 @@ def on_turn_received(session_id: str, turn_index: int) -> None:
 async def _run_quick_suggestion(session_id: str, turn_index: int) -> None:
     """
     调用 Gemini Flash 生成 1 条实时建议。
-    写入 live_turns.suggestion（最新 turn）+ live_events（SSE 重放）。
-    触发 SSE 推送。
+    含两阶段改进：
+      Phase 1 — 自适应状态机：解析 urgency_level，更新 _state，下次触发用动态 interval
+      Phase 2 — 说话人识别：查 live_speaker_mappings → profiles，真名注入 prompt
+    写入 live_turns.suggestion + live_events（SSE 重放）并推 SSE suggestion。
     """
     try:
         async with AsyncSessionLocal() as db:
-            # 1. 取最近 8 条 turns
+            # ── Step 1：取最近 8 条 turns ─────────────────────────────────
             result = await db.execute(
                 select(LiveTurn)
                 .where(LiveTurn.session_id == uuid.UUID(session_id))
@@ -153,25 +181,77 @@ async def _run_quick_suggestion(session_id: str, turn_index: int) -> None:
             )
             turns = list(reversed(result.scalars().all()))
             if not turns:
+                logger.debug(f"[TurnProc] 无 turn 数据，跳过 session={session_id[:8]}")
                 return
 
-            # 2. 格式化 transcript
+            # ── Step 2：说话人三层识别（Phase 2）────────────────────────────
+            # 第一层：声纹已匹配 → 真名 + 关系
+            speaker_map: Dict[str, str] = {}  # speaker_label → display string
+            try:
+                mapping_rows = await db.execute(
+                    select(LiveSpeakerMapping)
+                    .where(LiveSpeakerMapping.session_id == uuid.UUID(session_id))
+                )
+                for m in mapping_rows.scalars().all():
+                    if m.profile_id:
+                        prof_row = await db.execute(
+                            select(Profile).where(Profile.id == m.profile_id)
+                        )
+                        prof = prof_row.scalar_one_or_none()
+                        if prof:
+                            rel = prof.relationship_type or ""
+                            display = f"{prof.name}（{rel}）" if rel else prof.name
+                            speaker_map[m.speaker_label] = display
+                            logger.info(
+                                f"[DIAG-SPKR-1] 声纹已匹配 session={session_id[:8]} "
+                                f"label={m.speaker_label} → {display}"
+                            )
+                if not speaker_map:
+                    logger.debug(
+                        f"[DIAG-SPKR-1] 无声纹匹配 session={session_id[:8]} "
+                        f"turn={turn_index}，Gemini 凭内容推断"
+                    )
+            except Exception as spkr_exc:
+                logger.warning(
+                    f"[TurnProc] 说话人查询失败（非致命）session={session_id[:8]}: {spkr_exc}"
+                )
+
+            # 构建 speaker_section（注入 prompt）
+            if speaker_map:
+                desc_lines = "\n".join(
+                    f"  {lbl} = {desc}" for lbl, desc in speaker_map.items()
+                )
+                speaker_section = f"已知说话人：\n{desc_lines}\n\n"
+            else:
+                speaker_section = ""
+
+            # ── Step 3：格式化 transcript（使用真名替换 label）───────────────
+            def _fmt_speaker(t: LiveTurn) -> str:
+                """优先用声纹匹配真名，其次 user/other，最后 speaker_label"""
+                lbl = t.speaker_label or ""
+                if lbl and lbl in speaker_map:
+                    return speaker_map[lbl]
+                return "我（user）" if t.speaker == "user" else (lbl or t.speaker or "other")
+
             lines = "\n".join(
-                f"{t.speaker}: {t.text}" for t in turns
+                f"{_fmt_speaker(t)}: {t.text}" for t in turns
             )
 
-            # 2b. 注入 Layer 2（running_context，若有）
+            # ── Step 4：注入 Layer 2（running_context）──────────────────────
             running_ctx = await live_segment_manager.get_running_context(session_id, db)
             context_section = (
                 f"背景摘要（本段已有共识）：{running_ctx}\n\n"
                 if running_ctx else ""
             )
+
+            # ── Step 5：组装 Prompt ──────────────────────────────────────────
             prompt = _QUICK_PROMPT.format(
                 transcript=lines,
                 context_section=context_section,
+                speaker_section=speaker_section,
             )
 
-            # 3. 调 Gemini Flash（< 2s）
+            # ── Step 6：调 Gemini Flash（< 2s）──────────────────────────────
             _client = genai_sdk.Client(api_key=GEMINI_API_KEY)
             resp = await asyncio.to_thread(
                 _client.models.generate_content,
@@ -180,27 +260,79 @@ async def _run_quick_suggestion(session_id: str, turn_index: int) -> None:
             )
             raw = (resp.text or "").strip()
 
-            # 4. 解析 JSON
-            suggestion_text = ""
-            emotion_tag     = ""
-            skill_hint      = ""
+            # ── Step 7：解析 JSON（含新字段）────────────────────────────────
+            relevant_to_user = True   # 默认 true：保守策略，防误过滤
+            urgency_level    = 0
+            speech_act       = "neutral"
+            suggestion_text  = ""
+            emotion_tag      = ""
+            skill_hint       = ""
             try:
-                # 提取 JSON（防止模型输出额外文字）
                 start = raw.find("{")
                 end   = raw.rfind("}") + 1
                 if start >= 0 and end > start:
                     data = json.loads(raw[start:end])
-                    suggestion_text = data.get("text", "").strip()
-                    emotion_tag     = data.get("emotion_tag", "").strip()
-                    skill_hint      = data.get("skill_hint", "").strip()
+                    relevant_to_user = bool(data.get("relevant_to_user", True))
+                    urgency_level    = int(data.get("urgency_level", 0))
+                    speech_act       = str(data.get("speech_act", "neutral")).strip()
+                    suggestion_text  = str(data.get("text", "")).strip()
+                    emotion_tag      = str(data.get("emotion_tag", "")).strip()
+                    skill_hint       = str(data.get("skill_hint", "")).strip()
             except (json.JSONDecodeError, ValueError):
                 suggestion_text = raw[:60] if raw else ""
 
-            if not suggestion_text:
-                logger.debug(f"[TurnProc] 快速建议为空 session={session_id[:8]}")
+            logger.info(
+                f"[DIAG-ADAPT-3] Gemini 返回 session={session_id[:8]} turn={turn_index} "
+                f"relevant={relevant_to_user} urgency={urgency_level} "
+                f"speech_act={speech_act} text={suggestion_text[:20]!r}"
+            )
+
+            # ── Step 8：relevant_to_user 过滤────────────────────────────────
+            # false = 背景噪音 / 与用户无关的对话 → 跳过建议生成，不更新状态机
+            if not relevant_to_user:
+                logger.info(
+                    f"[DIAG-ADAPT-4] relevant_to_user=false，跳过 "
+                    f"session={session_id[:8]} turn={turn_index}"
+                    f"（噪音/与用户无关）"
+                )
                 return
 
-            # 5. 更新最新 turn 的 suggestion 字段
+            # ── Step 9：非对称状态机更新（Phase 1）──────────────────────────
+            state      = _get_state(session_id)
+            prev_urgency = state["last_urgency_level"]
+
+            if urgency_level >= 1:
+                # 升级：瞬时生效（1 次即触发）
+                state["last_urgency_level"] = urgency_level
+                state["calm_streak"]        = 0
+                logger.info(
+                    f"[DIAG-ADAPT-5] 模式升级 session={session_id[:8]} "
+                    f"{prev_urgency}→{urgency_level}（瞬时，interval={URGENCY_INTERVALS[urgency_level]}）"
+                )
+            else:
+                # urgency=0：需连续 3 次 calm 才降级
+                state["calm_streak"] += 1
+                if state["calm_streak"] >= 3 and prev_urgency > 0:
+                    state["last_urgency_level"] = 0
+                    logger.info(
+                        f"[DIAG-ADAPT-5] 模式降级 session={session_id[:8]} "
+                        f"{prev_urgency}→0（calm_streak={state['calm_streak']}，"
+                        f"interval={URGENCY_INTERVALS[0]}）"
+                    )
+                else:
+                    logger.debug(
+                        f"[DIAG-ADAPT-5] 保持模式 session={session_id[:8]} "
+                        f"urgency={prev_urgency} calm_streak={state['calm_streak']}"
+                    )
+
+            if not suggestion_text:
+                logger.debug(
+                    f"[TurnProc] 快速建议文本为空 session={session_id[:8]} "
+                    f"turn={turn_index}（但状态机已更新）"
+                )
+                return
+
+            # ── Step 10：写 DB（更新 suggestion 字段）───────────────────────
             await db.execute(
                 update(LiveTurn)
                 .where(
@@ -210,13 +342,15 @@ async def _run_quick_suggestion(session_id: str, turn_index: int) -> None:
                 .values(suggestion=suggestion_text)
             )
 
-            # 6. 写 live_events（供 SSE H-1 重放）
+            # ── Step 11：写 live_events（供 SSE H-1 重放）────────────────────
             payload = {
-                "type":       "suggestion",
-                "text":       suggestion_text,
-                "emotion_tag": emotion_tag,
-                "skill_hint": skill_hint,
-                "turn_index": turn_index,
+                "type":          "suggestion",
+                "text":          suggestion_text,
+                "emotion_tag":   emotion_tag,
+                "skill_hint":    skill_hint,
+                "turn_index":    turn_index,
+                "urgency_level": urgency_level,   # Phase 1 新增
+                "speech_act":    speech_act,      # Phase 1 新增
             }
             live_event = LiveEvent(
                 session_id=uuid.UUID(session_id),
@@ -228,7 +362,7 @@ async def _run_quick_suggestion(session_id: str, turn_index: int) -> None:
             event_id = live_event.id
             await db.commit()
 
-            # 7. 推送 SSE
+            # ── Step 12：推送 SSE ─────────────────────────────────────────────
             live_pubsub.push_event(
                 session_id=session_id,
                 event_id=event_id,
@@ -237,12 +371,14 @@ async def _run_quick_suggestion(session_id: str, turn_index: int) -> None:
             )
             logger.info(
                 f"[TurnProc] 快速建议已推送 session={session_id[:8]} "
-                f"turn={turn_index} emotion={emotion_tag}"
+                f"turn={turn_index} urgency={urgency_level} "
+                f"speech_act={speech_act} emotion={emotion_tag}"
             )
 
     except Exception as exc:
         logger.error(
-            f"[TurnProc] 快速建议异常 session={session_id[:8]} turn={turn_index}: {exc}"
+            f"[TurnProc] 快速建议异常 session={session_id[:8]} turn={turn_index}: {exc}",
+            exc_info=True,
         )
 
 
