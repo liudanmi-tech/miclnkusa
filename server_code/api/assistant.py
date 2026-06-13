@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-ASSISTANT_MODEL = "gemini-2.0-flash"
+ASSISTANT_MODEL = "gemini-2.5-flash"
 
 # Gemini safety settings — applied to all model calls
 _GEMINI_SAFETY = [
