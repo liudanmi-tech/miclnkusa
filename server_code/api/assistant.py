@@ -633,3 +633,184 @@ async def assistant_chat(
             "Connection": "keep-alive",
         },
     )
+
+
+# ─── Phase 3：退出后处理 ────────────────────────────────────────────────────────
+
+async def _call_gemini_finalize(session_id: str, conversation: list) -> dict:
+    """
+    单次 Gemini Flash 调用：从完整对话生成 card_title / summary / mood_state / emotion_type / intensity。
+    返回解析后的 dict；失败时 raise。
+    """
+    if not conversation:
+        return {
+            "card_title": "A brief chat session",
+            "summary": "A short conversation.",
+            "mood_state": "Neutral",
+            "emotion_type": "general_venting",
+            "intensity": 5,
+        }
+
+    conv_text = "\n".join(
+        f"{'User' if m.get('role') == 'user' else 'AI'}: {m.get('content', '')}"
+        for m in conversation[:20]
+    )
+
+    prompt = f"""You are analyzing a conversation between a user and an AI mental wellness assistant.
+
+CONVERSATION:
+{conv_text}
+
+Based on this conversation, generate a JSON response with exactly these 5 fields:
+1. card_title: First-person diary-style English title, 25-40 words, starting with "I"
+2. summary: First-person diary-style English summary, 50-100 words, starting with "Today"
+3. mood_state: Exactly one of: Happy | Excited | Content | Neutral | Anxious | Frustrated | Sad | Angry | Overwhelmed
+4. emotion_type: Exactly one of: workplace_stress | relationship_tension | family_conflict | academic_pressure | self_reflection | general_venting
+5. intensity: Integer 1-10
+
+Return ONLY valid JSON, no markdown fences:
+{{
+  "card_title": "...",
+  "summary": "...",
+  "mood_state": "...",
+  "emotion_type": "...",
+  "intensity": 7
+}}"""
+
+    genai.configure(api_key=GEMINI_API_KEY)
+    model = genai.GenerativeModel(
+        ASSISTANT_MODEL,
+        generation_config=genai.GenerationConfig(
+            temperature=0.3,
+            max_output_tokens=1024,
+            response_mime_type="application/json",
+        ),
+    )
+    response = await model.generate_content_async(prompt)
+
+    # 安全取 text（finish_reason != STOP 时 .text 可能抛异常）
+    try:
+        raw = response.text.strip()
+    except Exception:
+        candidate = response.candidates[0] if response.candidates else None
+        raw = ""
+        if candidate and candidate.content and candidate.content.parts:
+            raw = "".join(p.text for p in candidate.content.parts if hasattr(p, "text")).strip()
+
+    # 剥除 markdown 代码块
+    raw = re.sub(r"^```(?:json)?\s*", "", raw)
+    raw = re.sub(r"\s*```$", "", raw)
+    raw = raw.strip()
+
+    # 用 regex 直接提取 {...} 块，容错 Gemini 可能在 JSON 前后附加文字
+    m = re.search(r"\{.*\}", raw, re.DOTALL)
+    if m:
+        raw = m.group(0)
+
+    return json.loads(raw)
+
+
+async def _async_session_finalize(session_id: str, conversation: list, user_id: str) -> None:
+    """
+    fire-and-forget：退出时一次 Gemini 调用生成 card_title / summary / mood_state，写回 DB。
+    内部自建 AsyncSessionLocal，不依赖 handler 的 db session。
+    """
+    from database.connection import AsyncSessionLocal
+    from sqlalchemy import update as sa_update, func as sa_func
+
+    id8 = session_id[:8]
+    logger.info(f"[CHAT:{id8}] finalize started | conv_len={len(conversation)}")
+    try:
+        result = await _call_gemini_finalize(session_id, conversation)
+        card_title    = result.get("card_title", "")
+        summary       = result.get("summary", "")
+        mood_state    = result.get("mood_state", "Neutral")
+        emotion_type  = result.get("emotion_type", "general_venting")
+        intensity     = int(result.get("intensity", 5))
+
+        async with AsyncSessionLocal() as db:
+            # UPSERT analysis_results（session 可能已有记录，防重）
+            stmt = pg_insert(AnalysisResult).values(
+                id=uuid.uuid4(),
+                session_id=uuid.UUID(session_id),
+                dialogues=[],
+                card_title=card_title,
+                conversation_summary=summary,
+            ).on_conflict_do_update(
+                index_elements=["session_id"],
+                set_={
+                    "card_title": card_title,
+                    "conversation_summary": summary,
+                    "updated_at": sa_func.now(),
+                },
+            )
+            await db.execute(stmt)
+
+            # UPDATE sessions
+            await db.execute(
+                sa_update(Session)
+                .where(Session.id == uuid.UUID(session_id))
+                .values(
+                    mood_state=mood_state,
+                    emotion_type=emotion_type,
+                    emotion_intensity=intensity,
+                    finalize_status="completed",
+                )
+            )
+            await db.commit()
+
+        logger.info(
+            f"[CHAT:{id8}] finalize done | mood={mood_state} "
+            f"emotion_type={emotion_type} intensity={intensity} "
+            f"card_title_len={len(card_title)}"
+        )
+
+    except Exception as e:
+        logger.error(f"[CHAT:{id8}] finalize failed | error={str(e)}")
+        try:
+            from database.connection import AsyncSessionLocal
+            from sqlalchemy import update as sa_update
+            async with AsyncSessionLocal() as db:
+                await db.execute(
+                    sa_update(Session)
+                    .where(Session.id == uuid.UUID(session_id))
+                    .values(finalize_status="failed")
+                )
+                await db.commit()
+        except Exception:
+            pass
+
+
+class CloseChatSessionRequest(BaseModel):
+    session_id: str
+    conversation: List[ChatHistoryItem] = []
+
+
+@router.post("/assistant/close-chat-session")
+async def close_chat_session(
+    req: CloseChatSessionRequest,
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
+    from sqlalchemy import update as sa_update
+
+    id8 = req.session_id[:8]
+    logger.info(f"[CHAT:{id8}] close_chat_session received | conv_len={len(req.conversation)}")
+
+    # 1. DB 立即归档（不等后处理，接口快速返回）
+    await db.execute(
+        sa_update(Session)
+        .where(Session.id == uuid.UUID(req.session_id))
+        .values(status="archived", finalize_status="pending")
+    )
+    await db.commit()
+    logger.info(f"[CHAT:{id8}] session archived | finalize_status=pending")
+
+    # 2. fire-and-forget：退出后处理
+    conversation_dicts = [{"role": h.role, "content": h.content} for h in req.conversation]
+    asyncio.create_task(
+        _async_session_finalize(req.session_id, conversation_dicts, user_id)
+    )
+
+    # 3. 立即返回 200
+    return {"status": "ok", "session_id": req.session_id}
