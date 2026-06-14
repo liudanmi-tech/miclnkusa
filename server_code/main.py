@@ -1784,6 +1784,9 @@ class TaskItem(BaseModel):
     summary: Optional[str] = None  # 对话总结，来自 AnalysisResult
     card_title: Optional[str] = None  # 对话核心主题短标题（≤30字），来自 AnalysisResult
     cover_image_url: Optional[str] = None  # 策略分析首图 URL，来自 StrategyAnalysis.visual_data[0]
+    session_type: Optional[str] = None       # "chat" | "live" | "review"
+    finalize_status: Optional[str] = None    # pending | completed | failed（chat session 专用）
+    mood_state: Optional[str] = None         # Gemini 分析后写入 sessions.mood_state
 
 
 class TaskListResponse(BaseModel):
@@ -1812,6 +1815,11 @@ class TaskDetailResponse(BaseModel):
     speaker_names: Optional[dict] = None  # Speaker_0/1 -> 档案名（关系），如 张三（自己），便于前端展示
     conversation_summary: Optional[str] = None  # 「谁和谁对话」总结
     audio_url: Optional[str] = None  # 原始录音播放 URL（OSS 直链 或 /audio-file 代理）
+    card_title: Optional[str] = None         # 来自 AnalysisResult.card_title
+    finalize_status: Optional[str] = None    # pending | completed | failed
+    mood_state: Optional[str] = None         # sessions.mood_state
+    emotion_type: Optional[str] = None       # sessions.emotion_type
+    emotion_intensity: Optional[int] = None  # sessions.emotion_intensity
     created_at: str
     updated_at: str
 
@@ -2484,7 +2492,10 @@ async def get_task_list(
                 speaker_count=s.speaker_count,
                 summary=summary_map.get(str(s.id)),
                 card_title=card_title_map.get(str(s.id)),
-                cover_image_url=cover_map.get(str(s.id))
+                cover_image_url=cover_map.get(str(s.id)),
+                session_type=getattr(s, "session_type", None),
+                finalize_status=getattr(s, "finalize_status", None),
+                mood_state=getattr(s, "mood_state", None),
             )
             for s in sessions
         ]
@@ -2572,6 +2583,8 @@ async def get_task_detail(
                 risks=[],
                 summary=None,
                 audio_url=_audio_url,
+                finalize_status=getattr(db_session, "finalize_status", None),
+                mood_state=getattr(db_session, "mood_state", None),
                 created_at=db_session.created_at.isoformat() if db_session.created_at else "",
                 updated_at=db_session.updated_at.isoformat() if db_session.updated_at else ""
             )
@@ -2752,6 +2765,11 @@ async def get_task_detail(
             speaker_names=speaker_names,
             conversation_summary=conversation_summary,
             audio_url=_audio_url,
+            card_title=analysis_result.card_title if analysis_result else None,
+            finalize_status=getattr(db_session, "finalize_status", None),
+            mood_state=getattr(db_session, "mood_state", None),
+            emotion_type=getattr(db_session, "emotion_type", None),
+            emotion_intensity=getattr(db_session, "emotion_intensity", None),
             created_at=db_session.created_at.isoformat() if db_session.created_at else "",
             updated_at=db_session.updated_at.isoformat() if db_session.updated_at else ""
         )
