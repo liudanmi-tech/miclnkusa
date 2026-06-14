@@ -1,7 +1,7 @@
 # Live 模式声纹匹配方案
 
-> 状态：待实现
-> 更新时间：2026-06-09
+> 状态：已实现，诊断中
+> 更新时间：2026-06-10
 
 ---
 
@@ -242,3 +242,150 @@ pip install resemblyzer
 ```
 
 Resemblyzer 依赖：numpy、scipy、webrtcvad，约 50MB，无需 GPU，无需 HuggingFace token。
+
+---
+
+## 十、诊断检查点（逐节点排查）
+
+每次 live session 跑完后，执行以下命令检查各节点是否通过：
+
+```bash
+journalctl -u gemini-audio -n 500 --no-pager | grep DIAG
+```
+
+---
+
+### 检查点 [DIAG-WS-1]：WebSocket 连接是否建立
+
+**日志位置**：`live_audio.py`
+
+| 日志关键词 | 含义 |
+|-----------|------|
+| `[DIAG-WS-1] WS 连接尝试` | iOS 连接到达服务端 ✅ |
+| `[DIAG-WS-1] JWT 验证失败` | token 无效或过期 ❌ |
+| `[DIAG-WS-1] JWT 验证通过` | 鉴权成功 ✅ |
+| `[DIAG-WS-1] Session 不存在或无权` | session_id 错误或不属于该用户 ❌ |
+| `[DIAG-WS-1] Session 类型/状态不符` | `session_type` 不是 live，或 `status` 不是 active/completed ❌ |
+| `[LiveAudio] WS 连接 user=...` | WebSocket 握手成功，开始录音 ✅ |
+
+**如果没有任何 DIAG-WS-1 日志** → iOS 根本没有发起 WS 连接，排查 iOS 端 `startSession()` 是否被调用。
+
+---
+
+### 检查点 [DIAG-PCM-2]：PCM 音频是否流入服务端
+
+**日志位置**：`live_audio.py` 和 `voiceprint_matcher.py`
+
+| 日志关键词 | 含义 |
+|-----------|------|
+| `[DIAG-PCM-2] 第1帧PCM到达` | iOS 音频帧已发送到服务端 ✅ |
+| `[DIAG-PCM-2] PCM流入 frames=100` | 约 10 秒音频已流入 ✅ |
+| `[DIAG-PCM-2] PCMBuffer 累计 total=10.0s` | PCMBuffer 已写入 10s 音频 ✅ |
+
+**如果 DIAG-WS-1 通过但没有 DIAG-PCM-2** → iOS 连上了 WS 但没发送音频帧（排查 iOS 端 `sessionState == .active` 条件，麦克风权限，AVAudioEngine 启动失败）。
+
+---
+
+### 检查点 [DIAG-VP-3]：声纹匹配是否被触发
+
+**日志位置**：`live_audio.py` (`_gemini_to_ios`)
+
+| 日志关键词 | 含义 |
+|-----------|------|
+| `[DIAG-VP-3] 触发声纹匹配 turn=N speaker=Speaker_1 dur=X.XXs` | Deepgram 转录完成，开始触发匹配 ✅ |
+
+**dur 字段说明**：
+- `dur < 1.0s` → 该 turn 将被跳过（太短），正常
+- `dur = 0.00s` → **异常！** Deepgram 没有返回 word 级 start/end 时间戳，检查 Deepgram 响应格式
+
+**如果 DIAG-PCM-2 通过但没有 DIAG-VP-3** → Deepgram 连接正常但没有转录输出，检查 `[Deepgram] is_final=True` 日志是否存在。
+
+---
+
+### 检查点 [DIAG-VP-4]：match_turn 内部进入
+
+**日志位置**：`voiceprint_matcher.py`
+
+| 日志关键词 | 含义 |
+|-----------|------|
+| `[DIAG-VP-4] match_turn 进入 dur=X.XXs` | 函数被执行 ✅ |
+| `[DIAG-VP-4] ⚠ turn 太短` | dur < 1.0s，跳过，等更长的 turn |
+| `[DIAG-VP-4] speaker=... 已确认，跳过` | 该说话人已识别，正常跳过 |
+
+---
+
+### 检查点 [DIAG-VP-5]：PCM 切割
+
+**日志位置**：`voiceprint_matcher.py`
+
+| 日志关键词 | 含义 |
+|-----------|------|
+| `[DIAG-VP-5] PCMBuffer 存在 total=Xs buf_len=Ys` | 缓冲存在 ✅ |
+| `[DIAG-VP-5] ❌ PCMBuffer 不存在！` | 音频帧从未到达或已被 cleanup() 清空 ❌ |
+| `[DIAG-VP-5] ✅ PCM 提取成功 pcm_bytes=N (X.XXs)` | 切割成功 ✅ |
+| `[DIAG-VP-5] ❌ PCM 提取失败 请求范围=[A, B] 缓冲有效区=[C, D]` | 时间范围不在缓冲窗口内 ❌ |
+
+**PCM 提取失败的诊断**：
+- 若 `A < C`（请求开始时间早于缓冲起点）→ turn 超过 30s 滚动窗口，buffer 已丢弃
+- 若 `B > D`（请求结束时间晚于 total_written）→ 时钟不同步（异常情况）
+
+---
+
+### 检查点 [DIAG-VP-6]：Resemblyzer embedding 计算
+
+**日志位置**：`voiceprint_service.py`
+
+| 日志关键词 | 含义 |
+|-----------|------|
+| `[DIAG-VP-6] Resemblyzer 开始计算 pcm_bytes=N (X.XXs)` | 开始计算 ✅ |
+| `[DIAG-VP-6] ✅ embedding 计算完成 dim=256` | 成功 ✅ |
+| `[DIAG-VP-6] ❌ Resemblyzer encoder 不可用` | resemblyzer 未安装 ❌ → `pip install resemblyzer` |
+| `[DIAG-VP-6] ❌ PCM 太短` | PCM < 0.5s，异常（DIAG-VP-4 应已过滤） |
+| `[DIAG-VP-6] ❌ compute_embedding_from_bytes 异常` | Resemblyzer 内部错误，看 exception 内容 |
+
+---
+
+### 检查点 [DIAG-VP-7]：档案 embedding 加载
+
+**日志位置**：`voiceprint_matcher.py`
+
+| 日志关键词 | 含义 |
+|-----------|------|
+| `[DIAG-VP-7] 档案加载 self_emb=✅ other_embs=1个` | 正常，有 self + 1个他人档案 ✅ |
+| `[DIAG-VP-7] 档案加载 self_emb=❌无self档案` | self 档案无 voice_embedding ❌ |
+| `[DIAG-VP-7] 档案加载 ... other_embs=0个` | 没有他人档案（Stage 2 会跳过） |
+
+**self 档案条件**：`profiles.relationship` 字段值必须是以下之一（大小写不敏感）：
+`自己` / `self` / `myself` / `me`
+
+---
+
+### 检查点 [Stage1/Stage2]：匹配计算
+
+**日志位置**：`voiceprint_matcher.py`
+
+| 日志关键词 | 含义 |
+|-----------|------|
+| `Stage1 session=... self_score=0.XXX` | Stage1 相似度分数 |
+| `Stage1 ✅ 确认是自己` | 匹配成功 ✅ |
+| `Stage2 best=0.XXX margin=0.XXX` | Stage2 分数详情 |
+| `Stage2 ✅ 强匹配 / 投票确认` | 匹配成功 ✅ |
+| `写 DB 成功: speaker=... profile=... confidence=0.XXX` | 写入 live_speaker_mappings ✅ |
+
+---
+
+### 快速诊断命令
+
+```bash
+# 查所有诊断节点日志
+journalctl -u gemini-audio -n 1000 --no-pager | grep 'DIAG\|Stage1\|Stage2\|写 DB'
+
+# 只看某个 session 的诊断（替换前8位）
+journalctl -u gemini-audio -n 1000 --no-pager | grep 'DIAG\|Stage' | grep 'aa7e1ad4'
+
+# 看 PCM 是否有数据流入
+journalctl -u gemini-audio -n 1000 --no-pager | grep 'DIAG-PCM'
+
+# 看声纹匹配结果
+journalctl -u gemini-audio -n 1000 --no-pager | grep 'DIAG-VP\|Stage1\|Stage2'
+```
