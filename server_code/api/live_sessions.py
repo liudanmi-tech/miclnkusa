@@ -672,10 +672,17 @@ async def end_live_session(
             .limit(2)
         )
         sample_texts = list(reversed([row[0] for row in texts_result.all()]))
+        # 查档案名称（LiveSpeakerMapping 无 .name 字段，需 JOIN profiles）
+        profile_name = None
+        if mapping.profile_id:
+            name_result = await db.execute(
+                select(Profile.name).where(Profile.id == mapping.profile_id)
+            )
+            profile_name = name_result.scalar_one_or_none()
         speaker_mappings_list.append(SpeakerMappingItem(
             speaker_label=mapping.speaker_label,
             profile_id=str(mapping.profile_id) if mapping.profile_id else None,
-            profile_name=mapping.name,
+            profile_name=profile_name,
             confidence=mapping.confidence,
             method=mapping.method,
             sample_texts=sample_texts,

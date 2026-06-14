@@ -23,9 +23,15 @@ import logging
 import os
 import subprocess
 import tempfile
+import threading
 from typing import List, Optional, Tuple
 
 import numpy as np
+
+# CAM++ / ECAPA-TDNN 推理串行锁 —— wespeaker / speechbrain 的 C 层不支持并发调用
+# 并发调用会导致 "malloc(): unaligned tcache chunk detected" → 进程崩溃
+_encoder_zh_compute_lock = threading.Lock()
+_encoder_compute_lock = threading.Lock()
 
 logger = logging.getLogger(__name__)
 
@@ -212,27 +218,100 @@ def _get_encoder_zh():
     懒加载 wespeaker CAM++ 中文模型。
     未安装 wespeaker 时 fallback 到 ECAPA-TDNN，不抛异常。
     安装方式：pip install git+https://github.com/wenet-e2e/wespeaker.git
+
+    关键修复：wespeaker/diar/umap_clusterer.py 会 import umap → import numba，
+    numba 在 Python 3.14 上调用 os._exit(0) 导致进程静默退出，无法被 try/except 捕获。
+    解决：在 import wespeaker 前用 mock 模块替换 umap_clusterer，跳过 umap/numba 导入。
     """
     global _encoder_zh, _encoder_zh_available
     if _encoder_zh_available is False:
         return None
     if _encoder_zh is not None:
         return _encoder_zh
+
+    logger.info("[voiceprint][CAM++] 开始加载 wespeaker CAM++ 中文模型...")
+
     try:
-        # torchaudio 2.0+ 移除了 set_audio_backend，wespeaker 代码里还用到，打补丁兼容
+        import sys, types
+
+        # Step 1: mock 问题依赖（避免 Python 3.14 兼容性 crash）
+        # 1a: umap_clusterer → import umap → import numba → os._exit(0) crash
+        # 1b: wespeaker.frontend.s3prl → import s3prl → torchaudio.sox_effects（torchaudio 2.x 已移除）
+        logger.info("[voiceprint][CAM++] Step1: mock 问题依赖模块")
+        mocked = []
+        if 'wespeaker.diar.umap_clusterer' not in sys.modules:
+            _fake_umap = types.ModuleType('wespeaker.diar.umap_clusterer')
+            _fake_umap.cluster = lambda *a, **kw: None
+            sys.modules['wespeaker.diar.umap_clusterer'] = _fake_umap
+            mocked.append('umap_clusterer')
+        if 'wespeaker.frontend.s3prl' not in sys.modules:
+            _fake_s3prl = types.ModuleType('wespeaker.frontend.s3prl')
+            _fake_s3prl.S3prlFrontend = None
+            sys.modules['wespeaker.frontend.s3prl'] = _fake_s3prl
+            mocked.append('frontend.s3prl')
+        if 'torchaudio.sox_effects' not in sys.modules:
+            _fake_sox = types.ModuleType('torchaudio.sox_effects')
+            _fake_sox.apply_effects_tensor = lambda *a, **kw: None
+            _fake_sox.apply_effects_file = lambda *a, **kw: None
+            sys.modules['torchaudio.sox_effects'] = _fake_sox
+            mocked.append('torchaudio.sox_effects')
+        logger.info(f"[voiceprint][CAM++] Step1: mock 注入 {mocked}")
+
+        # Step 2: torchaudio 兼容补丁（2.0+ 移除了 set_audio_backend）
+        logger.info("[voiceprint][CAM++] Step2: 检查 torchaudio 补丁")
         import torchaudio as _ta
         if not hasattr(_ta, 'set_audio_backend'):
             _ta.set_audio_backend = lambda x: None
+            logger.info("[voiceprint][CAM++] Step2: set_audio_backend monkey-patch 已应用")
+        else:
+            logger.info("[voiceprint][CAM++] Step2: torchaudio 原生支持 set_audio_backend，无需补丁")
+
+        # Step 2b: torchaudio.load 补丁 —— 用 stdlib wave 模块绕过 TorchCodec 依赖
+        # torchaudio 2.2+ 默认尝试 torchcodec 后端，服务器未安装时抛 ImportError
+        import torch as _torch
+        import wave as _wave_mod
+        import torchaudio as _ta2
+
+        def _stdlib_wave_load(path, *args, **kwargs):
+            """用 stdlib wave 加载 WAV，返回 (tensor, sample_rate)，兼容 torchaudio.load 接口"""
+            with _wave_mod.open(str(path), 'rb') as wf:
+                nch = wf.getnchannels()
+                sw  = wf.getsampwidth()
+                sr  = wf.getframerate()
+                raw = wf.readframes(wf.getnframes())
+            dtype = np.int16 if sw == 2 else (np.int32 if sw == 4 else np.int8)
+            data  = np.frombuffer(raw, dtype=dtype).astype(np.float32)
+            if sw == 2:
+                data = data / 32768.0
+            elif sw == 4:
+                data = data / 2147483648.0
+            # reshape: (channels, samples)
+            if nch == 1:
+                data = data.reshape(1, -1)
+            else:
+                data = data.reshape(-1, nch).T
+            return _torch.from_numpy(data.copy()), sr
+
+        _ta2.load = _stdlib_wave_load
+        logger.info("[voiceprint][CAM++] Step2b: torchaudio.load monkey-patched to stdlib wave (bypass TorchCodec)")
+
+        # Step 3: import wespeaker
+        logger.info("[voiceprint][CAM++] Step3: import wespeaker")
         import wespeaker
+        logger.info(f"[voiceprint][CAM++] Step3: wespeaker 导入成功，路径={wespeaker.__file__}")
+
+        # Step 4: load_model('chinese')
+        logger.info("[voiceprint][CAM++] Step4: wespeaker.load_model('chinese') 开始（首次会下载模型）")
         _encoder_zh = wespeaker.load_model('chinese')
         _encoder_zh_available = True
-        logger.info("[voiceprint] ✅ wespeaker CAM++ 中文模型加载成功")
-    except ImportError:
+        logger.info(f"[voiceprint][CAM++] ✅ CAM++ 中文模型加载成功 model={type(_encoder_zh).__name__}")
+
+    except ImportError as e:
         _encoder_zh_available = False
-        logger.warning("[voiceprint] wespeaker 未安装，中文声纹将 fallback 到 ECAPA-TDNN")
+        logger.warning(f"[voiceprint][CAM++] ImportError: {e} → fallback 到 ECAPA-TDNN")
     except Exception as e:
         _encoder_zh_available = False
-        logger.warning(f"[voiceprint] wespeaker 中文模型加载失败: {e}，fallback 到 ECAPA-TDNN")
+        logger.warning(f"[voiceprint][CAM++] 加载异常 {type(e).__name__}: {e} → fallback 到 ECAPA-TDNN")
     return _encoder_zh
 
 
@@ -406,8 +485,9 @@ def compute_embedding_from_bytes(pcm_bytes: bytes) -> Optional[List[float]]:
         wav_np = _pcm_to_float32(pcm_bytes)
         # ECAPA-TDNN 期望 (batch, time) 的 float32 tensor，16kHz 归一化音频
         wav_tensor = torch.FloatTensor(wav_np).unsqueeze(0)   # (1, T)
-        with torch.no_grad():
-            emb = encoder.encode_batch(wav_tensor)             # (1, 1, 192)
+        with _encoder_compute_lock:   # 串行保护：防止并发 C 层崩溃
+            with torch.no_grad():
+                emb = encoder.encode_batch(wav_tensor)             # (1, 1, 192)
         emb_np = emb.squeeze().cpu().numpy()                   # (192,)
 
         # L2 归一化（保险起见，SpeechBrain 输出通常已归一化）
@@ -505,14 +585,18 @@ def compute_embedding_zh(pcm_bytes: bytes) -> Optional[List[float]]:
     """
     import os, wave, tempfile
 
+    pcm_secs = len(pcm_bytes) / BYTES_PER_SEC
+    logger.info(f"[voiceprint][CAM++] compute_embedding_zh 入口 pcm={pcm_secs:.2f}s bytes={len(pcm_bytes)}")
+
     encoder = _get_encoder_zh()
     if encoder is None:
-        logger.warning("[voiceprint] CAM++ 不可用，fallback 到 ECAPA-TDNN（中文准确度会偏低）")
+        logger.warning("[voiceprint][CAM++] 不可用，fallback 到 ECAPA-TDNN（中文准确度会偏低）")
         return compute_embedding_from_bytes(pcm_bytes)
 
-    pcm_secs = len(pcm_bytes) / BYTES_PER_SEC
+    logger.info(f"[voiceprint][CAM++] encoder 获取成功 type={type(encoder).__name__}")
+
     if pcm_secs < 0.5:
-        logger.warning(f"[voiceprint] CAM++ PCM 太短 ({pcm_secs:.2f}s)")
+        logger.warning(f"[voiceprint][CAM++] PCM 太短 ({pcm_secs:.2f}s)，跳过")
         return None
 
     if len(pcm_bytes) % 2 != 0:
@@ -527,21 +611,25 @@ def compute_embedding_zh(pcm_bytes: bytes) -> Optional[List[float]]:
             wf.setsampwidth(2)
             wf.setframerate(SAMPLE_RATE)
             wf.writeframes(pcm_bytes)
+        logger.info(f"[voiceprint][CAM++] WAV 临时文件写入成功 path={tmp_path}")
 
-        emb = encoder.extract_embedding(tmp_path)   # numpy (192,) or (1,192)
+        logger.info(f"[voiceprint][CAM++] 调用 extract_embedding({tmp_path})")
+        with _encoder_zh_compute_lock:   # 串行保护：防止并发 C 层崩溃
+            emb = encoder.extract_embedding(tmp_path)   # numpy (192,) or (1,192)
         if emb is None:
+            logger.warning(f"[voiceprint][CAM++] extract_embedding 返回 None")
             return None
         emb_np = np.array(emb, dtype=np.float32).flatten()
         norm = np.linalg.norm(emb_np)
         if norm > 0:
             emb_np = emb_np / norm
         logger.info(
-            f"[voiceprint] CAM++ 完成 dim={len(emb_np)} "
-            f"nonzero={int(np.count_nonzero(emb_np))} dur={pcm_secs:.2f}s"
+            f"[voiceprint][CAM++] ✅ 完成 dim={len(emb_np)} "
+            f"nonzero={int(np.count_nonzero(emb_np))} norm_before={norm:.4f} dur={pcm_secs:.2f}s"
         )
         return emb_np.tolist()
     except Exception as e:
-        logger.warning(f"[voiceprint] CAM++ 计算异常: {e}")
+        logger.warning(f"[voiceprint][CAM++] 计算异常 {type(e).__name__}: {e}")
         return None
     finally:
         if tmp_path:
@@ -557,11 +645,19 @@ def compute_enrollment_embedding_zh(pcm_bytes: bytes) -> Optional[List[float]]:
     与 compute_enrollment_embedding() 完全对称，但使用 compute_embedding_zh。
     """
     raw_secs = len(pcm_bytes) / BYTES_PER_SEC
+    logger.info(f"[enrollment-zh][CAM++] 开始注册 raw={raw_secs:.1f}s bytes={len(pcm_bytes)}")
+
+    # 提前检查 CAM++ 是否可用，记录清晰日志
+    encoder = _get_encoder_zh()
+    if encoder is None:
+        logger.warning("[enrollment-zh][CAM++] CAM++ 不可用，enrollment-zh 将 fallback 到 ECAPA-TDNN")
+    else:
+        logger.info(f"[enrollment-zh][CAM++] encoder 就绪 type={type(encoder).__name__}")
 
     voiced_pcm, speech_ratio = strip_silence_vad(pcm_bytes)
     voiced_secs = len(voiced_pcm) / BYTES_PER_SEC
     logger.info(
-        f"[enrollment-zh] VAD 完成: raw={raw_secs:.1f}s → voiced={voiced_secs:.1f}s "
+        f"[enrollment-zh][CAM++] VAD 完成: raw={raw_secs:.1f}s → voiced={voiced_secs:.1f}s "
         f"ratio={speech_ratio*100:.0f}%"
     )
 

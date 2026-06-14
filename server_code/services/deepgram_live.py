@@ -64,6 +64,8 @@ class DeepgramSession:
         self._closed = False
         self._global_turn_index = 0
         self._turn_queue: asyncio.Queue[Optional[TranscribedTurn]] = asyncio.Queue()
+        self._total_audio_bytes_sent: int = 0   # 累计发送的 PCM 字节数
+        self._ts_offset_secs: float = 0.0       # Deepgram 重连后时间戳偏移量
 
     # ── 连接管理 ──────────────────────────────────────────────────────────────
 
@@ -108,6 +110,7 @@ class DeepgramSession:
             return
         try:
             await self._ws.send(pcm_bytes)
+            self._total_audio_bytes_sent += len(pcm_bytes)
             self._audio_frames_sent = getattr(self, "_audio_frames_sent", 0) + 1
             if self._audio_frames_sent % 200 == 0:   # 每 200 帧（约 2.5s）打一次
                 logger.debug(
@@ -169,6 +172,12 @@ class DeepgramSession:
                 await asyncio.sleep(wait)
                 retry += 1
                 try:
+                    # 记录重连时的字节偏移，修正后续 Deepgram 时间戳（从 0 重算）
+                    self._ts_offset_secs = self._total_audio_bytes_sent / (16000 * 2)
+                    logger.info(
+                        f"[Deepgram] 重连中 retry={retry} "
+                        f"ts_offset={self._ts_offset_secs:.1f}s session={self.session_id[:8]}"
+                    )
                     self._ws = await websockets.connect(
                         DEEPGRAM_WS_URL,
                         additional_headers={"Authorization": f"Token {DEEPGRAM_API_KEY}"},
@@ -262,8 +271,8 @@ class DeepgramSession:
         idx = self._global_turn_index
         self._global_turn_index += 1
 
-        start_sec = float(words[0].get("start", 0.0))
-        end_sec = float(words[-1].get("end", 0.0))
+        start_sec = float(words[0].get("start", 0.0)) + self._ts_offset_secs
+        end_sec = float(words[-1].get("end", 0.0)) + self._ts_offset_secs
         duration = end_sec - start_sec
 
         logger.info(

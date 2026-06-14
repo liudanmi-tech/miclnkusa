@@ -22,14 +22,25 @@ logger = logging.getLogger(__name__)
 # ──────────────────────────────────────────────────────────────────────────────
 # 常量
 # ──────────────────────────────────────────────────────────────────────────────
-GEMINI_MODEL = "gemini-2.5-flash-native-audio-latest"
+GEMINI_MODEL = "gemini-3.1-flash-live-preview"
 GEMINI_AUDIO_MIME = "audio/pcm;rate=16000"
 SESSION_RENEW_SECONDS = 14 * 60     # 14 分钟触发续期（Gemini Live 上限 15 分钟）
 AUDIO_BUFFER_MAXLEN = 200           # 约 96 KB PCM，应对 1-3s 建连延迟
 
-# native-audio 模型仅支持 AUDIO 输出，转录通过 input_audio_transcription 获取
-# 系统提示用于引导模型对话行为，转录本身由 input_audio_transcription 独立完成
-TRANSCRIPTION_SYSTEM_PROMPT = """你是一个安静的实时对话助手。请不要主动发言，等待用户说话。"""
+# TEXT 输出模型：每段发言以 JSON 格式返回，含 speaker 标签
+# 用于区分多个说话人（Speaker_1 = 用户，Speaker_2/3... = 其他人）
+TRANSCRIPTION_SYSTEM_PROMPT = """你是一个实时对话转录助手。
+
+规则：
+1. 只转录，不分析，不发言
+2. 每段发言严格按以下 JSON 格式输出（单行，不要其他内容）：
+   {"speaker":"Speaker_1","text":"转录文字"}
+3. 说话人标签规则：
+   - Speaker_1：距离麦克风最近的声音（戴眼镜的用户）
+   - Speaker_2、Speaker_3...：其他说话人，按首次出现顺序编号
+   - 保持说话人标签在整场对话中一致（同一把声音始终用同一个标签）
+4. 若只有一个人说话，统一用 Speaker_1
+5. 中文和英文混合时，按实际发言语言转录"""
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -68,8 +79,8 @@ class GeminiProxySession:
         # Turn 计数（续期后不重置，保持全局连续）
         self._global_turn_index = 0
 
-        # input_audio_transcription 流式累积缓冲
-        self._input_transcription_buffer: str = ""
+        # model_turn TEXT 流式累积缓冲（TEXT 输出模型使用）
+        self._model_turn_buffer: str = ""
 
         # 会话计时（用于触发续期）
         self._session_start_mono: Optional[float] = None
@@ -83,12 +94,9 @@ class GeminiProxySession:
     # ── 连接管理 ──────────────────────────────────────────────────────────────
 
     def _make_config(self) -> types.LiveConnectConfig:
-        # native-audio 模型仅支持 AUDIO 输出；通过 input_audio_transcription 获取文本转录
+        # TEXT 输出模式：模型直接输出转录 JSON，含说话人标签
         return types.LiveConnectConfig(
-            response_modalities=["AUDIO"],
-            input_audio_transcription=types.AudioTranscriptionConfig(
-                language_codes=["zh-CN", "en-US"],
-            ),
+            response_modalities=["TEXT"],
             system_instruction=types.Content(
                 parts=[types.Part(text=TRANSCRIPTION_SYSTEM_PROMPT)]
             ),
@@ -165,12 +173,15 @@ class GeminiProxySession:
     async def _receive_loop(self) -> None:
         """后台任务：从 Gemini Live 读取响应，解析 Turn，放入 _turn_queue"""
         try:
-            async for response in self._session.receive():
-                if self._closed:
-                    break
-                turn = self._parse_response(response)
-                if turn:
-                    await self._turn_queue.put(turn)
+            # google-genai 2.0.1: receive() 在 turn_complete 后自动结束（单轮迭代器）
+            # 外层 while 保证持续接收多轮对话
+            while not self._closed:
+                async for response in self._session.receive():
+                    if self._closed:
+                        break
+                    turn = self._parse_response(response)
+                    if turn:
+                        await self._turn_queue.put(turn)
         except asyncio.CancelledError:
             pass
         except Exception as e:
@@ -182,66 +193,60 @@ class GeminiProxySession:
 
     def _parse_response(self, response) -> Optional[TranscribedTurn]:
         """
-        解析 Gemini Live 响应。
-        native-audio 模型通过 input_audio_transcription 返回文本转录：
-          - server_content.input_transcription.text  → 流式累积
-          - server_content.input_transcription.finished = True → 发出一条 Turn
-        model_turn 中的 AUDIO inline_data 直接忽略。
+        解析 Gemini Live 响应（TEXT 输出模式）。
+        模型将每段发言输出为单行 JSON：{"speaker":"Speaker_1","text":"..."}
+          - server_content.model_turn.parts[].text → 流式累积到 _model_turn_buffer
+          - server_content.turn_complete = True → flush buffer，解析 JSON，发出 Turn
         """
         try:
             sc = getattr(response, "server_content", None)
             if sc is None:
                 return None
 
-            # ── 优先处理 input_audio_transcription ──────────────────────────────
-            it = getattr(sc, "input_transcription", None)
-            if it is not None:
-                chunk = getattr(it, "text", "") or ""
-                finished = getattr(it, "finished", False) or False
-                if chunk:
-                    self._input_transcription_buffer += chunk
-                if finished and self._input_transcription_buffer.strip():
-                    turn_text = self._input_transcription_buffer.strip()
-                    self._input_transcription_buffer = ""
-                    idx = self._global_turn_index
-                    self._global_turn_index += 1
-                    logger.debug(f"[GeminiProxy] 转录完成 idx={idx} text={turn_text[:40]}")
-                    # TODO: 多说话人识别（当前统一标为 Speaker_1）
-                    return TranscribedTurn(
-                        speaker_label="Speaker_1",
-                        text=turn_text,
-                        turn_index=idx,
-                    )
-                return None
+            tc = getattr(sc, "turn_complete", False)
 
-            # ── 兜底：model_turn TEXT（旧模型兼容，native-audio 不会走到这里）──
-            if not getattr(sc, "turn_complete", False):
-                return None
+            # ── 累积 model_turn TEXT 流式输出 ─────────────────────────────────
             model_turn = getattr(sc, "model_turn", None)
-            if model_turn is None:
-                return None
-            parts = getattr(model_turn, "parts", None) or []
-            raw_text = "".join(
-                getattr(p, "text", "") or "" for p in parts
-            ).strip()
-            if not raw_text:
-                return None
-            try:
-                data = json.loads(raw_text)
-                speaker_label = str(data.get("speaker", "Speaker_1"))
-                turn_text = str(data.get("text", "")).strip()
-            except (json.JSONDecodeError, AttributeError):
+            if model_turn is not None:
+                parts = getattr(model_turn, "parts", None) or []
+                chunk = "".join(getattr(p, "text", "") or "" for p in parts)
+                if chunk:
+                    self._model_turn_buffer += chunk
+
+            # ── turn_complete → flush buffer，解析 JSON ────────────────────────
+            if tc and self._model_turn_buffer.strip():
+                raw_text = self._model_turn_buffer.strip()
+                self._model_turn_buffer = ""
+                idx = self._global_turn_index
+                self._global_turn_index += 1
+
+                # 逐行尝试解析 JSON，取第一个有效行
                 speaker_label = "Speaker_1"
                 turn_text = raw_text
-            if not turn_text:
-                return None
-            idx = self._global_turn_index
-            self._global_turn_index += 1
-            return TranscribedTurn(
-                speaker_label=speaker_label,
-                text=turn_text,
-                turn_index=idx,
-            )
+                for line in raw_text.splitlines():
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        data = json.loads(line)
+                        speaker_label = str(data.get("speaker", "Speaker_1"))
+                        turn_text = str(data.get("text", "")).strip()
+                        break
+                    except (json.JSONDecodeError, AttributeError):
+                        continue
+
+                if not turn_text:
+                    return None
+                logger.info(
+                    f"[GeminiProxy] 转录完成 idx={idx} speaker={speaker_label} text={turn_text[:40]}"
+                )
+                return TranscribedTurn(
+                    speaker_label=speaker_label,
+                    text=turn_text,
+                    turn_index=idx,
+                )
+
+            return None
         except Exception as e:
             logger.warning(f"[GeminiProxy] _parse_response 异常: {e}")
             return None
