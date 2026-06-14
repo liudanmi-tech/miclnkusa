@@ -814,3 +814,87 @@ async def close_chat_session(
 
     # 3. 立即返回 200
     return {"status": "ok", "session_id": req.session_id}
+
+
+# ─── Phase 4：对话转图片 ────────────────────────────────────────────────────────
+
+class GenerateImageFromChatRequest(BaseModel):
+    session_id: str
+    conversation: List[ChatHistoryItem] = []
+    style_key: str = "ghibli"
+
+
+@router.post("/assistant/generate-image-from-chat", status_code=202)
+async def generate_image_from_chat(
+    req: GenerateImageFromChatRequest,
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
+    from sqlalchemy import update as sa_update
+    from database.models import Profile
+
+    id8 = req.session_id[:8]
+    logger.info(
+        f"[CHAT:{id8}] generate_image_from_chat | conv_len={len(req.conversation)} style={req.style_key}"
+    )
+
+    # 1. 构造 synthetic_transcript（仅 role=="user" 消息，AI 回复跳过）
+    #    单说话人 → generate_scene_images 自动进入场景2（旁白模式）
+    synthetic_transcript = [
+        {"text": h.content, "is_me": True, "speaker": "Speaker_0"}
+        for h in req.conversation
+        if h.role == "user"
+    ]
+    logger.debug(
+        f"[CHAT:{id8}] synthetic_transcript built | user_turns={len(synthetic_transcript)} mode=narration"
+    )
+    if not synthetic_transcript:
+        raise HTTPException(status_code=400, detail="No user messages in conversation")
+
+    # 2. 查 user profile（relationship_type="自己"）→ speaker_mapping
+    profile_q = await db.execute(
+        select(Profile).where(
+            Profile.user_id == uuid.UUID(user_id),
+            Profile.relationship_type == "自己",
+        ).limit(1)
+    )
+    profile = profile_q.scalar_one_or_none()
+    profile_id = str(profile.id) if profile else None
+    speaker_mapping = {"Speaker_0": profile_id} if profile_id else {}
+
+    # 3. DB 更新：image_status="generating"，finalize_status="pending"
+    await db.execute(
+        sa_update(Session)
+        .where(Session.id == uuid.UUID(req.session_id))
+        .values(image_status="generating", finalize_status="pending")
+    )
+    await db.commit()
+
+    # 4. fire-and-forget：生图任务
+    from scene_image_generator import generate_scene_images as _gen_scene_imgs
+    from main import generate_image_from_prompt as _gen_img_fn
+    _gemini_model = os.getenv("GEMINI_FLASH_MODEL", ASSISTANT_MODEL)
+
+    asyncio.create_task(_gen_scene_imgs(
+        transcript=synthetic_transcript,
+        style_key=req.style_key,
+        session_id=req.session_id,
+        user_id=user_id,
+        gemini_flash_model=_gemini_model,
+        generate_image_fn=_gen_img_fn,
+        speaker_mapping=speaker_mapping,
+        max_images=1,
+    ))
+    logger.info(
+        f"[CHAT:{id8}] scene_image triggered | style={req.style_key} "
+        f"profile_id={profile_id[:8] if profile_id else 'none'}"
+    )
+
+    # 5. fire-and-forget：退出后处理（与 close-chat-session 路径相同）
+    conversation_dicts = [{"role": h.role, "content": h.content} for h in req.conversation]
+    asyncio.create_task(
+        _async_session_finalize(req.session_id, conversation_dicts, user_id)
+    )
+
+    # 6. 立即返回 202
+    return {"status": "generating", "session_id": req.session_id}
