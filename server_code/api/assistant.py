@@ -19,6 +19,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from datetime import datetime, timezone
 from pydantic import BaseModel
 
@@ -74,6 +75,8 @@ class AssistantChatRequest(BaseModel):
     message: str          # "__INIT__" 表示首次自动触发
     history: List[ChatHistoryItem] = []
     image_base64_list: Optional[List[str]] = None  # 用户上传的图片列表（JPEG base64，最多3张），仅传给 Gemini 不落库
+    is_chat_session: bool = False   # True = 对话式会话模式（无需预先录音分析）
+    skill_mode: str = "auto"        # "auto" | "manual"
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -315,6 +318,80 @@ async def init_chat_session(
         raise HTTPException(status_code=500, detail="Failed to create chat session")
 
 
+async def _init_skill_matching(
+    session_id: str,
+    message: str,
+    user_id: str,
+    sse_queue: asyncio.Queue,
+) -> None:
+    """
+    fire-and-forget：第1轮对话结束后，异步执行技能匹配并 UPSERT strategy_analysis。
+    匹配完成后向 sse_queue 推送 skill_tags 事件；失败时推送 None 以解除 generator 阻塞。
+    """
+    id8 = session_id[:8]
+    logger.info(f"[CHAT:{id8}] skill_matching started")
+    try:
+        from database.connection import AsyncSessionLocal
+        from skills.router import match_skills_v2
+        from sqlalchemy import func as sa_func
+
+        transcript_stub = [{"speaker": "user", "text": message}]
+
+        async with AsyncSessionLocal() as db:
+            stubs = await match_skills_v2(
+                transcript=transcript_stub,
+                profiles=None,
+                user_id=user_id,
+                db=db,
+                model=None,
+            )
+
+        # 对话会话阈值 75（review 为 90，此处二次过滤保留 emotion_recognition 兜底）
+        stubs = [
+            s for s in stubs
+            if (s.get("score") or 0) >= 75 or s.get("skill_id") == "emotion_recognition"
+        ]
+
+        skill_tags = [
+            {"skill_id": s["skill_id"], "skill_name": s["skill_name"]}
+            for s in stubs
+        ]
+        logger.info(f"[CHAT:{id8}] skill_matching done | tags={[t['skill_id'] for t in skill_tags]}")
+
+        # UPSERT strategy_analysis（iOS 重试时不重复插入）
+        async with AsyncSessionLocal() as db:
+            stmt = pg_insert(StrategyAnalysis).values(
+                id=uuid.uuid4(),
+                session_id=uuid.UUID(session_id),
+                visual_data=[],
+                strategies=[],
+                applied_skills=[{"skill_id": s["skill_id"], "priority": 100} for s in stubs],
+                skill_cards=stubs,
+                scene_category="chat",
+                scene_confidence=1.0,
+            ).on_conflict_do_update(
+                index_elements=["session_id"],
+                set_={
+                    "applied_skills": [{"skill_id": s["skill_id"], "priority": 100} for s in stubs],
+                    "skill_cards": stubs,
+                    "updated_at": sa_func.now(),
+                },
+            )
+            await db.execute(stmt)
+            await db.commit()
+        logger.info(f"[CHAT:{id8}] strategy_analysis written | skills={len(stubs)}")
+
+        # 通知 SSE generator 推送 skill_tags
+        await sse_queue.put({"type": "skill_tags", "tags": skill_tags})
+
+    except Exception as e:
+        logger.error(f"[CHAT:{id8}] _init_skill_matching failed | error={str(e)}")
+        try:
+            await sse_queue.put(None)  # 解除 generator 阻塞
+        except Exception:
+            pass
+
+
 @router.post("/assistant/chat")
 async def assistant_chat(
     req: AssistantChatRequest,
@@ -337,6 +414,18 @@ async def assistant_chat(
         if _used_turns >= _max_turns:
             raise HTTPException(status_code=403, detail="chat_limit_reached")
 
+    # Chat Session 进入日志 & SSE skill_tags 队列
+    _session_turn = len(req.history) // 2
+    if req.is_chat_session:
+        logger.info(f"[CHAT:{req.session_id[:8]}] /chat received | is_chat=True turn={_session_turn}")
+
+    _sse_skill_queue: Optional[asyncio.Queue] = None
+    if req.is_chat_session and _session_turn == 0 and req.message not in ("__INIT__", "__SWITCH__"):
+        _sse_skill_queue = asyncio.Queue()
+        asyncio.create_task(
+            _init_skill_matching(req.session_id, req.message, user_id, _sse_skill_queue)
+        )
+
     # 1. 取策略分析
     strategy_q = await db.execute(
         select(StrategyAnalysis).where(
@@ -345,17 +434,21 @@ async def assistant_chat(
     )
     strategy = strategy_q.scalar_one_or_none()
     if not strategy:
-        raise HTTPException(status_code=404, detail="Strategy not found")
-
-    # 2. 定位目标技能卡片
-    skill_cards: list = strategy.skill_cards or []
-    target_card = next(
-        (c for c in skill_cards if c.get("skill_id") == req.skill_id), None
-    )
-    skill_name = target_card.get("skill_name", req.skill_id) if target_card else req.skill_id
-    skill_content_json = json.dumps(
-        target_card.get("content", {}), ensure_ascii=False, indent=2
-    ) if target_card else "{}"
+        if not req.is_chat_session:
+            raise HTTPException(status_code=404, detail="Strategy not found")
+        # 对话会话首轮：strategy 尚未写入，使用默认 emotion_recognition
+        skill_name = "Emotion Recognition"
+        skill_content_json = "{}"
+    else:
+        # 2. 定位目标技能卡片
+        skill_cards: list = strategy.skill_cards or []
+        target_card = next(
+            (c for c in skill_cards if c.get("skill_id") == req.skill_id), None
+        )
+        skill_name = target_card.get("skill_name", req.skill_id) if target_card else req.skill_id
+        skill_content_json = json.dumps(
+            target_card.get("content", {}), ensure_ascii=False, indent=2
+        ) if target_card else "{}"
 
     # 3. 取对话摘要（AnalysisResult）
     conv_summary = ""
@@ -493,6 +586,16 @@ async def assistant_chat(
 
         yield _sse({"type": "done"})
 
+        # 对话会话首轮：等待 skill_tags 推送（最多 8 秒）
+        if _sse_skill_queue is not None:
+            try:
+                _tags_event = await asyncio.wait_for(_sse_skill_queue.get(), timeout=8.0)
+                if _tags_event:
+                    yield _sse(_tags_event)
+                    logger.info(f"[CHAT:{req.session_id[:8]}] skill_tags pushed | tags={[t['skill_id'] for t in _tags_event.get('tags', [])]}")
+            except asyncio.TimeoutError:
+                logger.warning(f"[CHAT:{req.session_id[:8]}] skill_tags timeout(8s)，跳过")
+
         # 对话结束后，异步写入 PostgreSQL KG（fire-and-forget，不阻塞 SSE）
         if full_text and req.message not in ("__INIT__", "__SWITCH__"):
             try:
@@ -516,7 +619,8 @@ async def assistant_chat(
                         skill_name=skill_name,
                     )
                 )
-                logger.info(f"[KG] assistant 对话异步触发: session_id={req.session_id}")
+                _log_pfx = f"[CHAT:{req.session_id[:8]}]" if req.is_chat_session else "[KG]"
+                logger.info(f"{_log_pfx} KG write triggered | session_id={req.session_id}")
             except Exception as sm_err:
                 logger.warning(f"[KG] assistant 触发失败: {sm_err}")
 
