@@ -23,7 +23,7 @@ from datetime import datetime, timezone
 from pydantic import BaseModel
 
 from database.connection import get_db
-from database.models import AnalysisResult, StrategyAnalysis, User
+from database.models import AnalysisResult, StrategyAnalysis, User, Session
 from auth.jwt_handler import get_current_user_id
 
 logger = logging.getLogger(__name__)
@@ -273,6 +273,47 @@ async def _generate_suggestions(context: str, skill_name: str) -> List[str]:
 
 
 # ─── Endpoint ─────────────────────────────────────────────────────────────────
+
+# ── Chat Session：创建 ─────────────────────────────────────────────────────────
+
+class InitChatSessionResponse(BaseModel):
+    session_id: str
+    created_at: str
+
+
+@router.post("/assistant/init-chat-session", response_model=InitChatSessionResponse)
+async def init_chat_session(
+    db: AsyncSession = Depends(get_db),
+    user_id: str = Depends(get_current_user_id),
+):
+    """
+    创建 chat 类型 session，立即返回，无任何 AI 调用。
+    Phase 1 of chat session implementation.
+    """
+    logger.info(f"[CHAT:new] init_chat_session | user_id={user_id[:8]}")
+
+    try:
+        session = Session(
+            user_id=uuid.UUID(user_id),
+            session_type="chat",
+            status="processing",
+            finalize_status="pending",
+            image_status="none",
+        )
+        db.add(session)
+        await db.commit()
+        await db.refresh(session)
+
+        session_id = str(session.id)
+        created_at = session.created_at.isoformat() if session.created_at else datetime.now(timezone.utc).isoformat()
+
+        logger.info(f"[CHAT:{session_id[:8]}] session created | user_id={user_id[:8]}")
+        return InitChatSessionResponse(session_id=session_id, created_at=created_at)
+
+    except Exception as e:
+        logger.error(f"[CHAT:new] init_chat_session failed | user_id={user_id[:8]} error={str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to create chat session")
+
 
 @router.post("/assistant/chat")
 async def assistant_chat(
