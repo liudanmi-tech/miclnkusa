@@ -54,8 +54,16 @@ class Session(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
+    # ── Chat / Live / Review 通用类型字段 ────────────────────────────────────────
+    session_type          = Column(String(20), default="review", server_default="review")  # 'review' | 'live' | 'chat'
+
+    # ── Chat Session 专用字段 ────────────────────────────────────────────────────
+    finalize_status       = Column(String(20), default="pending", server_default="pending")  # pending | completed | failed
+    mood_state            = Column(String(50))         # Happy/Frustrated/Sad/... Gemini 分析完整对话后生成
+    emotion_type          = Column(String(100))        # workplace_stress / relationship_tension / ...
+    emotion_intensity     = Column(Integer)            # 1-10
+
     # ── Live Mode 专用字段 ──────────────────────────────────────────────────────
-    session_type          = Column(String(20), default="review", server_default="review")  # 'review' | 'live'
     card_title            = Column(String(100))        # Gemini 生成的 30 字标题（Live Mode post-processing）
     live_summary          = Column(Text)               # Gemini 生成的 200 字总结
     summary_status        = Column(String(20))         # processing | completed | failed
