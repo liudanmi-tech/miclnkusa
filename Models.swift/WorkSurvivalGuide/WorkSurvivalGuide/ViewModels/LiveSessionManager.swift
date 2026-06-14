@@ -36,6 +36,7 @@ struct LiveTurnItem: Identifiable {
     let speaker: String         // "user" | "other"
     let text: String
     let timestampMs: Int
+    var profileName: String?    // 由 speaker_identified SSE 到达后填入
 }
 
 // MARK: - LiveSessionManager
@@ -50,6 +51,8 @@ class LiveSessionManager: NSObject, ObservableObject {
     @Published var isGlassesAvailable: Bool = false
     @Published var transcript: [LiveTurnItem] = []
     @Published var elapsedSeconds: Int = 0
+    /// speakerLabel → 档案姓名，speaker_identified SSE 到达后填入
+    @Published var speakerProfiles: [String: String] = [:]
 
     // MARK: - Session 信息
 
@@ -70,6 +73,8 @@ class LiveSessionManager: NSObject, ObservableObject {
     // MARK: - Private — 音频
 
     private var audioEngine: AVAudioEngine?
+    /// PCM 格式转换器（重用，避免每次回调重建，保持采样率转换的内部状态）
+    private var audioConverter: AVAudioConverter?
     /// PCM 缓冲区，累积到 chunkSize 再发送
     private var audioCaptureBuffer = Data()
     /// 约 100ms：16000 Hz × 0.1s × 2 bytes/sample = 3200 字节
@@ -132,9 +137,14 @@ class LiveSessionManager: NSObject, ObservableObject {
         self.sessionId = sessionId
         self.authToken = token
         self.transcript = []
+        self.speakerProfiles = [:]
         self.audioCaptureBuffer = Data()
         self.elapsedSeconds = 0
         self.sessionState = .connecting
+
+        #if DEBUG || INTERNALTEST
+        DebugLogger.shared.startLiveSession(sessionId: sessionId)
+        #endif
 
         setupAudioSession()
         connectWebSocket(sessionId: sessionId, token: token)
@@ -151,6 +161,10 @@ class LiveSessionManager: NSObject, ObservableObject {
     /// 停止 Live 录音（用户点击结束后调用）
     func stopSession() {
         sessionState = .ending
+        #if DEBUG || INTERNALTEST
+        DebugLogger.shared.setLiveGeminiStatus("Disconnected")
+        DebugLogger.shared.endLiveSession()
+        #endif
         stopAudioCapture()
         elapsedTimer?.invalidate()
         elapsedTimer = nil
@@ -161,6 +175,16 @@ class LiveSessionManager: NSObject, ObservableObject {
         wsURLSession?.invalidateAndCancel()
         wsURLSession = nil
         DispatchQueue.main.async { self.sessionState = .ended }
+    }
+
+    // MARK: - 声纹识别
+
+    /// speaker_identified SSE 到达时调用：更新映射并回填已有 transcript
+    func updateSpeakerProfile(speakerLabel: String, profileName: String) {
+        speakerProfiles[speakerLabel] = profileName
+        for i in transcript.indices where transcript[i].speakerLabel == speakerLabel {
+            transcript[i].profileName = profileName
+        }
     }
 
     // MARK: - AVAudioSession 配置
@@ -193,6 +217,21 @@ class LiveSessionManager: NSObject, ObservableObject {
     // MARK: - AVAudioEngine 采集
 
     private func startAudioCapture() {
+        // 先请求麦克风权限：权限被拒时 iOS 仍会触发 tap 但返回全零 PCM（静音）
+        AVAudioSession.sharedInstance().requestRecordPermission { [weak self] granted in
+            guard granted else {
+                print("[LiveSession] 麦克风权限被拒绝，音频采集中止")
+                DispatchQueue.main.async {
+                    self?.sessionState = .error("麦克风权限未授权")
+                    self?.onWSError?("麦克风权限未授权")
+                }
+                return
+            }
+            DispatchQueue.main.async { self?.startAudioCaptureImpl() }
+        }
+    }
+
+    private func startAudioCaptureImpl() {
         let engine = AVAudioEngine()
         let inputNode = engine.inputNode
         let inputFormat = inputNode.outputFormat(forBus: 0)
@@ -208,10 +247,17 @@ class LiveSessionManager: NSObject, ObservableObject {
             return
         }
 
+        // Converter 只创建一次，复用内部采样率转换状态
+        guard let converter = AVAudioConverter(from: inputFormat, to: targetFormat) else {
+            print("[LiveSession] 无法创建 AVAudioConverter")
+            return
+        }
+        self.audioConverter = converter
+
         // 每次约 1600 帧 = 100ms @16kHz
         inputNode.installTap(onBus: 0, bufferSize: 1600, format: inputFormat) { [weak self] buffer, _ in
             guard let self = self else { return }
-            self.convertAndEnqueue(buffer, from: inputFormat, to: targetFormat)
+            self.convertAndEnqueue(buffer, to: targetFormat)
         }
 
         do {
@@ -225,21 +271,28 @@ class LiveSessionManager: NSObject, ObservableObject {
 
     private func convertAndEnqueue(
         _ buffer: AVAudioPCMBuffer,
-        from inputFormat: AVAudioFormat,
         to targetFormat: AVAudioFormat
     ) {
-        guard let converter = AVAudioConverter(from: inputFormat, to: targetFormat) else { return }
+        guard let converter = self.audioConverter else { return }
 
-        let ratio = targetFormat.sampleRate / inputFormat.sampleRate
+        let ratio = targetFormat.sampleRate / buffer.format.sampleRate
         let outputFrameCount = AVAudioFrameCount(Double(buffer.frameLength) * ratio)
-        guard let outBuf = AVAudioPCMBuffer(pcmFormat: targetFormat, frameCapacity: outputFrameCount) else { return }
+        guard outputFrameCount > 0,
+              let outBuf = AVAudioPCMBuffer(pcmFormat: targetFormat, frameCapacity: outputFrameCount) else { return }
 
+        // consumed flag：确保每个输入 buffer 只被 converter 消费一次
+        var inputConsumed = false
         var convError: NSError?
         converter.convert(to: outBuf, error: &convError) { _, outStatus in
+            if inputConsumed {
+                outStatus.pointee = .noDataNow
+                return nil
+            }
+            inputConsumed = true
             outStatus.pointee = .haveData
             return buffer
         }
-        guard convError == nil, let int16Ptr = outBuf.int16ChannelData else { return }
+        guard convError == nil, outBuf.frameLength > 0, let int16Ptr = outBuf.int16ChannelData else { return }
 
         let byteCount = Int(outBuf.frameLength) * 2
         let pcmData = Data(bytes: int16Ptr[0], count: byteCount)
@@ -258,6 +311,7 @@ class LiveSessionManager: NSObject, ObservableObject {
         audioEngine?.inputNode.removeTap(onBus: 0)
         audioEngine?.stop()
         audioEngine = nil
+        audioConverter = nil
         audioCaptureBuffer = Data()
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
         print("[LiveSession] 音频采集已停止")
@@ -333,10 +387,14 @@ class LiveSessionManager: NSObject, ObservableObject {
                     speakerLabel: speakerLabel,
                     speaker: speaker,
                     text: turnText,
-                    timestampMs: tsMs
+                    timestampMs: tsMs,
+                    profileName: self.speakerProfiles[speakerLabel]
                 )
                 self.transcript.append(item)
                 self.onTranscript?(item)
+                #if DEBUG || INTERNALTEST
+                DebugLogger.shared.setLiveTurnCount(self.transcript.count)
+                #endif
 
             case "error":
                 let msg = json["message"] as? String ?? "Gemini 连接失败"
@@ -365,6 +423,9 @@ extension LiveSessionManager: URLSessionWebSocketDelegate {
         print("[LiveSession] WebSocket 握手成功")
         DispatchQueue.main.async {
             self.sessionState = .active
+            #if DEBUG || INTERNALTEST
+            DebugLogger.shared.setLiveGeminiStatus("Connected ✓")
+            #endif
             // 握手完成后才启动接收循环，避免 Code=57（Socket is not connected）
             self.receiveTask = Task { [weak self] in
                 await self?.receiveLoop()

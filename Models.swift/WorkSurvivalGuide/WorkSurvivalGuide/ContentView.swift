@@ -77,7 +77,17 @@ struct ContentView: View {
                         TourOverlayView()
                             .zIndex(9998)
 
-                        // Debug 悬浮面板已隐藏
+                        // DEV 环境标识（仅 Dev Scheme 可见，Release 包不编译）
+                        #if LIVE_MODE_ENABLED
+                        DevBadgeOverlay()
+                            .zIndex(9999)
+                        #endif
+
+                        // Debug 悬浮面板（仅 DEBUG 构建）
+                        #if DEBUG || INTERNALTEST
+                        DebugPanelView()
+                            .zIndex(9997)
+                        #endif
                     }
                     .ignoresSafeArea(edges: .bottom)
                     .navigationBarHidden(true)

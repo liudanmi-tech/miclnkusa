@@ -28,8 +28,8 @@ struct DebugPanelView: View {
     var body: some View {
         GeometryReader { geo in
             ZStack(alignment: .topTrailing) {
-                // 透明底，填满屏幕，让 overlay 可以接收手势
-                Color.clear
+                // 透明底，仅用于撑开 ZStack 尺寸，不拦截触摸
+                Color.clear.allowsHitTesting(false)
 
                 Group {
                     if isExpanded {
@@ -72,7 +72,11 @@ struct DebugPanelView: View {
                 Text("DBG")
                     .font(.system(size: 10, weight: .black, design: .monospaced))
                     .foregroundColor(.white)
-                if logger.lastError != nil {
+                if logger.isLiveMode {
+                    Circle()
+                        .fill(Color(hex: "#34D399"))
+                        .frame(width: 6, height: 6)
+                } else if logger.lastError != nil {
                     Circle()
                         .fill(Color(hex: "#F87171"))
                         .frame(width: 6, height: 6)
@@ -164,21 +168,31 @@ struct DebugPanelView: View {
         ScrollView(.vertical, showsIndicators: false) {
             VStack(alignment: .leading, spacing: 8) {
 
+                // Mode badge
+                modeRow
+
                 // Session ID
                 sessionRow
+
+                // Live mode flow nodes
+                if logger.isLiveMode {
+                    liveStatusSection
+                }
 
                 // Emoji User ID (visible once emoji is loaded)
                 if logger.emojiUserId != "—" {
                     emojiUserRow
                 }
 
-                // Status grid
-                VStack(spacing: 4) {
-                    statusRow(icon: "arrow.up.circle.fill",   label: "Upload",   value: logger.uploadStatus,   color: "#60A5FA")
-                    statusRow(icon: "waveform",               label: "Analysis", value: logger.analysisStatus, color: "#A78BFA")
-                    statusRow(icon: "target",                 label: "Skills",   value: logger.skillStatus,    color: "#FBBF24")
-                    statusRow(icon: "photo.stack.fill",       label: "Images",   value: logger.imageStatus,    color: "#34D399")
-                    statusRow(icon: "face.smiling.fill",      label: "Emoji",    value: "\(logger.emojiSlot) \(logger.emojiUrlStatus)", color: "#F472B6")
+                // Status grid (Post-Analysis)
+                if !logger.isLiveMode {
+                    VStack(spacing: 4) {
+                        statusRow(icon: "arrow.up.circle.fill",   label: "Upload",   value: logger.uploadStatus,   color: "#60A5FA")
+                        statusRow(icon: "waveform",               label: "Analysis", value: logger.analysisStatus, color: "#A78BFA")
+                        statusRow(icon: "target",                 label: "Skills",   value: logger.skillStatus,    color: "#FBBF24")
+                        statusRow(icon: "photo.stack.fill",       label: "Images",   value: logger.imageStatus,    color: "#34D399")
+                        statusRow(icon: "face.smiling.fill",      label: "Emoji",    value: "\(logger.emojiSlot) \(logger.emojiUrlStatus)", color: "#F472B6")
+                    }
                 }
 
                 // Last error
@@ -230,6 +244,92 @@ struct DebugPanelView: View {
             }
             .padding(12)
         }
+    }
+
+    private var modeRow: some View {
+        HStack(spacing: 6) {
+            if logger.isLiveMode {
+                Image(systemName: "antenna.radiowaves.left.and.right")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundColor(Color(hex: "#34D399"))
+                Text("LIVE MODE")
+                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                    .foregroundColor(Color(hex: "#34D399"))
+                Circle().fill(Color(hex: "#34D399")).frame(width: 5, height: 5)
+            } else {
+                Image(systemName: "mic.fill")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundColor(Color(hex: "#A78BFA"))
+                Text("POST-ANALYSIS")
+                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                    .foregroundColor(Color(hex: "#A78BFA"))
+            }
+            Spacer()
+        }
+        .padding(10)
+        .background(Color.white.opacity(0.04))
+        .cornerRadius(8)
+    }
+
+    private var liveStatusSection: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("LIVE FLOW NODES")
+                .font(.system(size: 9, weight: .bold, design: .monospaced))
+                .foregroundColor(Color.white.opacity(0.3))
+                .padding(.bottom, 2)
+
+            statusRow(icon: "antenna.radiowaves.left.and.right",
+                      label: "Gemini",
+                      value: logger.liveGeminiStatus,
+                      color: "#34D399")
+
+            statusRow(icon: "dot.radiowaves.right",
+                      label: "SSE",
+                      value: logger.liveSSEStatus,
+                      color: "#60A5FA")
+
+            statusRow(icon: "text.bubble.fill",
+                      label: "Turns",
+                      value: "\(logger.liveTurnCount)",
+                      color: "#A78BFA")
+
+            statusRow(icon: "sparkles",
+                      label: "Hints",
+                      value: "\(logger.liveSuggestionCount)",
+                      color: "#FBBF24")
+
+            statusRow(icon: "target",
+                      label: "Skills",
+                      value: logger.liveSkillCount == 0
+                          ? "—"
+                          : "\(logger.liveSkillCount): \(logger.liveSkillNames.prefix(2).joined(separator: ","))",
+                      color: "#F472B6")
+
+            statusRow(icon: "square.stack.3d.up.fill",
+                      label: "Segments",
+                      value: "\(logger.liveSegmentCount)",
+                      color: "#818CF8")
+
+            statusRow(icon: "photo.circle.fill",
+                      label: "Image",
+                      value: logger.liveImageStatus,
+                      color: "#FB923C")
+
+            statusRow(icon: "arrow.down.circle.fill",
+                      label: "SSE Recv",
+                      value: "\(logger.liveSSERawEventCount)",
+                      color: "#34D399")
+
+            statusRow(icon: "exclamationmark.triangle.fill",
+                      label: "Parse Err",
+                      value: logger.liveSSEParseErrors == 0
+                          ? "0"
+                          : "❌ \(logger.liveSSEParseErrors)",
+                      color: logger.liveSSEParseErrors == 0 ? "#6B7280" : "#F87171")
+        }
+        .padding(8)
+        .background(Color(hex: "#34D399").opacity(0.05))
+        .cornerRadius(8)
     }
 
     private var sessionRow: some View {

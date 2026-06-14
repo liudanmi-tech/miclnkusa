@@ -50,19 +50,39 @@ class AppConfig {
         #endif
     }
     
-    /// GCP 美区节点（读写统一）
-    var readBaseURL: String { "https://api.yohomie.art/api/v1" }
+    /// 是否连接测试服（34.74.255.48）
+    /// ⚠️ 只改 DEBUG 块里的 return 值：false = 生产，true = 测试服
+    /// Release 包永远 false，不受影响，App Store 提交安全
+    var useTestServer: Bool {
+#if DEBUG
+return true  // ← 切测试服改 true，切生产改 false
+        #else
+        return false  // Release 包硬编码，禁止修改此行
+        #endif
+    }
 
-    /// GCP 美区节点（读写统一）
-    var writeBaseURL: String { "https://api.yohomie.art/api/v1" }
-    
+    /// API 读接口 baseURL
+    var readBaseURL: String {
+        useTestServer ? "http://34.74.255.48/api/v1" : "https://api.yohomie.art/api/v1"
+    }
+
+    /// API 写接口 baseURL
+    var writeBaseURL: String {
+        useTestServer ? "http://34.74.255.48/api/v1" : "https://api.yohomie.art/api/v1"
+    }
+
+    /// SSE 事件流专用 baseURL（HTTPS 避免 iOS URLSession HTTP 缓冲问题）
+    var sseBaseURL: String {
+        useTestServer ? "https://test-api.yohomie.art" : "https://api.yohomie.art"
+    }
+
     private init() {}
-    
+
     // 切换环境（用于测试）
     func setUseMockData(_ useMock: Bool) {
         UserDefaults.standard.set(useMock, forKey: "use_mock_data")
     }
-    
+
     /// 切换北京只读（用于测试或地区切换）
     func setUseBeijingRead(_ use: Bool) {
         UserDefaults.standard.set(use, forKey: "use_beijing_read")

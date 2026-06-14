@@ -28,6 +28,7 @@ struct DebugLogEntry: Identifiable {
         case network  = "🌐"
         case ui       = "👆"
         case system   = "⚙️"
+        case live     = "📡"
     }
 
     var levelColor: String {
@@ -67,6 +68,21 @@ final class DebugLogger: ObservableObject {
     @Published private(set) var emojiUrlStatus: String = "—"   // nil / presigned / old-api
     /// 用户点击事件列表（最近 20 条）
     @Published private(set) var tapEvents: [String] = []
+
+    /// Live 模式专属状态
+    @Published private(set) var isLiveMode:           Bool     = false
+    @Published private(set) var liveGeminiStatus:     String   = "—"
+    @Published private(set) var liveTurnCount:        Int      = 0
+    @Published private(set) var liveSSEStatus:        String   = "—"
+    @Published private(set) var liveSuggestionCount:  Int      = 0
+    @Published private(set) var liveSkillCount:       Int      = 0
+    @Published private(set) var liveSkillNames:       [String] = []
+    @Published private(set) var liveSegmentCount:     Int      = 0
+    @Published private(set) var liveImageStatus:      String   = "—"
+    /// SSE 原始事件收到数（JSON 解析前）
+    @Published private(set) var liveSSERawEventCount: Int      = 0
+    /// SSE JSON 解析失败次数
+    @Published private(set) var liveSSEParseErrors:   Int      = 0
 
     private init() { registerNotifications() }
 
@@ -134,19 +150,109 @@ final class DebugLogger: ObservableObject {
         }
     }
 
+    // MARK: - Live Mode API
+
+    /// 开始 Live 会话，重置所有 Live 计数器
+    func startLiveSession(sessionId: String) {
+        run {
+            self.isLiveMode          = true
+            self.sessionId           = sessionId
+            self.liveGeminiStatus    = "Connecting…"
+            self.liveTurnCount       = 0
+            self.liveSSEStatus       = "Connecting…"
+            self.liveSuggestionCount = 0
+            self.liveSkillCount      = 0
+            self.liveSkillNames      = []
+            self.liveSegmentCount    = 0
+            self.liveImageStatus     = "—"
+            self.liveSSERawEventCount = 0
+            self.liveSSEParseErrors  = 0
+            self.lastError           = nil
+            self.append(.info, .live, "Live session: \(sessionId.prefix(8))")
+        }
+    }
+
+    func endLiveSession() {
+        run { self.isLiveMode = false }
+    }
+
+    func setLiveGeminiStatus(_ s: String) {
+        run {
+            self.liveGeminiStatus = s
+            self.append(.info, .live, "Gemini: \(s)")
+        }
+    }
+
+    func setLiveSSEStatus(_ s: String) {
+        run {
+            self.liveSSEStatus = s
+            self.append(.info, .live, "SSE: \(s)")
+        }
+    }
+
+    func setLiveTurnCount(_ n: Int) {
+        run { self.liveTurnCount = n }
+    }
+
+    func setLiveSuggestionCount(_ n: Int) {
+        run { self.liveSuggestionCount = n }
+    }
+
+    func setLiveSkillMatch(count: Int, names: [String]) {
+        run {
+            self.liveSkillCount = count
+            self.liveSkillNames = names
+            let nameStr = names.prefix(3).joined(separator: ", ")
+            self.append(.success, .live, "Skills \(count): \(nameStr)")
+        }
+    }
+
+    func setLiveSegmentCount(_ n: Int) {
+        run { self.liveSegmentCount = n }
+    }
+
+    func setLiveImageStatus(_ s: String) {
+        run {
+            self.liveImageStatus = s
+            self.append(.info, .live, "Image: \(s)")
+        }
+    }
+
+    func incLiveSSERawEvent() {
+        run { self.liveSSERawEventCount += 1 }
+    }
+
+    func incLiveSSEParseError(dataSnippet: String) {
+        run {
+            self.liveSSEParseErrors += 1
+            self.append(.error, .live, "SSE parse err: \(dataSnippet.prefix(40))")
+        }
+    }
+
     func clear() {
         run {
             self.logs.removeAll()
-            self.sessionId     = nil
-            self.uploadStatus  = "—"
-            self.analysisStatus = "—"
-            self.skillStatus   = "—"
-            self.imageStatus   = "—"
-            self.lastError     = nil
-            self.emojiUserId   = "—"
-            self.emojiSlot     = "—"
-            self.emojiUrlStatus = "—"
+            self.sessionId           = nil
+            self.uploadStatus        = "—"
+            self.analysisStatus      = "—"
+            self.skillStatus         = "—"
+            self.imageStatus         = "—"
+            self.lastError           = nil
+            self.emojiUserId         = "—"
+            self.emojiSlot           = "—"
+            self.emojiUrlStatus      = "—"
             self.tapEvents.removeAll()
+            self.isLiveMode          = false
+            self.liveGeminiStatus    = "—"
+            self.liveTurnCount       = 0
+            self.liveSSEStatus       = "—"
+            self.liveSuggestionCount = 0
+            self.liveSkillCount      = 0
+            self.liveSkillNames      = []
+            self.liveSegmentCount    = 0
+            self.liveImageStatus     = "—"
+            self.liveSSERawEventCount = 0
+            self.liveSSEParseErrors  = 0
         }
     }
 

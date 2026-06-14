@@ -8,6 +8,7 @@
 import SwiftUI
 import PhotosUI
 import UIKit
+import AVFoundation
 
 // MARK: - UITextField Wrapper
 struct UITextFieldWrapper: UIViewRepresentable {
@@ -364,6 +365,12 @@ struct ProfileEditView: View {
                     }
                     .padding(.horizontal, 24)
                     } // end if !taskListVM.tasks.isEmpty
+
+                    // 声纹注册（仅在编辑已有档案时显示）
+                    if let existingProfile = profile {
+                        VoiceprintEnrollSection(profileId: existingProfile.id)
+                            .padding(.horizontal, 24)
+                    }
 
                     // Emoji 风格选择（始终可见）
                     VStack(alignment: .leading, spacing: 8) {
@@ -759,5 +766,243 @@ class ProfileEditViewModel: ObservableObject {
         audioStartTime = profile.audioStartTime
         audioEndTime = profile.audioEndTime
         audioUrl = profile.audioUrl
+    }
+}
+
+// MARK: - Voiceprint Enrollment
+
+private enum VPEnrollState {
+    case idle
+    case recording
+    case uploading
+    case success
+    case failed(String)
+}
+
+private class VoiceprintEnrollVM: ObservableObject {
+    @Published var state: VPEnrollState = .idle
+    @Published var elapsed: Double = 0
+
+    let minDuration: Double = 3.0
+    let maxDuration: Double = 10.0
+
+    private var profileId: String = ""
+    private var engine: AVAudioEngine?
+    private var converter: AVAudioConverter?
+    private let pcmLock = NSLock()
+    private var _pcmBuffer = Data()
+    private var elapsedTimer: Timer?
+
+    func startRecording(profileId: String) {
+        self.profileId = profileId
+        AVAudioSession.sharedInstance().requestRecordPermission { [weak self] granted in
+            DispatchQueue.main.async {
+                guard granted else {
+                    self?.state = .failed("Microphone permission denied")
+                    return
+                }
+                self?._startImpl()
+            }
+        }
+    }
+
+    private func _startImpl() {
+        pcmLock.lock(); _pcmBuffer = Data(); pcmLock.unlock()
+        elapsed = 0
+
+        let session = AVAudioSession.sharedInstance()
+        do {
+            // Must match LiveSessionManager audio chain exactly so ECAPA-TDNN embeddings are compatible
+            try session.setCategory(.playAndRecord, mode: .voiceChat,
+                                    options: [.allowBluetooth, .allowBluetoothA2DP, .defaultToSpeaker])
+            try session.setActive(true)
+            try session.setPreferredSampleRate(16000)
+            if let hfpInput = session.availableInputs?.first(where: { $0.portType == .bluetoothHFP }) {
+                try session.setPreferredInput(hfpInput)
+            }
+        } catch {
+            state = .failed("Audio session: \(error.localizedDescription)")
+            return
+        }
+
+        let eng = AVAudioEngine()
+        let inputNode = eng.inputNode
+        let inputFormat = inputNode.outputFormat(forBus: 0)
+
+        guard let targetFormat = AVAudioFormat(
+            commonFormat: .pcmFormatInt16, sampleRate: 16000, channels: 1, interleaved: true
+        ), let conv = AVAudioConverter(from: inputFormat, to: targetFormat) else {
+            state = .failed("Cannot create audio converter")
+            return
+        }
+        self.converter = conv
+
+        inputNode.installTap(onBus: 0, bufferSize: 1600, format: inputFormat) { [weak self] buffer, _ in
+            self?._appendPCM(buffer, targetFormat: targetFormat)
+        }
+
+        do {
+            try eng.start()
+        } catch {
+            state = .failed("Audio engine: \(error.localizedDescription)")
+            return
+        }
+        self.engine = eng
+        state = .recording
+
+        elapsedTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
+            guard let self = self else { return }
+            self.elapsed += 0.1
+            if self.elapsed >= self.maxDuration {
+                self.stopAndUpload()
+            }
+        }
+    }
+
+    private func _appendPCM(_ buffer: AVAudioPCMBuffer, targetFormat: AVAudioFormat) {
+        guard let conv = self.converter else { return }
+        let ratio = targetFormat.sampleRate / buffer.format.sampleRate
+        let frameCount = AVAudioFrameCount(Double(buffer.frameLength) * ratio)
+        guard frameCount > 0,
+              let outBuf = AVAudioPCMBuffer(pcmFormat: targetFormat, frameCapacity: frameCount) else { return }
+
+        var consumed = false; var convErr: NSError?
+        conv.convert(to: outBuf, error: &convErr) { _, status in
+            if consumed { status.pointee = .noDataNow; return nil }
+            consumed = true; status.pointee = .haveData; return buffer
+        }
+        guard convErr == nil, outBuf.frameLength > 0, let ptr = outBuf.int16ChannelData else { return }
+        let data = Data(bytes: ptr[0], count: Int(outBuf.frameLength) * 2)
+        pcmLock.lock(); _pcmBuffer.append(data); pcmLock.unlock()
+    }
+
+    func stopAndUpload() {
+        _stopCapture()
+        state = .uploading
+        pcmLock.lock(); let captured = _pcmBuffer; pcmLock.unlock()
+        let pid = profileId
+        Task {
+            do {
+                try await NetworkManager.shared.enrollVoiceprintFromPCM(profileId: pid, pcmData: captured)
+                await MainActor.run { self.state = .success }
+            } catch {
+                await MainActor.run { self.state = .failed(error.localizedDescription) }
+            }
+        }
+    }
+
+    private func _stopCapture() {
+        elapsedTimer?.invalidate(); elapsedTimer = nil
+        engine?.inputNode.removeTap(onBus: 0)
+        engine?.stop(); engine = nil; converter = nil
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+    }
+}
+
+private struct VoiceprintEnrollSection: View {
+    let profileId: String
+    @StateObject private var vm = VoiceprintEnrollVM()
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Voice ID")
+                    .font(.system(size: 16, weight: .bold, design: .rounded))
+                    .foregroundColor(AppColors.headerText)
+                Text("Optional")
+                    .font(.system(size: 12, design: .rounded))
+                    .foregroundColor(AppColors.secondaryText)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.gray.opacity(0.12))
+                    .cornerRadius(4)
+            }
+            stateView
+        }
+    }
+
+    @ViewBuilder private var stateView: some View {
+        switch vm.state {
+        case .idle:
+            Button(action: { vm.startRecording(profileId: profileId) }) {
+                HStack {
+                    Image(systemName: "waveform.circle")
+                        .font(.system(size: 16))
+                        .foregroundColor(AppColors.secondaryText)
+                    Text("Record voice for speaker recognition")
+                        .font(.system(size: 14, design: .rounded))
+                        .foregroundColor(AppColors.secondaryText)
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 14))
+                        .foregroundColor(AppColors.secondaryText)
+                }
+                .padding()
+                .background(Color.gray.opacity(0.1))
+                .cornerRadius(8)
+            }
+
+        case .recording:
+            HStack {
+                Circle().fill(Color.red).frame(width: 8, height: 8)
+                Text(String(format: "%.1fs / 10s", vm.elapsed))
+                    .font(.system(size: 14, design: .rounded))
+                    .foregroundColor(AppColors.primaryText)
+                Spacer()
+                Button("Save") { vm.stopAndUpload() }
+                    .font(.system(size: 14, weight: .semibold, design: .rounded))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 7)
+                    .background(vm.elapsed >= vm.minDuration ? Color.blue : Color.blue.opacity(0.35))
+                    .cornerRadius(8)
+                    .disabled(vm.elapsed < vm.minDuration)
+            }
+            .padding()
+            .background(Color.red.opacity(0.07))
+            .cornerRadius(8)
+
+        case .uploading:
+            HStack {
+                ProgressView().scaleEffect(0.8)
+                Text("Saving voice ID...")
+                    .font(.system(size: 14, design: .rounded))
+                    .foregroundColor(AppColors.secondaryText)
+            }
+            .padding()
+            .background(Color.gray.opacity(0.08))
+            .cornerRadius(8)
+
+        case .success:
+            HStack {
+                Image(systemName: "checkmark.circle.fill").foregroundColor(.green)
+                Text("Voice ID saved")
+                    .font(.system(size: 14, design: .rounded))
+                    .foregroundColor(.green)
+                Spacer()
+                Button("Re-record") { vm.state = .idle }
+                    .font(.system(size: 12, design: .rounded))
+                    .foregroundColor(AppColors.secondaryText)
+            }
+            .padding()
+            .background(Color.green.opacity(0.07))
+            .cornerRadius(8)
+
+        case .failed(let msg):
+            HStack {
+                Image(systemName: "xmark.circle.fill").foregroundColor(.red)
+                Text(msg)
+                    .font(.system(size: 13, design: .rounded))
+                    .foregroundColor(.red)
+                    .lineLimit(2)
+                Spacer()
+                Button("Retry") { vm.state = .idle }
+                    .font(.system(size: 12, design: .rounded))
+                    .foregroundColor(AppColors.secondaryText)
+            }
+            .padding()
+            .background(Color.red.opacity(0.07))
+            .cornerRadius(8)
+        }
     }
 }

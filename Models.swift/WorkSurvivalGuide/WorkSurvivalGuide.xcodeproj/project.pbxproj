@@ -452,7 +452,7 @@
 				INFOPLIST_KEY_LSApplicationCategoryType = "";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Chattoon listens to your voice to generate personalized AI comic scenes from your conversations. Recordings are processed privately and never stored or shared.";
-				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "需要保存策略分析图片到相册";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Chattoon saves AI-generated images to your photo library so you can keep and share your moments.";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Chattoon uses speech recognition to transcribe your voice messages into text for the AI Assistant.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -466,6 +466,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
+				"OTHER_SWIFT_FLAGS[arch=*]" = "-D LIVE_MODE_ENABLED";
 				PRODUCT_BUNDLE_IDENTIFIER = com.liudan.WorkSurvivalGuide;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -490,7 +491,7 @@
 				INFOPLIST_KEY_LSApplicationCategoryType = "";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Chattoon listens to your voice to generate personalized AI comic scenes from your conversations. Recordings are processed privately and never stored or shared.";
-				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "需要保存策略分析图片到相册";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Chattoon saves AI-generated images to your photo library so you can keep and share your moments.";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Chattoon uses speech recognition to transcribe your voice messages into text for the AI Assistant.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -504,7 +505,6 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				"OTHER_SWIFT_FLAGS[arch=*]" = " -DINTERNALTEST";
 				PRODUCT_BUNDLE_IDENTIFIER = com.liudan.WorkSurvivalGuide;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;

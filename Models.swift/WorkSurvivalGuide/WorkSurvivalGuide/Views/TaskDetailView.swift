@@ -18,6 +18,7 @@ struct TaskDetailView: View {
     @State private var showReportMenu = false
     @State private var reportSubmitted = false
     @State private var showSummarySheet = false
+    @State private var showLiveReplaySheet = false
     @State private var strategyIsLoading = false
     @AppStorage("ai_disclaimer_shown") private var aiDisclaimerShown = false
     @State private var showAIDisclaimer = false
@@ -53,7 +54,14 @@ struct TaskDetailView: View {
                         // ── Info card ──
                         MomentInfoCard(
                             sceneDescription: currentSceneDescription,
-                            onSummaryTap: { showSummarySheet = true },
+                            isLive: detail?.sessionType == "live" || task.status == .completed,
+                            onSummaryTap: {
+                                if detail?.sessionType == "live" || task.status == .completed {
+                                    showLiveReplaySheet = true
+                                } else {
+                                    showSummarySheet = true
+                                }
+                            },
                             audioPlayer: audioPlayer,
                             moodEmoji: moodEmoji,
                             moodEmojiUrl: moodEmojiUrl,
@@ -173,6 +181,12 @@ struct TaskDetailView: View {
                     dialogues: detail?.dialogues ?? []
                 )
             }
+            .sheet(isPresented: $showLiveReplaySheet) {
+                LiveReplaySheet(
+                    dialogues: detail?.dialogues ?? [],
+                    skillCards: strategySkillCards ?? []
+                )
+            }
             .alert("About AI Content", isPresented: $showAIDisclaimer) {
                 Button("Got it", role: .cancel) { }
             } message: {
@@ -281,7 +295,7 @@ struct TaskDetailView: View {
 
     private func loadAll() {
         loadTaskDetail()
-        if task.status == .archived {
+        if task.status == .archived || task.status == .completed {
             loadStrategyAnalysis()
         }
     }
@@ -389,6 +403,7 @@ struct TaskDetailView: View {
 
 private struct MomentInfoCard: View {
     let sceneDescription: String?
+    let isLive: Bool
     let onSummaryTap: () -> Void
     @ObservedObject var audioPlayer: SessionAudioPlayerService
     let moodEmoji: String?
@@ -724,6 +739,245 @@ private struct SummarySheet: View {
             }
         }
         .preferredColorScheme(.dark)
+    }
+}
+
+// MARK: - LiveReplaySheet
+// 对话回放页：复刻 LiveSessionView 布局，去掉录制控件（计时、设备状态、结束按钮）
+
+private struct LiveReplaySheet: View {
+    let dialogues: [DialogueItem]
+    let skillCards: [SkillCard]
+    @Environment(\.dismiss) private var dismiss
+
+    // 过滤掉 emotion/mental_health 类卡片，只展示技能策略卡
+    private var strategyCards: [SkillCard] {
+        skillCards.filter { $0.contentType != "emotion" && $0.contentType != "mental_health" }
+    }
+
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+            VStack(spacing: 0) {
+                replayHeader
+                chatArea
+            }
+        }
+        .preferredColorScheme(.dark)
+    }
+
+    // MARK: - 顶部栏（无设备/计时/REC）
+    private var replayHeader: some View {
+        HStack {
+            Spacer()
+            Text("对话回放")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundColor(.white)
+            Spacer()
+            Button("完成") { dismiss() }
+                .font(.system(size: 15, weight: .medium))
+                .foregroundColor(Color(hex: "#5E9BF5"))
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 14)
+        .background(Color(white: 0.07))
+    }
+
+    // MARK: - 对话流区域
+    private var chatArea: some View {
+        ScrollView {
+            LazyVStack(spacing: 10) {
+                if dialogues.isEmpty {
+                    VStack(spacing: 12) {
+                        Image(systemName: "bubble.left.and.bubble.right")
+                            .font(.system(size: 36))
+                            .foregroundColor(.white.opacity(0.12))
+                        Text("暂无对话记录")
+                            .font(.system(size: 14))
+                            .foregroundColor(.white.opacity(0.25))
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, 60)
+                } else {
+                    ForEach(Array(dialogues.enumerated()), id: \.offset) { _, dialogue in
+                        ReplayTurnBubble(dialogue: dialogue)
+                        if let sug = dialogue.suggestion, !sug.isEmpty {
+                            ReplaySuggestionBubble(text: sug)
+                        }
+                    }
+
+                    // 技能卡片区（在对话流末尾）
+                    if !strategyCards.isEmpty {
+                        skillCardsSection
+                    }
+                }
+
+                Color.clear.frame(height: 1)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 14)
+        }
+    }
+
+    // MARK: - 技能卡片区块
+    private var skillCardsSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Rectangle()
+                    .fill(Color.white.opacity(0.15))
+                    .frame(height: 1)
+                Text("Session Skills")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.4))
+                    .textCase(.uppercase)
+                Rectangle()
+                    .fill(Color.white.opacity(0.15))
+                    .frame(height: 1)
+            }
+            .padding(.vertical, 6)
+
+            ForEach(strategyCards) { card in
+                ReplaySkillCardView(card: card)
+            }
+        }
+    }
+}
+
+// MARK: - 对话气泡（复刻 LiveSessionView TurnBubble）
+
+private struct ReplayTurnBubble: View {
+    let dialogue: DialogueItem
+    private var isMe: Bool { dialogue.isMe ?? false }
+
+    // 将 "Speaker_1" 映射为 "说话人A"
+    private var displayLabel: String {
+        let letters = ["A", "B", "C", "D", "E"]
+        if let suffix = dialogue.speaker.components(separatedBy: "_").last,
+           let n = Int(suffix), n >= 1, n - 1 < letters.count {
+            return "说话人\(letters[n - 1])"
+        }
+        return dialogue.speaker
+    }
+
+    var body: some View {
+        HStack(alignment: .bottom, spacing: 0) {
+            if isMe { Spacer(minLength: 60) }
+            VStack(alignment: isMe ? .trailing : .leading, spacing: 3) {
+                if !isMe {
+                    Text(displayLabel)
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundColor(.white.opacity(0.38))
+                        .padding(.leading, 4)
+                }
+                Text(dialogue.content)
+                    .font(.system(size: 14))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 9)
+                    .background(
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .fill(isMe ? Color(white: 0.20) : Color(white: 0.16))
+                    )
+                    .frame(maxWidth: .infinity, alignment: isMe ? .trailing : .leading)
+            }
+            if !isMe { Spacer(minLength: 60) }
+        }
+    }
+}
+
+// MARK: - AI 建议气泡（复刻 LiveSessionView InlineSuggestionBubble）
+
+private struct ReplaySuggestionBubble: View {
+    let text: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            ZStack {
+                Circle().fill(Color(white: 0.22)).frame(width: 28, height: 28)
+                Text("AI")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundColor(.white.opacity(0.7))
+            }
+            Text(text)
+                .font(.system(size: 13))
+                .foregroundColor(.white.opacity(0.82))
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .background(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(Color(white: 0.18))
+                )
+            Spacer(minLength: 60)
+        }
+    }
+}
+
+// MARK: - 技能卡片（复刻 LiveSessionView LiveSkillCardView，适配 SkillCard 模型）
+
+private struct ReplaySkillCardView: View {
+    let card: SkillCard
+
+    private var accentColor: Color {
+        let lc = (card.category ?? "").lowercased()
+        if lc.contains("social") || lc.contains("沟通") || lc.contains("relationships") { return Color(hex: "#4A9EFF") }
+        if lc.contains("language") || lc.contains("语言") { return Color(hex: "#34C759") }
+        if lc.contains("emotion") || lc.contains("情绪") { return Color(hex: "#BF5AF2") }
+        if lc.contains("negotiat") || lc.contains("谈判") { return Color(hex: "#FF9500") }
+        return Color(hex: "#00D4FF")
+    }
+
+    private var iconName: String {
+        let lc = (card.category ?? "").lowercased()
+        if lc.contains("social") || lc.contains("relationships") { return "person.2.fill" }
+        if lc.contains("language") { return "globe" }
+        if lc.contains("emotion") { return "heart.fill" }
+        if lc.contains("negotiat") { return "arrow.left.arrow.right" }
+        return "lightbulb.fill"
+    }
+
+    // 取第一条策略内容作为 advice 展示
+    private var adviceText: String? {
+        card.content?.strategies?.first?.content
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 0) {
+            Rectangle()
+                .fill(accentColor)
+                .frame(width: 3)
+
+            HStack(alignment: .top, spacing: 10) {
+                ZStack {
+                    Circle()
+                        .fill(accentColor.opacity(0.15))
+                        .frame(width: 32, height: 32)
+                    Image(systemName: iconName)
+                        .font(.system(size: 14))
+                        .foregroundColor(accentColor)
+                }
+                .padding(.top, 1)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(card.accordionTitle)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(.white)
+                    if let advice = adviceText, !advice.isEmpty {
+                        Text(advice)
+                            .font(.system(size: 12))
+                            .foregroundColor(.white.opacity(0.72))
+                            .lineLimit(3)
+                    }
+                }
+
+                Spacer()
+            }
+            .padding(.leading, 10)
+            .padding(.trailing, 12)
+            .padding(.vertical, 10)
+        }
+        .background(Color(white: 0.14))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }
 

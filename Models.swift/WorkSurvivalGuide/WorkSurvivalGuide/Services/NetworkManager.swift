@@ -1898,6 +1898,35 @@ class NetworkManager {
         print("✅ [NetworkManager] 多 URL 声纹注册成功 profileId=\(profileId)")
     }
 
+    /// 用实时 PCM 注册声纹（POST /api/v1/profiles/{id}/enroll-voiceprint-pcm）
+    /// pcmData: 16kHz 16-bit mono little-endian PCM（与 live session WebSocket 格式完全一致）
+    func enrollVoiceprintFromPCM(profileId: String, pcmData: Data) async throws {
+        guard hasValidToken() else {
+            throw NSError(domain: "NetworkError", code: 401,
+                          userInfo: [NSLocalizedDescriptionKey: "Please log in first."])
+        }
+        guard let url = URL(string: "\(baseURLForWrite)/profiles/\(profileId)/enroll-voiceprint-pcm") else {
+            throw NSError(domain: "NetworkError", code: -1,
+                          userInfo: [NSLocalizedDescriptionKey: "Invalid URL"])
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(getAuthToken())", forHTTPHeaderField: "Authorization")
+        request.timeoutInterval = 60
+        request.httpBody = pcmData
+
+        print("🌐 [NetworkManager] PCM 声纹注册 profileId=\(profileId) bytes=\(pcmData.count)")
+        let (responseData, response) = try await URLSession.shared.data(for: request)
+        let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard statusCode >= 200 && statusCode < 300 else {
+            let detail = (try? JSONDecoder().decode(FastAPIErrorResponse.self, from: responseData))?.detail
+            throw NSError(domain: "NetworkError", code: statusCode,
+                          userInfo: [NSLocalizedDescriptionKey: detail ?? "声纹注册失败 (HTTP \(statusCode))"])
+        }
+        print("✅ [NetworkManager] PCM 声纹注册成功 profileId=\(profileId)")
+    }
+
     // MARK: - Custom Skills API
 
     /// 生成自定义技能预览（AI 生成 Markdown，不存储）

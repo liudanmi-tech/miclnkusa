@@ -161,10 +161,10 @@ struct TaskItem: Codable, Identifiable {
     }
     
     /// 卡片是否可点击进入详情：
-    /// - status 必须为 archived
+    /// - status 必须为 archived 或 completed（live session 结束后为 completed）
     /// - 有封面图，或者录音超过 15 分钟（图片生成永久失败兜底，允许进入）
     var isReadyToView: Bool {
-        guard status == .archived else { return false }
+        guard status == .archived || status == .completed else { return false }
         if coverImageUrl != nil { return true }
         return Date().timeIntervalSince(startTime) > 15 * 60
     }
@@ -344,6 +344,7 @@ struct TaskDetailResponse: Codable {
     let duration: Int
     let tags: [String]
     let status: String
+    let sessionType: String?  // "live" | "review" | nil
     let emotionScore: Int?
     let speakerCount: Int?
     let dialogues: [DialogueItem]
@@ -363,6 +364,7 @@ struct TaskDetailResponse: Codable {
         case duration
         case tags
         case status
+        case sessionType = "session_type"
         case emotionScore = "emotion_score"
         case speakerCount = "speaker_count"
         case dialogues
@@ -395,6 +397,7 @@ struct TaskDetailResponse: Codable {
         duration = try container.decode(Int.self, forKey: .duration)
         tags = try container.decode([String].self, forKey: .tags)
         status = try container.decode(String.self, forKey: .status)
+        sessionType = try? container.decode(String.self, forKey: .sessionType)
         emotionScore = try? container.decode(Int.self, forKey: .emotionScore)
         speakerCount = try? container.decode(Int.self, forKey: .speakerCount)
         dialogues = try container.decode([DialogueItem].self, forKey: .dialogues)
@@ -416,6 +419,7 @@ struct TaskDetailResponse: Codable {
         duration: Int,
         tags: [String],
         status: String,
+        sessionType: String? = nil,
         emotionScore: Int?,
         speakerCount: Int?,
         dialogues: [DialogueItem],
@@ -434,6 +438,7 @@ struct TaskDetailResponse: Codable {
         self.duration = duration
         self.tags = tags
         self.status = status
+        self.sessionType = sessionType
         self.emotionScore = emotionScore
         self.speakerCount = speakerCount
         self.dialogues = dialogues
@@ -454,13 +459,15 @@ struct DialogueItem: Codable {
     let tone: String
     let timestamp: String?  // 时间戳格式："MM:SS"
     let isMe: Bool?  // 新增：是否是我说的
-    
+    let suggestion: String?  // live session 专用：本条发言的 AI coaching tip
+
     enum CodingKeys: String, CodingKey {
         case speaker
         case content
         case tone
         case timestamp
         case isMe = "is_me"
+        case suggestion
     }
 }
 
