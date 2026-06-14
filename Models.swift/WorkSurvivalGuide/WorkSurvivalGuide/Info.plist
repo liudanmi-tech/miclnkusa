@@ -2,15 +2,18 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>CFBundleDevelopmentRegion</key>
-	<string>en</string>
 	<key>CFBundleGetInfoString</key>
 	<string></string>
-	<key>NSMicrophoneUsageDescription</key>
-	<string>Chattoon listens to your voice to generate personalized AI comic scenes from your conversations. Recordings are processed privately and never stored or shared.</string>
-	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>Chattoon uses speech recognition to transcribe your voice messages into text for the AI Assistant.</string>
-	<key>NSPhotoLibraryAddUsageDescription</key>
-	<string>Chattoon saves AI-generated images to your photo library so you can keep and share your moments.</string>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSExceptionDomains</key>
+		<dict>
+			<key>34.74.255.48</key>
+			<dict>
+				<key>NSExceptionAllowsInsecureHTTPLoads</key>
+				<true/>
+			</dict>
+		</dict>
+	</dict>
 </dict>
 </plist>
