@@ -501,19 +501,29 @@ async def _init_skill_matching(
     message: str,
     user_id: str,
     sse_queue: asyncio.Queue,
+    history: Optional[List[ChatHistoryItem]] = None,
 ) -> None:
     """
-    fire-and-forget：第1轮对话结束后，异步执行技能匹配并 UPSERT strategy_analysis。
+    fire-and-forget：第1/2轮对话结束后，异步执行技能匹配并 UPSERT strategy_analysis。
+    turn=0 时只用当前消息；turn=1 时用完整对话历史（更多上下文提升匹配准确率）。
     匹配完成后向 sse_queue 推送 skill_tags 事件；失败时推送 None 以解除 generator 阻塞。
     """
     id8 = session_id[:8]
-    logger.info(f"[CHAT:{id8}] skill_matching started")
+    logger.info(f"[CHAT:{id8}] skill_matching started | history_len={len(history) if history else 0}")
     try:
         from database.connection import AsyncSessionLocal
         from skills.router import match_skills_v2
         from sqlalchemy import func as sa_func
 
-        transcript_stub = [{"speaker": "user", "text": message}]
+        # turn=1 时用完整历史 + 当前消息，给匹配器更多上下文
+        if history:
+            transcript_stub = [
+                {"speaker": "user" if h.role == "user" else "assistant", "text": h.content}
+                for h in history
+            ]
+            transcript_stub.append({"speaker": "user", "text": message})
+        else:
+            transcript_stub = [{"speaker": "user", "text": message}]
 
         async with AsyncSessionLocal() as db:
             stubs = await match_skills_v2(
@@ -598,10 +608,15 @@ async def assistant_chat(
         logger.info(f"[CHAT:{req.session_id[:8]}] /chat received | is_chat=True turn={_session_turn}")
 
     _sse_skill_queue: Optional[asyncio.Queue] = None
-    if req.is_chat_session and _session_turn == 0 and req.message not in ("__INIT__", "__SWITCH__"):
+    # turn=0：首次匹配（只用第一条消息）
+    # turn=1：用完整对话历史重新匹配，纠正 turn=0 可能的误判（如首句未提谈薪但后续提到）
+    if req.is_chat_session and _session_turn <= 1 and req.message not in ("__INIT__", "__SWITCH__"):
         _sse_skill_queue = asyncio.Queue()
         asyncio.create_task(
-            _init_skill_matching(req.session_id, req.message, user_id, _sse_skill_queue)
+            _init_skill_matching(
+                req.session_id, req.message, user_id, _sse_skill_queue,
+                history=req.history if _session_turn == 1 else None,
+            )
         )
 
     # 1. 取策略分析
