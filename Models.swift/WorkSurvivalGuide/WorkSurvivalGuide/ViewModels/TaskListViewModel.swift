@@ -58,9 +58,9 @@ class TaskListViewModel: ObservableObject {
     /// 加载/刷新后调用：根据 tasks 状态同步 isProcessing（处理 App 重启场景）
     private func reconcileProcessingState() {
         let cutoff = Date().addingTimeInterval(-processingTimeoutSeconds)
-        // 找最近的非终态 session（6 分钟内）
+        // 找最近的非终态 session（6 分钟内）；chat session 不占用录音锁
         let active = tasks.first {
-            ![TaskStatus.archived, .completed, .failed, .burned].contains($0.status)
+            ![TaskStatus.archived, .completed, .failed, .burned, .chatActive].contains($0.status)
             && $0.startTime > cutoff
         }
         if let active {
@@ -252,7 +252,7 @@ class TaskListViewModel: ObservableObject {
             tasks.insert(updatedTask, at: 0)
             print("✅ [TaskListViewModel] 任务已插入到列表顶部")
         }
-        // 终态（完成/失败）→ 解锁录音按钮
+        // 终态（完成/失败）→ 解锁录音按钮；chat session 不持有锁，无需解锁
         if [TaskStatus.archived, .completed, .failed, .burned].contains(updatedTask.status) {
             clearProcessing(for: updatedTask.id)
         }

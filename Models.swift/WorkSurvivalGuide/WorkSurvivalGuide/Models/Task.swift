@@ -15,6 +15,7 @@ enum TaskStatus: String, Codable {
     case completed = "completed"    // Live session 结束（等同 archived，服务端用此值）
     case burned = "burned"          // 已焚毁
     case failed = "failed"          // 分析失败
+    case chatActive = "chat_active" // 对话会话活跃中（本地状态，不同步到服务端）
 }
 
 // 任务数据模型（重命名为 TaskItem 以避免与 Swift 的并发 Task 类型冲突）
@@ -31,6 +32,10 @@ struct TaskItem: Codable, Identifiable {
     let summary: String?             // 对话总结（可选）
     let cardTitle: String?           // 对话核心主题短标题（≤30字，可选）
     let coverImageUrl: String?        // 策略分析首图 URL（可选）
+    let sessionType: String?          // "chat" | "review" | "live" | nil
+    let coverType: String?            // "generated" | "expression" | nil（chat session 专属）
+    let finalizeStatus: String?       // "pending" | "completed" | "failed" | nil
+    let emotionMood: String?          // mood_state from sessions（如 "Frustrated"）
     /// 分析进度文案（仅本地展示，列表 API 不返回；如「上传中」「转写音频…」「匹配了 2 个技能」）
     let progressDescription: String?
     
@@ -48,6 +53,10 @@ struct TaskItem: Codable, Identifiable {
         case summary
         case cardTitle = "card_title"
         case coverImageUrl = "cover_image_url"
+        case sessionType = "session_type"
+        case coverType = "cover_type"
+        case finalizeStatus = "finalize_status"
+        case emotionMood = "mood_state"
         case progressDescription = "progress_description"
     }
     
@@ -65,6 +74,10 @@ struct TaskItem: Codable, Identifiable {
         summary: String? = nil,
         cardTitle: String? = nil,
         coverImageUrl: String? = nil,
+        sessionType: String? = nil,
+        coverType: String? = nil,
+        finalizeStatus: String? = nil,
+        emotionMood: String? = nil,
         progressDescription: String? = nil
     ) {
         self.id = id
@@ -79,6 +92,10 @@ struct TaskItem: Codable, Identifiable {
         self.summary = summary
         self.cardTitle = cardTitle
         self.coverImageUrl = coverImageUrl
+        self.sessionType = sessionType
+        self.coverType = coverType
+        self.finalizeStatus = finalizeStatus
+        self.emotionMood = emotionMood
         self.progressDescription = progressDescription
     }
     
@@ -109,6 +126,10 @@ struct TaskItem: Codable, Identifiable {
         summary = try? container.decode(String.self, forKey: .summary)
         cardTitle = try? container.decode(String.self, forKey: .cardTitle)
         coverImageUrl = try? container.decode(String.self, forKey: .coverImageUrl)
+        sessionType = try? container.decode(String.self, forKey: .sessionType)
+        coverType = try? container.decode(String.self, forKey: .coverType)
+        finalizeStatus = try? container.decode(String.self, forKey: .finalizeStatus)
+        emotionMood = try? container.decode(String.self, forKey: .emotionMood)
         progressDescription = try? container.decodeIfPresent(String.self, forKey: .progressDescription) ?? nil
     }
     
@@ -161,9 +182,12 @@ struct TaskItem: Codable, Identifiable {
     }
     
     /// 卡片是否可点击进入详情：
-    /// - status 必须为 archived 或 completed（live session 结束后为 completed）
-    /// - 有封面图，或者录音超过 15 分钟（图片生成永久失败兜底，允许进入）
+    /// - chat session：有生成图才走 detail；否则重开对话
+    /// - review / live：archived/completed 状态 + 有封面图，或超过 15 分钟兜底
     var isReadyToView: Bool {
+        if sessionType == "chat" {
+            return coverType == "generated" && coverImageUrl != nil
+        }
         guard status == .archived || status == .completed else { return false }
         if coverImageUrl != nil { return true }
         return Date().timeIntervalSince(startTime) > 15 * 60

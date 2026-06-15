@@ -237,6 +237,45 @@ struct TaskListView: View {
                 viewModel.deleteTask(taskId: taskId)
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ChatSessionClosed"))) { notification in
+            guard let sessionId = notification.object as? String else { return }
+            let mood = notification.userInfo?["mood"] as? String
+            if let idx = viewModel.tasks.firstIndex(where: { $0.id == sessionId }) {
+                let cur = viewModel.tasks[idx]
+                let updated = TaskItem(
+                    id: cur.id, title: cur.title, startTime: cur.startTime,
+                    endTime: cur.endTime, duration: cur.duration, tags: cur.tags,
+                    status: .archived, emotionScore: cur.emotionScore,
+                    speakerCount: cur.speakerCount, summary: cur.summary,
+                    cardTitle: cur.cardTitle, coverImageUrl: cur.coverImageUrl,
+                    sessionType: cur.sessionType, coverType: cur.coverType,
+                    finalizeStatus: "pending", emotionMood: mood
+                )
+                viewModel.updateTask(updated)
+            }
+            // 刷新列表以获取最新 finalize_status
+            viewModel.refreshTasks()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ChatSessionGeneratingImage"))) { notification in
+            guard let sessionId = notification.object as? String else { return }
+            if let idx = viewModel.tasks.firstIndex(where: { $0.id == sessionId }) {
+                let cur = viewModel.tasks[idx]
+                let updated = TaskItem(
+                    id: cur.id, title: cur.title, startTime: cur.startTime,
+                    endTime: cur.endTime, duration: cur.duration, tags: cur.tags,
+                    status: .archived, emotionScore: cur.emotionScore,
+                    speakerCount: cur.speakerCount, summary: cur.summary,
+                    cardTitle: cur.cardTitle, coverImageUrl: nil,
+                    sessionType: cur.sessionType, coverType: "generated",
+                    finalizeStatus: "pending", emotionMood: cur.emotionMood
+                )
+                viewModel.updateTask(updated)
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ChatSessionDeleted"))) { notification in
+            guard let sessionId = notification.object as? String else { return }
+            viewModel.deleteTask(taskId: sessionId)
+        }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("TaskProgressUpdated"))) { notification in
             if let dict = notification.userInfo as? [String: String],
                let taskId = dict["taskId"],
@@ -286,6 +325,7 @@ struct TaskCardRow: View {
     @State private var isDeleting = false
     @State private var isCancelling = false
     @State private var navigateToDetail = false
+    @State private var showChatSession = false
 
     private let deleteWidth: CGFloat = 68
     private let snapThreshold: CGFloat = 40
@@ -323,13 +363,14 @@ struct TaskCardRow: View {
 
             // ── 2. 卡片视觉层（禁止 hit-testing，避免遮挡按钮）─────
             ZStack {
+                // detail 页导航（review / live session）
                 NavigationLink(
                     destination: TaskDetailView(task: task),
                     isActive: $navigateToDetail
                 ) { EmptyView() }
 
                 TaskCardView(task: task)
-                    .opacity(task.isReadyToView ? 1.0 : 0.9)
+                    .opacity(task.isReadyToView || task.sessionType == "chat" ? 1.0 : 0.9)
             }
             .offset(x: dragOffset)
             .allowsHitTesting(false) // ← 禁止，让下层按钮可点击
@@ -351,6 +392,14 @@ struct TaskCardRow: View {
                                 if dragOffset != 0 {
                                     withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
                                         dragOffset = 0
+                                    }
+                                } else if task.sessionType == "chat" {
+                                    if task.isReadyToView {
+                                        // 有生成图 → detail 页
+                                        navigateToDetail = true
+                                    } else {
+                                        // 无生成图 → 重入对话
+                                        showChatSession = true
                                     }
                                 } else if task.isReadyToView {
                                     navigateToDetail = true
@@ -414,6 +463,9 @@ struct TaskCardRow: View {
                     }
                 }
         )
+        .fullScreenCover(isPresented: $showChatSession) {
+            ChatAIAssistantView(sessionId: task.id)
+        }
     }
 
     private func performDelete() {

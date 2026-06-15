@@ -28,7 +28,8 @@ struct TaskCardView: View {
 
     /// archived 但封面图还没来：图片正在后台生成中
     private var isGeneratingImages: Bool {
-        task.status == .archived && task.coverImageUrl == nil
+        if task.sessionType == "chat" { return false }
+        return task.status == .archived && task.coverImageUrl == nil
     }
 
     /// Returns local GIF resource name for current loading stage, nil if no GIF should show
@@ -82,7 +83,7 @@ struct TaskCardView: View {
             VStack {
                 Spacer()
                 VStack(alignment: .leading, spacing: 4) {
-                    if task.status == .archived {
+                    if task.status == .archived || task.status == .completed {
                         Text(task.cardTitle ?? task.refinedTitle)
                             .font(.system(size: 12, weight: .medium, design: .rounded))
                             .foregroundColor(.white.opacity(0.95))
@@ -187,6 +188,8 @@ struct TaskCardView: View {
             return isGeneratingImages ? Color(hex: "#4A3F00").opacity(0.9) : Color(white: 0.15)
         case .burned, .failed:
             return Color(hex: "#4A1C1C").opacity(0.9)
+        case .chatActive:
+            return Color(hex: "#1A2B3C").opacity(0.9)
         }
     }
 
@@ -213,6 +216,10 @@ struct TaskCardView: View {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .font(.system(size: 36))
                     .foregroundColor(Color(hex: "#F87171"))
+            case .chatActive:
+                Image(systemName: "bubble.left.and.bubble.right.fill")
+                    .font(.system(size: 32))
+                    .foregroundColor(Color.white.opacity(0.6))
             }
         }
     }
@@ -229,6 +236,8 @@ struct TaskCardView: View {
             return "Burned"
         case .failed:
             return "Analysis Failed"
+        case .chatActive:
+            return "Chat in progress"
         }
     }
 
@@ -242,6 +251,8 @@ struct TaskCardView: View {
             return isGeneratingImages ? Color(hex: "#FBBF24") : Color.white.opacity(0.6)
         case .burned, .failed:
             return Color(hex: "#F87171")
+        case .chatActive:
+            return Color.white.opacity(0.6)
         }
     }
 

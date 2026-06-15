@@ -13,6 +13,26 @@ struct FastAPIErrorResponse: Codable {
     let detail: String
 }
 
+// MARK: - Chat Session Response Types
+
+struct InitChatSessionResponse: Codable {
+    let sessionId: String
+    let createdAt: String
+    enum CodingKeys: String, CodingKey {
+        case sessionId = "session_id"
+        case createdAt = "created_at"
+    }
+}
+
+struct GenerateImageFromChatResponse: Codable {
+    let status: String
+    let sessionId: String
+    enum CodingKeys: String, CodingKey {
+        case status
+        case sessionId = "session_id"
+    }
+}
+
 class NetworkManager {
     static let shared = NetworkManager()
     
@@ -870,10 +890,14 @@ class NetworkManager {
         skillId: String,
         message: String,
         history: [[String: String]],
+        isChatSession: Bool = false,
+        userLanguage: String = "en",
         imageBase64List: [String] = [],
         onMeta:        @escaping @Sendable (String, Bool) -> Void,
         onToken:       @escaping @Sendable (String) -> Void,
         onSuggestions: @escaping @Sendable ([String]) -> Void,
+        onSkillTags:   @escaping @Sendable ([String]) -> Void = { _ in },
+        onMoodState:   @escaping @Sendable (String?) -> Void = { _ in },
         onMeme:        @escaping @Sendable (String) -> Void = { _ in },
         onDone:        @escaping @Sendable () -> Void,
         onError:       @escaping @Sendable (String) -> Void
@@ -897,6 +921,10 @@ class NetworkManager {
             "message": message,
             "history": history
         ]
+        if isChatSession {
+            body["is_chat_session"] = true
+            body["user_language"] = userLanguage
+        }
         if !imageBase64List.isEmpty {
             body["image_base64_list"] = imageBase64List
         }
@@ -936,7 +964,11 @@ class NetworkManager {
                     case "meta":
                         let skillName = event["skill_name"] as? String ?? ""
                         let memUsed   = event["memory_used"] as? Bool ?? false
-                        await MainActor.run { onMeta(skillName, memUsed) }
+                        let mood      = event["mood_state"] as? String
+                        await MainActor.run {
+                            onMeta(skillName, memUsed)
+                            onMoodState(mood)
+                        }
 
                     case "token":
                         let content = event["content"] as? String ?? ""
@@ -2416,6 +2448,87 @@ extension NetworkManager {
             throw NSError(domain: "NetworkError", code: code,
                           userInfo: [NSLocalizedDescriptionKey: "修改失败（\(code)）"])
         }
+    }
+
+    // MARK: - Chat Session APIs
+
+    /// 创建 chat 类型 session，立即返回 session_id
+    func initChatSession() async throws -> InitChatSessionResponse {
+        let token = getAuthToken()
+        guard !token.isEmpty else {
+            throw NSError(domain: "NetworkError", code: 401, userInfo: [NSLocalizedDescriptionKey: "请先登录"])
+        }
+        var request = URLRequest(url: URL(string: "\(baseURLForWrite)/assistant/init-chat-session")!)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = 30
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+            let msg = (try? JSONDecoder().decode(FastAPIErrorResponse.self, from: data))?.detail ?? "init-chat-session failed (\(code))"
+            throw NSError(domain: "NetworkError", code: code, userInfo: [NSLocalizedDescriptionKey: msg])
+        }
+        let decoded = try JSONDecoder().decode(APIResponse<InitChatSessionResponse>.self, from: data)
+        guard decoded.code == 200, let result = decoded.data else {
+            throw NSError(domain: "NetworkError", code: decoded.code, userInfo: [NSLocalizedDescriptionKey: decoded.message])
+        }
+        return result
+    }
+
+    /// 直接退出：归档 session，触发异步 finalize（生成 card_title / summary / mood_state）
+    func closeChatSession(sessionId: String, conversation: [[String: String]]) async throws {
+        let token = getAuthToken()
+        guard !token.isEmpty else {
+            throw NSError(domain: "NetworkError", code: 401, userInfo: [NSLocalizedDescriptionKey: "请先登录"])
+        }
+        var request = URLRequest(url: URL(string: "\(baseURLForWrite)/assistant/close-chat-session")!)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = 30
+        let body: [String: Any] = ["session_id": sessionId, "conversation": conversation]
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+            let msg = (try? JSONDecoder().decode(FastAPIErrorResponse.self, from: data))?.detail ?? "close-chat-session failed (\(code))"
+            throw NSError(domain: "NetworkError", code: code, userInfo: [NSLocalizedDescriptionKey: msg])
+        }
+    }
+
+    /// 对话转图片：生成封面图，返回 202 立即响应，后台异步生图
+    func generateImageFromChat(
+        sessionId: String,
+        conversation: [[String: String]],
+        styleKey: String
+    ) async throws -> GenerateImageFromChatResponse {
+        let token = getAuthToken()
+        guard !token.isEmpty else {
+            throw NSError(domain: "NetworkError", code: 401, userInfo: [NSLocalizedDescriptionKey: "请先登录"])
+        }
+        var request = URLRequest(url: URL(string: "\(baseURLForWrite)/assistant/generate-image-from-chat")!)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = 30
+        let body: [String: Any] = [
+            "session_id": sessionId,
+            "conversation": conversation,
+            "style_key": styleKey
+        ]
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+            let msg = (try? JSONDecoder().decode(FastAPIErrorResponse.self, from: data))?.detail ?? "generate-image-from-chat failed (\(code))"
+            throw NSError(domain: "NetworkError", code: code, userInfo: [NSLocalizedDescriptionKey: msg])
+        }
+        let decoded = try JSONDecoder().decode(APIResponse<GenerateImageFromChatResponse>.self, from: data)
+        guard decoded.code == 200 || decoded.code == 202, let result = decoded.data else {
+            throw NSError(domain: "NetworkError", code: decoded.code, userInfo: [NSLocalizedDescriptionKey: decoded.message])
+        }
+        return result
     }
 
     /// 记录声纹录入意愿（不做实际录入，仅标记 voiceprint_intent）
