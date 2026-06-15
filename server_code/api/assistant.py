@@ -209,8 +209,17 @@ def _build_prompt(
         "【Do NOT send meme when】: user is very distressed, serious conflict of interests, or reply is longer than 3 paragraphs → output [MEME:none]"
     )
 
+    # 根据客户端设备语言动态生成语言指令
+    lang_code = (user_language or "en").lower().split("-")[0]
+    if lang_code == "zh":
+        lang_instruction_start = "系统要求：你必须全程用中文回复。无论下面的上下文是英文还是其他语言，都必须用中文作答。\n\n"
+        lang_instruction_end   = "重要：你的全部回复必须使用中文，包括建议选项。"
+    else:
+        lang_instruction_start = "SYSTEM REQUIREMENT: You MUST respond in English only. Do not use Chinese or any other language under any circumstances.\n\n"
+        lang_instruction_end   = "IMPORTANT: Your ENTIRE response must be in English only."
+
     return (
-        f"SYSTEM REQUIREMENT: You MUST respond in English only. Do not use Chinese or any other language under any circumstances, even if the context below is in Chinese.\n\n"
+        f"{lang_instruction_start}"
         f"You are the user's workplace AI assistant who understands their work situation. Answer what they ask and follow the natural flow of conversation.\n\n"
         f"{skill_block}"
         f"{resource_block}"
@@ -221,7 +230,7 @@ def _build_prompt(
         f"{history_block}\n\n"
         f"{task_desc}"
         f"{suggestions_instruction}\n\n"
-        f"IMPORTANT: Your ENTIRE response must be in English only. Do not write any Chinese characters."
+        f"{lang_instruction_end}"
     )
 
 
