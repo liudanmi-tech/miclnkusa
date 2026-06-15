@@ -25,6 +25,47 @@ class RecordingViewModel: ObservableObject {
     private var currentRecordingTaskId: String? // 当前录音任务的 ID
     private var pollingTask: Task<Void, Never>? // 轮询任务引用，用于取消
     
+    // MARK: - Chat Session（新录音入口）
+
+    /// 防重复点击锁，API 调用期间为 true
+    @Published var isCreatingSession: Bool = false
+    /// 非 nil 时由父视图触发 fullScreenCover → ChatAIAssistantView
+    @Published var chatSessionId: String? = nil
+
+    /// 点击录音按钮 → 创建 chat session（不启动麦克风录音）
+    func createChatSession() {
+        guard !isCreatingSession else { return }
+        isCreatingSession = true
+        Task { @MainActor in
+            defer { self.isCreatingSession = false }
+            do {
+                let response = try await NetworkManager.shared.initChatSession()
+                let startTime = Date()
+                let formatter = DateFormatter()
+                formatter.dateStyle = .none
+                formatter.timeStyle = .short
+                let timeString = formatter.string(from: startTime)
+                let newTask = TaskItem(
+                    id: response.sessionId,
+                    title: "Chat \(timeString)",
+                    startTime: startTime,
+                    endTime: nil,
+                    duration: 0,
+                    tags: [],
+                    status: .chatActive,
+                    sessionType: "chat"
+                )
+                NotificationCenter.default.post(
+                    name: NSNotification.Name("NewTaskCreated"),
+                    object: newTask
+                )
+                self.chatSessionId = response.sessionId
+            } catch {
+                print("❌ [RecordingViewModel] createChatSession 失败: \(error.localizedDescription)")
+            }
+        }
+    }
+
     // 开始录音
     func startRecording() {
         print("🎤 [RecordingViewModel] ========== 开始录制 ==========")

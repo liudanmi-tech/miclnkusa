@@ -16,9 +16,6 @@ struct RecordingButtonView: View {
     @State private var introTimer: Timer? = nil
     // 文字脉冲动画
     @State private var textPulse: Bool = false
-    // 录音同意提示（首次录音前显示一次）
-    @AppStorage("recording_consent_shown") private var recordingConsentShown = false
-    @State private var showRecordingConsent = false
 
     /// 上一条录音仍在分析中（非录音过程中）
     private var isLocked: Bool {
@@ -56,19 +53,19 @@ struct RecordingButtonView: View {
 
                     // ── 内容区域 ────────────────────────────────────────
                     if isIntro {
-                        // 消息框文字（分析中时显示 Analyzing...）
+                        // 消息框文字（分析中/创建中时显示 spinner）
                         HStack(spacing: 10) {
-                            if isLocked {
+                            if isLocked || viewModel.isCreatingSession {
                                 ProgressView()
                                     .progressViewStyle(CircularProgressViewStyle(tint: .white.opacity(0.75)))
                                     .scaleEffect(0.75)
                             } else {
-                                Image(systemName: "mic.fill")
+                                Image(systemName: "bubble.left.and.bubble.right.fill")
                                     .font(.system(size: 14, weight: .semibold))
                                     .foregroundStyle(.white.opacity(0.75))
                             }
 
-                            Text(isLocked ? "Analyzing..." : "Tell me what happened today")
+                            Text(isLocked ? "Analyzing..." : viewModel.isCreatingSession ? "Starting chat..." : "Tell me what happened today")
                                 .font(.system(size: 14, weight: .medium, design: .rounded))
                                 .foregroundStyle(.white.opacity(isLocked ? 0.5 : (textPulse ? 1.0 : 0.75)))
                                 .lineLimit(1)
@@ -79,20 +76,16 @@ struct RecordingButtonView: View {
                         }
                         .transition(.opacity)
                     } else {
-                        // 录音按钮图标
+                        // 圆形按钮图标
                         Group {
-                            if viewModel.isRecording {
-                                Image(systemName: "stop.fill")
-                                    .font(.system(size: 22, weight: .bold))
-                                    .foregroundStyle(.white)
-                            } else if isLocked {
-                                // 分析中：显示 spinner，禁止新录音
+                            if viewModel.isCreatingSession || isLocked {
+                                // 创建中 / 分析中：显示 spinner
                                 ProgressView()
                                     .progressViewStyle(CircularProgressViewStyle(tint: .white.opacity(0.6)))
                                     .scaleEffect(0.9)
                             } else {
-                                Image(systemName: "mic.fill")
-                                    .font(.system(size: 22, weight: .semibold))
+                                Image(systemName: "bubble.left.and.bubble.right.fill")
+                                    .font(.system(size: 20, weight: .semibold))
                                     .foregroundStyle(.white)
                             }
                         }
@@ -101,7 +94,7 @@ struct RecordingButtonView: View {
                 }
             }
             .buttonStyle(.plain)
-            .disabled(viewModel.isUploading || isLocked)
+            .disabled(viewModel.isUploading || isLocked || viewModel.isCreatingSession)
         }
         .animation(.spring(response: 0.52, dampingFraction: 0.80), value: isIntro)
         .onAppear {
@@ -111,60 +104,26 @@ struct RecordingButtonView: View {
         .onDisappear {
             cancelTimer()
         }
-        // 录音过程中若 intro 还没消，强制收起
-        .onChange(of: viewModel.isRecording) { recording in
-            if recording && isIntro {
+        // 开始创建 session 时若 intro 还没消，强制收起
+        .onChange(of: viewModel.isCreatingSession) { creating in
+            if creating && isIntro {
                 dismissIntro()
             }
-        }
-        .alert("Recording Consent", isPresented: $showRecordingConsent) {
-            Button("Cancel", role: .cancel) { }
-            Button("I Agree") {
-                recordingConsentShown = true
-                startRecordingAfterConsent()
-            }
-        } message: {
-            Text("By recording, you confirm this is your own voice or experience, and you have the consent of any other parties involved.\n\nYour audio will be securely sent to Google Gemini AI for transcription and analysis, and stored on Google Cloud. We never retain, sell, or share your personal data.")
         }
     }
 
     // MARK: - Actions
 
     private func handleTap() {
-        // 引导第3步：只要点击了录音按钮就推进，不依赖录音是否完成或上传
+        // 引导第3步：只要点击了按钮就推进
         if TourManager.shared.currentStep == .recordingButton {
             TourManager.shared.advance()
         }
 
-        // 上一条录音仍在分析中，禁止开始新录音（停止当前录音不受影响）
         guard !isLocked else { return }
 
-        // 首次录音前弹出同意提示（仅当未开始录音时拦截）
-        if !recordingConsentShown && !viewModel.isRecording {
-            if isIntro { dismissIntro() }
-            showRecordingConsent = true
-            return
-        }
-
-        if isIntro {
-            // 5秒内点击：立即收起 → 进入录音
-            dismissIntro()
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-                viewModel.startRecording()
-            }
-        } else {
-            if viewModel.isRecording {
-                viewModel.stopRecordingAndUpload()
-            } else {
-                viewModel.startRecording()
-            }
-        }
-    }
-
-    private func startRecordingAfterConsent() {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-            viewModel.startRecording()
-        }
+        if isIntro { dismissIntro() }
+        viewModel.createChatSession()
     }
 
     // MARK: - Timer
