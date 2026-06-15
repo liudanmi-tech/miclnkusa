@@ -148,6 +148,14 @@ struct ContentView: View {
         .sheet(isPresented: $showTextInput) {
             TextInputView()
         }
+        .fullScreenCover(isPresented: Binding(
+            get: { recordingViewModel.chatSessionId != nil },
+            set: { if !$0 { recordingViewModel.chatSessionId = nil } }
+        )) {
+            if let sessionId = recordingViewModel.chatSessionId {
+                ChatAIAssistantView(sessionId: sessionId)
+            }
+        }
         .sheet(isPresented: $recordingViewModel.showPaywall, onDismiss: {
             if SubscriptionManager.shared.isPro {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
