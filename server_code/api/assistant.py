@@ -505,26 +505,24 @@ async def init_chat_session(
         raise HTTPException(status_code=500, detail="Failed to create chat session")
 
 
-async def _init_skill_matching(
+async def _match_skills_serial(
     session_id: str,
     message: str,
     user_id: str,
-    sse_queue: asyncio.Queue,
     history: Optional[List[ChatHistoryItem]] = None,
-) -> None:
+) -> list:
     """
-    fire-and-forget：第1/2轮对话结束后，异步执行技能匹配并 UPSERT strategy_analysis。
-    turn=0 时只用当前消息；turn=1 时用完整对话历史（更多上下文提升匹配准确率）。
-    匹配完成后向 sse_queue 推送 skill_tags 事件；失败时推送 None 以解除 generator 阻塞。
+    串行技能匹配（Groq ~250ms）：await 后返回 skill_tags list。
+    匹配完成同时 UPSERT strategy_analysis，供当轮 prompt 构建使用。
+    失败时返回空列表（不阻塞主流程）。
     """
     id8 = session_id[:8]
-    logger.info(f"[CHAT:{id8}] skill_matching started | history_len={len(history) if history else 0}")
+    logger.info(f"[CHAT:{id8}] skill_matching started (serial/Groq) | history_len={len(history) if history else 0}")
     try:
         from database.connection import AsyncSessionLocal
         from skills.router import match_skills_v2
         from sqlalchemy import func as sa_func
 
-        # turn=1 时用完整历史 + 当前消息，给匹配器更多上下文
         if history:
             transcript_stub = [
                 {"speaker": "user" if h.role == "user" else "assistant", "text": h.content}
@@ -541,11 +539,8 @@ async def _init_skill_matching(
                 user_id=user_id,
                 db=db,
                 model=None,
+                use_groq=True,
             )
-
-        # _build_stubs_auto 内已有完整过滤（90分阈值 + primary_category 兜底）
-        # 不再做二次过滤，避免将兜底的低分技能（如 score=70）错误丢弃
-        # emotion_recognition 由 _append_always_run 通过 always_run=True 保留
 
         skill_tags = [
             {"skill_id": s["skill_id"], "skill_name": s["skill_name"]}
@@ -553,7 +548,7 @@ async def _init_skill_matching(
         ]
         logger.info(f"[CHAT:{id8}] skill_matching done | tags={[t['skill_id'] for t in skill_tags]}")
 
-        # UPSERT strategy_analysis（iOS 重试时不重复插入）
+        # UPSERT strategy_analysis
         async with AsyncSessionLocal() as db:
             stmt = pg_insert(StrategyAnalysis).values(
                 id=uuid.uuid4(),
@@ -576,15 +571,11 @@ async def _init_skill_matching(
             await db.commit()
         logger.info(f"[CHAT:{id8}] strategy_analysis written | skills={len(stubs)}")
 
-        # 通知 SSE generator 推送 skill_tags
-        await sse_queue.put({"type": "skill_tags", "tags": skill_tags})
+        return skill_tags
 
     except Exception as e:
-        logger.error(f"[CHAT:{id8}] _init_skill_matching failed | error={str(e)}")
-        try:
-            await sse_queue.put(None)  # 解除 generator 阻塞
-        except Exception:
-            pass
+        logger.error(f"[CHAT:{id8}] _match_skills_serial failed | error={str(e)}")
+        return []
 
 
 @router.post("/assistant/chat")
@@ -614,16 +605,12 @@ async def assistant_chat(
     if req.is_chat_session:
         logger.info(f"[CHAT:{req.session_id[:8]}] /chat received | is_chat=True turn={_session_turn}")
 
-    _sse_skill_queue: Optional[asyncio.Queue] = None
-    # turn=0：首次匹配（只用第一条消息）
-    # turn=1：用完整对话历史重新匹配，纠正 turn=0 可能的误判（如首句未提谈薪但后续提到）
-    if req.is_chat_session and _session_turn <= 1 and req.message not in ("__INIT__", "__SWITCH__"):
-        _sse_skill_queue = asyncio.Queue()
-        asyncio.create_task(
-            _init_skill_matching(
-                req.session_id, req.message, user_id, _sse_skill_queue,
-                history=req.history if _session_turn == 1 else None,
-            )
+    # 串行技能匹配（Groq ~250ms），每轮都匹配，结果供当轮 prompt 使用
+    _matched_tags: list = []
+    if req.is_chat_session and req.message not in ("__INIT__", "__SWITCH__"):
+        _matched_tags = await _match_skills_serial(
+            req.session_id, req.message, user_id,
+            history=req.history if req.history else None,
         )
 
     # 1. 取策略分析
@@ -703,6 +690,16 @@ async def assistant_chat(
         if _non_system_cards:
             _strategy_skill_id = _non_system_cards[0]["skill_id"]
 
+    # 串行匹配结果优先（Groq 刚写入的 strategy_analysis 可能还未在本 db session 可见）
+    if _matched_tags:
+        _first_non_sys = next(
+            (t for t in _matched_tags if t["skill_id"] not in _SYSTEM_SKILLS),
+            None
+        )
+        if _first_non_sys:
+            _strategy_skill_id = _first_non_sys["skill_id"]
+            logger.info(f"[CHAT:{req.session_id[:8]}] effective_skill from Groq | {_strategy_skill_id}")
+
     logger.info(
         f"[CHAT:{req.session_id[:8]}] baseline_check | req_skill={req.skill_id} "
         f"effective_skill={_strategy_skill_id} history_turns={history_turns}"
@@ -759,7 +756,12 @@ async def assistant_chat(
 
     # 6. SSE 生成器
     async def event_generator():
-        # 元数据事件（最先）
+        # skill_tags 第一个推出（在 meta 之前），iOS 立刻更新 currentSkillId
+        if _matched_tags:
+            yield _sse({"type": "skill_tags", "tags": _matched_tags})
+            logger.info(f"[CHAT:{req.session_id[:8]}] skill_tags pushed (serial) | tags={[t['skill_id'] for t in _matched_tags]}")
+
+        # 元数据事件
         yield _sse({"type": "meta", "skill_name": skill_name, "memory_used": memory_used})
 
         full_text_parts = []
@@ -874,16 +876,6 @@ async def assistant_chat(
                     logger.warning(
                         f"[CHAT:{req.session_id[:8]}] baseline_data parse failed: {_bd_err}"
                     )
-
-        # 对话会话首轮：等待 skill_tags 推送（最多 8 秒）
-        if _sse_skill_queue is not None:
-            try:
-                _tags_event = await asyncio.wait_for(_sse_skill_queue.get(), timeout=8.0)
-                if _tags_event:
-                    yield _sse(_tags_event)
-                    logger.info(f"[CHAT:{req.session_id[:8]}] skill_tags pushed | tags={[t['skill_id'] for t in _tags_event.get('tags', [])]}")
-            except asyncio.TimeoutError:
-                logger.warning(f"[CHAT:{req.session_id[:8]}] skill_tags timeout(8s)，跳过")
 
         # 对话结束后，异步写入 PostgreSQL KG（fire-and-forget，不阻塞 SSE）
         if full_text and req.message not in ("__INIT__", "__SWITCH__"):
