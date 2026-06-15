@@ -40,7 +40,7 @@ struct ChatAIAssistantView: View {
 
                 VStack(spacing: 0) {
                     // 技能标签区
-                    if chatVM.isMatchingSkills || !chatVM.skillTags.isEmpty {
+                    if chatVM.isMatchingSkills || !chatVM.skillTags.isEmpty || chatVM.baselinePhase != nil {
                         skillTagsBar
                             .transition(.opacity.combined(with: .move(edge: .top)))
                     }
@@ -113,6 +113,7 @@ struct ChatAIAssistantView: View {
             Button("OK") {}
         }
         .animation(.easeInOut(duration: 0.2), value: chatVM.skillTags.isEmpty)
+        .animation(.easeInOut(duration: 0.2), value: chatVM.baselinePhase)
         .onChange(of: chatVM.messages.count) { _ in scrollToBottom = true }
     }
 
@@ -142,6 +143,15 @@ struct ChatAIAssistantView: View {
                             .padding(.horizontal, 10)
                             .padding(.vertical, 5)
                             .background(Color.white.opacity(0.1))
+                            .clipShape(Capsule())
+                    }
+                    if let phase = chatVM.baselinePhase {
+                        Text(phase == "ask" ? "Setting up your profile..." : "Saving profile...")
+                            .font(.system(size: 12, weight: .medium, design: .rounded))
+                            .foregroundColor(.white.opacity(0.5))
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 5)
+                            .background(Color.white.opacity(0.06))
                             .clipShape(Capsule())
                     }
                 }

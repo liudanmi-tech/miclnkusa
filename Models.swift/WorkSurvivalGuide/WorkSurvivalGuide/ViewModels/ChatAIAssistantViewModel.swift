@@ -68,6 +68,8 @@ final class ChatAIAssistantViewModel: ObservableObject {
     @Published var errorMessage: String? = nil
     @Published var showPaywall: Bool = false
     @Published var showProLimitToast: Bool = false
+    /// baseline_init SSE：当前阶段（"ask" / "save"），nil 表示无 baseline 流程
+    @Published var baselinePhase: String? = nil
 
     // MARK: Immutable
 
@@ -203,6 +205,11 @@ final class ChatAIAssistantViewModel: ObservableObject {
             onMoodState: { [weak self] mood in
                 Task { @MainActor [weak self] in
                     if let mood = mood { self?.lastMoodState = mood }
+                }
+            },
+            onBaselineInit: { [weak self] _, phase in
+                Task { @MainActor [weak self] in
+                    self?.baselinePhase = phase
                 }
             },
             onDone: { [weak self] in

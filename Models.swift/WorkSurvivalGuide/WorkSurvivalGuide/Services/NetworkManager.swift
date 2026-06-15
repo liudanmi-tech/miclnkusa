@@ -897,10 +897,11 @@ class NetworkManager {
         onToken:       @escaping @Sendable (String) -> Void,
         onSuggestions: @escaping @Sendable ([String]) -> Void,
         onSkillTags:   @escaping @Sendable ([String]) -> Void = { _ in },
-        onMoodState:   @escaping @Sendable (String?) -> Void = { _ in },
-        onMeme:        @escaping @Sendable (String) -> Void = { _ in },
-        onDone:        @escaping @Sendable () -> Void,
-        onError:       @escaping @Sendable (String) -> Void
+        onMoodState:    @escaping @Sendable (String?) -> Void = { _ in },
+        onMeme:         @escaping @Sendable (String) -> Void = { _ in },
+        onBaselineInit: @escaping @Sendable (String, String) -> Void = { _, _ in },
+        onDone:         @escaping @Sendable () -> Void,
+        onError:        @escaping @Sendable (String) -> Void
     ) -> Task<Void, Never> {
         let token = getAuthToken()
         guard !token.isEmpty else { onError("未登录，请先登录"); return Task {} }
@@ -995,6 +996,13 @@ class NetworkManager {
                             tagIds = event["tags"] as? [String] ?? []
                         }
                         await MainActor.run { onSkillTags(tagIds) }
+
+                    case "baseline_init":
+                        let bSkillId = event["skill_id"] as? String ?? ""
+                        let bPhase   = event["phase"] as? String ?? "ask"
+                        if !bSkillId.isEmpty {
+                            await MainActor.run { onBaselineInit(bSkillId, bPhase) }
+                        }
 
                     case "done":
                         await MainActor.run { onDone() }; return

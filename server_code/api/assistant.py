@@ -108,6 +108,7 @@ class AssistantChatRequest(BaseModel):
     image_base64_list: Optional[List[str]] = None  # 用户上传的图片列表（JPEG base64，最多3张），仅传给 Gemini 不落库
     is_chat_session: bool = False   # True = 对话式会话模式（无需预先录音分析）
     skill_mode: str = "auto"        # "auto" | "manual"
+    user_language: Optional[str] = "en"  # 用户语言，影响 prompt 语言提示
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -807,32 +808,33 @@ async def assistant_chat(
                     except Exception as exc:
                         logger.warning(f"[meme] 梗图获取失败: {exc}")
 
-        yield _sse({"type": "done"})
-
-        # baseline_init 事件（通知 iOS 当前为 baseline 初始化轮次）
+        # baseline_init 事件：必须在 done 之前发送，iOS 收到 done 后会关闭连接
         if needs_baseline_init:
             yield _sse({"type": "baseline_init", "skill_id": req.skill_id, "phase": _baseline_phase})
             logger.info(f"[CHAT:{req.session_id[:8]}] baseline_init SSE | skill={req.skill_id} phase={_baseline_phase}")
-            # save 阶段：解析 AI 输出的 [BASELINE_DATA] 并写库
-            if _baseline_phase == "save":
-                _bd_match = re.search(
-                    r"\[BASELINE_DATA\](.*?)\[/BASELINE_DATA\]", suggestions_raw, re.DOTALL
-                )
-                if _bd_match:
-                    _bd_str = _bd_match.group(1).strip()
-                    try:
-                        _bd_obj = json.loads(_bd_str)
-                        _bd_lines = [f"{k}: {v}" for k, v in _bd_obj.items() if v]
-                        _new_baseline = "\n".join(_bd_lines)
-                        if _new_baseline:
-                            asyncio.create_task(_write_skill_baseline(user_id, req.skill_id, _new_baseline))
-                            logger.info(
-                                f"[CHAT:{req.session_id[:8]}] baseline_captured | skill={req.skill_id} chars={len(_new_baseline)}"
-                            )
-                    except Exception as _bd_err:
-                        logger.warning(
-                            f"[CHAT:{req.session_id[:8]}] baseline_data parse failed: {_bd_err}"
+
+        yield _sse({"type": "done"})
+
+        # save 阶段：解析 AI 输出的 [BASELINE_DATA] 并写库（在 done 后执行，纯服务端）
+        if needs_baseline_init and _baseline_phase == "save":
+            _bd_match = re.search(
+                r"\[BASELINE_DATA\](.*?)\[/BASELINE_DATA\]", suggestions_raw, re.DOTALL
+            )
+            if _bd_match:
+                _bd_str = _bd_match.group(1).strip()
+                try:
+                    _bd_obj = json.loads(_bd_str)
+                    _bd_lines = [f"{k}: {v}" for k, v in _bd_obj.items() if v]
+                    _new_baseline = "\n".join(_bd_lines)
+                    if _new_baseline:
+                        asyncio.create_task(_write_skill_baseline(user_id, req.skill_id, _new_baseline))
+                        logger.info(
+                            f"[CHAT:{req.session_id[:8]}] baseline_captured | skill={req.skill_id} chars={len(_new_baseline)}"
                         )
+                except Exception as _bd_err:
+                    logger.warning(
+                        f"[CHAT:{req.session_id[:8]}] baseline_data parse failed: {_bd_err}"
+                    )
 
         # 对话会话首轮：等待 skill_tags 推送（最多 8 秒）
         if _sse_skill_queue is not None:
