@@ -954,6 +954,16 @@ class NetworkManager {
                             await MainActor.run { onMeme(gifURL) }
                         }
 
+                    case "skill_tags":
+                        // server sends [{skill_id, skill_name}], extract skill_ids
+                        let tagIds: [String]
+                        if let tagDicts = event["tags"] as? [[String: Any]] {
+                            tagIds = tagDicts.compactMap { $0["skill_id"] as? String }
+                        } else {
+                            tagIds = event["tags"] as? [String] ?? []
+                        }
+                        await MainActor.run { onSkillTags(tagIds) }
+
                     case "done":
                         await MainActor.run { onDone() }; return
 
