@@ -303,7 +303,10 @@ async def _stream_gemini(prompt: str, image_base64_list: Optional[List[str]] = N
                 contents = prompt
             response = model.generate_content(contents, stream=True)
             for chunk in response:
-                text = getattr(chunk, "text", None)
+                try:
+                    text = chunk.text
+                except (ValueError, AttributeError):
+                    text = None
                 if text:
                     loop.call_soon_threadsafe(queue.put_nowait, ("token", text))
             loop.call_soon_threadsafe(queue.put_nowait, ("done", None))
