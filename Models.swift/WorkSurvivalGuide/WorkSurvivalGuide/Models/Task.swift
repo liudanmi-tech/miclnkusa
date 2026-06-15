@@ -16,6 +16,13 @@ enum TaskStatus: String, Codable {
     case burned = "burned"          // 已焚毁
     case failed = "failed"          // 分析失败
     case chatActive = "chat_active" // 对话会话活跃中（本地状态，不同步到服务端）
+
+    // 服务端可能返回未知状态（如 "processing"），fallback 到 analyzing 避免解码崩溃
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        let raw = try container.decode(String.self)
+        self = TaskStatus(rawValue: raw) ?? .analyzing
+    }
 }
 
 // 任务数据模型（重命名为 TaskItem 以避免与 Swift 的并发 Task 类型冲突）
