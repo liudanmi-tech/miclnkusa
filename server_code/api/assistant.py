@@ -543,11 +543,9 @@ async def _init_skill_matching(
                 model=None,
             )
 
-        # 对话会话阈值 75（review 为 90，此处二次过滤保留 emotion_recognition 兜底）
-        stubs = [
-            s for s in stubs
-            if (s.get("score") or 0) >= 75 or s.get("skill_id") == "emotion_recognition"
-        ]
+        # _build_stubs_auto 内已有完整过滤（90分阈值 + primary_category 兜底）
+        # 不再做二次过滤，避免将兜底的低分技能（如 score=70）错误丢弃
+        # emotion_recognition 由 _append_always_run 通过 always_run=True 保留
 
         skill_tags = [
             {"skill_id": s["skill_id"], "skill_name": s["skill_name"]}
@@ -693,6 +691,23 @@ async def assistant_chat(
     baseline_init_note = ""
     history_turns = len(req.history) // 2   # 提前计算，Step 6 也使用
     _SYSTEM_SKILLS = {"emotion_recognition", "depression_prevention"}
+
+    # baseline 检查使用「有效技能 ID」：优先取 strategy_analysis 里第一个非系统技能，
+    # 避免 iOS turn=1 仍在用默认 emotion_recognition 导致检查被跳过
+    _strategy_skill_id = req.skill_id
+    if strategy:
+        _non_system_cards = [
+            c for c in (strategy.skill_cards or [])
+            if c.get("skill_id") not in _SYSTEM_SKILLS
+        ]
+        if _non_system_cards:
+            _strategy_skill_id = _non_system_cards[0]["skill_id"]
+
+    logger.info(
+        f"[CHAT:{req.session_id[:8]}] baseline_check | req_skill={req.skill_id} "
+        f"effective_skill={_strategy_skill_id} history_turns={history_turns}"
+    )
+
     try:
         from sqlalchemy import text as sa_text
         _bn_row = await db.execute(
@@ -700,7 +715,7 @@ async def assistant_chat(
                 "SELECT baseline_text, baseline_complete FROM skill_notes "
                 "WHERE user_id = :uid AND skill_id = :sid"
             ),
-            {"uid": uuid.UUID(user_id), "sid": req.skill_id},
+            {"uid": uuid.UUID(user_id), "sid": _strategy_skill_id},
         )
         _bn = _bn_row.fetchone()
         _bn_complete = bool(_bn[1]) if _bn else False
@@ -708,17 +723,17 @@ async def assistant_chat(
 
         if baseline_text:
             logger.info(
-                f"[CHAT:{req.session_id[:8]}] baseline_text loaded | skill={req.skill_id} chars={len(baseline_text)}"
+                f"[CHAT:{req.session_id[:8]}] baseline_text loaded | skill={_strategy_skill_id} chars={len(baseline_text)}"
             )
-        elif not _bn_complete and req.skill_id not in _SYSTEM_SKILLS and history_turns >= 1:
+        elif not _bn_complete and _strategy_skill_id not in _SYSTEM_SKILLS and history_turns >= 1:
             # 首次使用该技能（无 baseline），注入引导模板
-            _note = _load_skill_note(req.skill_id)
+            _note = _load_skill_note(_strategy_skill_id)
             if _note:
                 needs_baseline_init = True
                 baseline_init_note = _note
                 _baseline_phase = "ask" if history_turns == 1 else "save"
                 logger.info(
-                    f"[CHAT:{req.session_id[:8]}] baseline_init | skill={req.skill_id} phase={_baseline_phase}"
+                    f"[CHAT:{req.session_id[:8]}] baseline_init | skill={_strategy_skill_id} phase={_baseline_phase}"
                 )
     except Exception as exc:
         logger.warning(f"[CHAT:{req.session_id[:8]}] baseline load failed: {exc}")
