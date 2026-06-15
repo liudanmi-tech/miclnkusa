@@ -17,11 +17,16 @@ enum TaskStatus: String, Codable {
     case failed = "failed"          // 分析失败
     case chatActive = "chat_active" // 对话会话活跃中（本地状态，不同步到服务端）
 
-    // 服务端可能返回未知状态（如 "processing"），fallback 到 analyzing 避免解码崩溃
+    // 服务端 chat session 初始状态为 "processing"，映射到 chatActive（不触发录音锁）
+    // 其他未知状态 fallback 到 analyzing
     init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
         let raw = try container.decode(String.self)
-        self = TaskStatus(rawValue: raw) ?? .analyzing
+        if raw == "processing" {
+            self = .chatActive
+        } else {
+            self = TaskStatus(rawValue: raw) ?? .analyzing
+        }
     }
 }
 
