@@ -28,6 +28,37 @@ from database.models import AnalysisResult, StrategyAnalysis, User, Session
 from auth.jwt_handler import get_current_user_id
 
 logger = logging.getLogger(__name__)
+
+# ─── Skill Resource Loader ───────────────────────────────────────────────────
+
+_SKILLS_DIR = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "skills"))
+
+def _load_skill_resource(skill_id: str) -> str:
+    """Load resource.md for a skill. Returns empty string if file not found."""
+    path = os.path.join(_SKILLS_DIR, skill_id, "resource.md")
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return f.read()
+    except FileNotFoundError:
+        return ""
+    except Exception as e:
+        logger.warning(f"[assistant] load_skill_resource({skill_id}) error: {e}")
+        return ""
+
+
+def _load_skill_note(skill_id: str) -> str:
+    """Load note.md template for a skill. Returns empty string if file not found."""
+    path = os.path.join(_SKILLS_DIR, skill_id, "note.md")
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return f.read()
+    except FileNotFoundError:
+        return ""
+    except Exception as e:
+        logger.warning(f"[assistant] load_skill_note({skill_id}) error: {e}")
+        return ""
+
+
 router = APIRouter()
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
@@ -92,10 +123,16 @@ def _build_prompt(
     memory_context: str,
     history: List[ChatHistoryItem],
     message: str,
+    user_language: Optional[str] = None,
+    skill_resource: str = "",
+    baseline_text: str = "",
+    baseline_init_note: str = "",
 ) -> str:
     """Build the complete prompt for Gemini"""
     mem_block = f"\nRelevant memory context:\n{memory_context}" if memory_context else ""
     summary_block = f"\nWork conversation summary:\n{conversation_summary}" if conversation_summary else ""
+    resource_block = f"\nSkill reference material:\n{skill_resource}\n" if skill_resource else ""
+    baseline_block = f"\nUser background for this skill:\n{baseline_text}\n" if baseline_text else ""
 
     history_block = ""
     if history:
@@ -111,6 +148,28 @@ def _build_prompt(
         skill_block = f"Work context reference ({skill_name}):\n{skill_content_json}"
     else:
         skill_block = f"Work context reference ({skill_name}): [known skill context, omitted to save tokens]"
+
+    # Baseline init block: injected when user's background for this skill is not yet collected
+    if baseline_init_note:
+        if history_turns == 1:
+            baseline_init_block = (
+                f"\nBASELINE COLLECTION (First session for \"{skill_name}\"):\n"
+                f"After addressing the user's message, naturally ask for key background info (required fields only). "
+                f"Do NOT output [BASELINE_DATA] in this turn — only ask the questions.\n\n"
+                f"{baseline_init_note}\n"
+            )
+        else:
+            baseline_init_block = (
+                f"\nBASELINE CAPTURE ({skill_name}):\n"
+                f"The user just responded to your background questions. "
+                f"After the [/SUGGESTIONS] block, output the confirmed baseline data:\n"
+                f"[BASELINE_DATA]{{\"field1\":\"value\",\"field2\":\"value\",...}}[/BASELINE_DATA]\n"
+                f"Use field keys from the note template. Use \"\" for unknown values. "
+                f"This block is hidden from the user.\n\n"
+                f"{baseline_init_note}\n"
+            )
+    else:
+        baseline_init_block = ""
 
     if message == "__INIT__":
         task_desc = (
@@ -153,6 +212,9 @@ def _build_prompt(
         f"SYSTEM REQUIREMENT: You MUST respond in English only. Do not use Chinese or any other language under any circumstances, even if the context below is in Chinese.\n\n"
         f"You are the user's workplace AI assistant who understands their work situation. Answer what they ask and follow the natural flow of conversation.\n\n"
         f"{skill_block}"
+        f"{resource_block}"
+        f"{baseline_init_block}"
+        f"{baseline_block}"
         f"{summary_block}"
         f"{mem_block}"
         f"{history_block}\n\n"
@@ -273,6 +335,28 @@ async def _generate_suggestions(context: str, skill_name: str) -> List[str]:
     except Exception as exc:
         logger.warning(f"[assistant] suggestions 生成失败: {exc}")
     return []
+
+
+async def _write_skill_baseline(user_id: str, skill_id: str, baseline_text: str) -> None:
+    """fire-and-forget: 写入 skill_notes.baseline_text, 设 baseline_complete=true"""
+    from database.connection import AsyncSessionLocal
+    from sqlalchemy import text as sa_text_w
+    id8 = user_id[:8]
+    try:
+        async with AsyncSessionLocal() as db:
+            await db.execute(
+                sa_text_w(
+                    "INSERT INTO skill_notes (user_id, skill_id, baseline_text, baseline_complete, last_updated) "
+                    "VALUES (:uid, :sid, :btext, true, NOW()) "
+                    "ON CONFLICT (user_id, skill_id) DO UPDATE "
+                    "SET baseline_text = :btext, baseline_complete = true, last_updated = NOW()"
+                ),
+                {"uid": uuid.UUID(user_id), "sid": skill_id, "btext": baseline_text},
+            )
+            await db.commit()
+        logger.info(f"[KG] baseline_written | user={id8} skill={skill_id} chars={len(baseline_text)}")
+    except Exception as e:
+        logger.error(f"[KG] baseline_write failed | user={id8} skill={skill_id} error={e}")
 
 
 # ─── Endpoint ─────────────────────────────────────────────────────────────────
@@ -484,7 +568,49 @@ async def assistant_chat(
     except Exception as exc:
         logger.warning(f"[assistant] KG 记忆获取失败: {exc}")
 
-    # 5. 组装 prompt
+    # 5. 加载 skill_notes（Tier 1 必现层 + baseline 初始化检测）
+    baseline_text = ""
+    needs_baseline_init = False
+    _baseline_phase = "ask"   # "ask" | "save"
+    baseline_init_note = ""
+    history_turns = len(req.history) // 2   # 提前计算，Step 6 也使用
+    _SYSTEM_SKILLS = {"emotion_recognition", "depression_prevention"}
+    try:
+        from sqlalchemy import text as sa_text
+        _bn_row = await db.execute(
+            sa_text(
+                "SELECT baseline_text, baseline_complete FROM skill_notes "
+                "WHERE user_id = :uid AND skill_id = :sid"
+            ),
+            {"uid": uuid.UUID(user_id), "sid": req.skill_id},
+        )
+        _bn = _bn_row.fetchone()
+        _bn_complete = bool(_bn[1]) if _bn else False
+        baseline_text = (_bn[0] or "") if _bn_complete else ""
+
+        if baseline_text:
+            logger.info(
+                f"[CHAT:{req.session_id[:8]}] baseline_text loaded | skill={req.skill_id} chars={len(baseline_text)}"
+            )
+        elif not _bn_complete and req.skill_id not in _SYSTEM_SKILLS and history_turns >= 1:
+            # 首次使用该技能（无 baseline），注入引导模板
+            _note = _load_skill_note(req.skill_id)
+            if _note:
+                needs_baseline_init = True
+                baseline_init_note = _note
+                _baseline_phase = "ask" if history_turns == 1 else "save"
+                logger.info(
+                    f"[CHAT:{req.session_id[:8]}] baseline_init | skill={req.skill_id} phase={_baseline_phase}"
+                )
+    except Exception as exc:
+        logger.warning(f"[CHAT:{req.session_id[:8]}] baseline load failed: {exc}")
+
+    # 6. 加载技能 resource.md（turn < 3 时注入，超过则省略节省 token）
+    skill_resource = _load_skill_resource(req.skill_id) if history_turns < 3 else ""
+    if skill_resource:
+        logger.info(f"[CHAT:{req.session_id[:8]}] skill_resource loaded | skill={req.skill_id} chars={len(skill_resource)}")
+
+    # 7. 组装 prompt
     prompt = _build_prompt(
         skill_name=skill_name,
         skill_content_json=skill_content_json,
@@ -492,6 +618,10 @@ async def assistant_chat(
         memory_context=memory_context,
         history=req.history,
         message=req.message,
+        user_language=req.user_language,
+        skill_resource=skill_resource,
+        baseline_text=baseline_text,
+        baseline_init_note=baseline_init_note,
     )
 
     # 6. SSE 生成器
@@ -585,6 +715,31 @@ async def assistant_chat(
                         logger.warning(f"[meme] 梗图获取失败: {exc}")
 
         yield _sse({"type": "done"})
+
+        # baseline_init 事件（通知 iOS 当前为 baseline 初始化轮次）
+        if needs_baseline_init:
+            yield _sse({"type": "baseline_init", "skill_id": req.skill_id, "phase": _baseline_phase})
+            logger.info(f"[CHAT:{req.session_id[:8]}] baseline_init SSE | skill={req.skill_id} phase={_baseline_phase}")
+            # save 阶段：解析 AI 输出的 [BASELINE_DATA] 并写库
+            if _baseline_phase == "save":
+                _bd_match = re.search(
+                    r"\[BASELINE_DATA\](.*?)\[/BASELINE_DATA\]", suggestions_raw, re.DOTALL
+                )
+                if _bd_match:
+                    _bd_str = _bd_match.group(1).strip()
+                    try:
+                        _bd_obj = json.loads(_bd_str)
+                        _bd_lines = [f"{k}: {v}" for k, v in _bd_obj.items() if v]
+                        _new_baseline = "\n".join(_bd_lines)
+                        if _new_baseline:
+                            asyncio.create_task(_write_skill_baseline(user_id, req.skill_id, _new_baseline))
+                            logger.info(
+                                f"[CHAT:{req.session_id[:8]}] baseline_captured | skill={req.skill_id} chars={len(_new_baseline)}"
+                            )
+                    except Exception as _bd_err:
+                        logger.warning(
+                            f"[CHAT:{req.session_id[:8]}] baseline_data parse failed: {_bd_err}"
+                        )
 
         # 对话会话首轮：等待 skill_tags 推送（最多 8 秒）
         if _sse_skill_queue is not None:
