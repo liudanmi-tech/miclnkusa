@@ -337,6 +337,99 @@ async def _generate_suggestions(context: str, skill_name: str) -> List[str]:
     return []
 
 
+async def _async_update_dynamic_kg(session_id: str, user_id: str) -> None:
+    """
+    fire-and-forget：退出时将本次对话写入的 KG 事件/目标 UUID
+    追加到 skill_notes.dynamic_kg_ids（去重）。
+    """
+    from database.connection import AsyncSessionLocal
+    from database.models import KgEvent, KgGoal, StrategyAnalysis
+    from sqlalchemy import select as sa_select, text as sa_text_d, bindparam
+    from sqlalchemy.dialects.postgresql import ARRAY
+    from sqlalchemy import UUID as SA_UUID
+
+    id8 = session_id[:8]
+    try:
+        async with AsyncSessionLocal() as db:
+            # 1. 从 strategy_analysis 取主技能 ID
+            _sa_q = await db.execute(
+                sa_select(StrategyAnalysis.skill_cards).where(
+                    StrategyAnalysis.session_id == uuid.UUID(session_id)
+                )
+            )
+            skill_cards = _sa_q.scalar_one_or_none() or []
+            primary_skill_id = None
+            for card in (skill_cards or []):
+                sid = card.get("skill_id", "")
+                if sid and sid not in ("emotion_recognition", "depression_prevention"):
+                    primary_skill_id = sid
+                    break
+            if not primary_skill_id:
+                primary_skill_id = next((c.get("skill_id") for c in (skill_cards or [])), None)
+            if not primary_skill_id:
+                logger.info(f"[CHAT:{id8}] update_dynamic_kg: no primary skill, skip")
+                return
+
+            # 2. 查本次会话写入的 KG 事件/目标 ID
+            uid = uuid.UUID(user_id)
+            sess_id = uuid.UUID(session_id)
+            _ev_q = await db.execute(
+                sa_select(KgEvent.id).where(
+                    KgEvent.session_id == sess_id,
+                    KgEvent.user_id == uid,
+                )
+            )
+            _go_q = await db.execute(
+                sa_select(KgGoal.id).where(
+                    KgGoal.session_id == sess_id,
+                    KgGoal.user_id == uid,
+                )
+            )
+            new_ids = {str(r[0]) for r in _ev_q.all()} | {str(r[0]) for r in _go_q.all()}
+            if not new_ids:
+                logger.info(f"[CHAT:{id8}] update_dynamic_kg: no new KG nodes, skip")
+                return
+
+            # 3. 取当前 dynamic_kg_ids，Python 侧去重合并
+            _cur_q = await db.execute(
+                sa_text_d(
+                    "SELECT dynamic_kg_ids FROM skill_notes "
+                    "WHERE user_id = :uid AND skill_id = :sid"
+                ),
+                {"uid": uid, "sid": primary_skill_id},
+            )
+            _cur = _cur_q.fetchone()
+            _cur_ids = {str(i) for i in (_cur[0] or [])} if _cur else set()
+            merged_uuids = [uuid.UUID(i) for i in (_cur_ids | new_ids)]
+
+            # 4. UPSERT dynamic_kg_ids（如无行则 INSERT，否则 UPDATE）
+            _array_type = ARRAY(SA_UUID(as_uuid=True))
+            if _cur:
+                await db.execute(
+                    sa_text_d(
+                        "UPDATE skill_notes SET dynamic_kg_ids = :ids, last_updated = NOW() "
+                        "WHERE user_id = :uid AND skill_id = :sid"
+                    ).bindparams(bindparam("ids", type_=_array_type)),
+                    {"uid": uid, "sid": primary_skill_id, "ids": merged_uuids},
+                )
+            else:
+                await db.execute(
+                    sa_text_d(
+                        "INSERT INTO skill_notes (user_id, skill_id, dynamic_kg_ids) "
+                        "VALUES (:uid, :sid, :ids)"
+                    ).bindparams(bindparam("ids", type_=_array_type)),
+                    {"uid": uid, "sid": primary_skill_id, "ids": merged_uuids},
+                )
+            await db.commit()
+
+        logger.info(
+            f"[CHAT:{id8}] dynamic_kg_updated | skill={primary_skill_id} "
+            f"added={len(new_ids)} total={len(merged_uuids)}"
+        )
+    except Exception as e:
+        logger.error(f"[CHAT:{id8}] update_dynamic_kg failed | error={e}")
+
+
 async def _write_skill_baseline(user_id: str, skill_id: str, baseline_text: str) -> None:
     """fire-and-forget: 写入 skill_notes.baseline_text, 设 baseline_complete=true"""
     from database.connection import AsyncSessionLocal
@@ -967,7 +1060,13 @@ async def close_chat_session(
         _async_session_finalize(req.session_id, conversation_dicts, user_id)
     )
 
-    # 3. 立即返回 200
+    # 3. fire-and-forget：更新 skill_notes.dynamic_kg_ids
+    asyncio.create_task(
+        _async_update_dynamic_kg(req.session_id, user_id)
+    )
+    logger.info(f"[CHAT:{id8}] dynamic_kg update triggered")
+
+    # 4. 立即返回 200
     return {"status": "ok", "session_id": req.session_id}
 
 
