@@ -59,6 +59,30 @@ def _load_skill_note(skill_id: str) -> str:
         return ""
 
 
+def _extract_note_questions(note_content: str) -> str:
+    """
+    从 note.md 中提取 'AI 初始化问卷话术' 段落的问题文本，
+    用于直接输出给用户（跳过 Gemini）。
+    提取范围：## AI 初始化问卷话术 下方，到下一个 --- 分隔符之前。
+    """
+    import re
+    m = re.search(
+        r"## AI 初始化问卷话术\s*\n(.*?)(?:\n---|\Z)",
+        note_content,
+        re.DOTALL,
+    )
+    if not m:
+        return ""
+    section = m.group(1).strip()
+    # 去掉 Markdown 标记：引用块(>)、粗体(**)、代码块(`)
+    section = re.sub(r"^\s*>\s*", "", section, flags=re.MULTILINE)
+    section = re.sub(r"\*\*([^*]+)\*\*", r"\1", section)
+    section = re.sub(r"`([^`]+)`", r"\1", section)
+    # 把反引号剩余符号清掉
+    section = section.replace("`", "")
+    return section.strip()
+
+
 router = APIRouter()
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
@@ -766,6 +790,17 @@ async def assistant_chat(
 
         # 元数据事件
         yield _sse({"type": "meta", "skill_name": skill_name, "memory_used": memory_used})
+
+        # baseline ask 阶段：直接输出 note 问题文本，跳过 Gemini
+        if needs_baseline_init and _baseline_phase == "ask":
+            _note_text = _extract_note_questions(baseline_init_note)
+            if _note_text:
+                logger.info(f"[CHAT:{req.session_id[:8]}] baseline_ask: streaming note questions directly | chars={len(_note_text)}")
+                yield _sse({"type": "token", "content": _note_text})
+            yield _sse({"type": "baseline_init", "skill_id": _strategy_skill_id, "phase": "ask"})
+            logger.info(f"[CHAT:{req.session_id[:8]}] baseline_init SSE | skill={_strategy_skill_id} phase=ask")
+            yield _sse({"type": "done"})
+            return
 
         full_text_parts = []
         suggestions_raw = ""
