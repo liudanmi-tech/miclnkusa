@@ -2469,11 +2469,8 @@ extension NetworkManager {
             let msg = (try? JSONDecoder().decode(FastAPIErrorResponse.self, from: data))?.detail ?? "init-chat-session failed (\(code))"
             throw NSError(domain: "NetworkError", code: code, userInfo: [NSLocalizedDescriptionKey: msg])
         }
-        let decoded = try JSONDecoder().decode(APIResponse<InitChatSessionResponse>.self, from: data)
-        guard decoded.code == 200, let result = decoded.data else {
-            throw NSError(domain: "NetworkError", code: decoded.code, userInfo: [NSLocalizedDescriptionKey: decoded.message])
-        }
-        return result
+        // 服务端直接返回 InitChatSessionResponse（无 APIResponse 包装）
+        return try JSONDecoder().decode(InitChatSessionResponse.self, from: data)
     }
 
     /// 直接退出：归档 session，触发异步 finalize（生成 card_title / summary / mood_state）
