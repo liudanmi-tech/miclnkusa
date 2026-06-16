@@ -22,6 +22,7 @@ struct TaskDetailView: View {
     @State private var strategyIsLoading = false
     @AppStorage("ai_disclaimer_shown") private var aiDisclaimerShown = false
     @State private var showAIDisclaimer = false
+    @State private var showChatView = false
 
     var body: some View {
         GeometryReader { geometry in
@@ -62,6 +63,7 @@ struct TaskDetailView: View {
                                     showSummarySheet = true
                                 }
                             },
+                            onChatTap: task.sessionType == "chat" ? { showChatView = true } : nil,
                             audioPlayer: audioPlayer,
                             moodEmoji: moodEmoji,
                             moodEmojiUrl: moodEmojiUrl,
@@ -79,7 +81,8 @@ struct TaskDetailView: View {
                                 skillCards: skillCards,
                                 sessionId: task.id,
                                 sceneImages: strategyAnalysis?.sceneImages ?? [],
-                                baseURL: NetworkManager.shared.getBaseURL()
+                                baseURL: NetworkManager.shared.getBaseURL(),
+                                onSkillTap: task.sessionType == "chat" ? { showChatView = true } : nil
                             )
                             .padding(.horizontal, 16)
                             .padding(.top, 12)
@@ -174,6 +177,9 @@ struct TaskDetailView: View {
                 if profileVM.selfEmojiType == "self" {
                     await SelfEmojiURLCache.shared.load()
                 }
+            }
+            .fullScreenCover(isPresented: $showChatView) {
+                ChatAIAssistantView(sessionId: task.id)
             }
             .sheet(isPresented: $showSummarySheet) {
                 SummarySheet(
@@ -405,6 +411,8 @@ private struct MomentInfoCard: View {
     let sceneDescription: String?
     let isLive: Bool
     let onSummaryTap: () -> Void
+    /// 非 nil 时表示 chat session：doc.text 按钮跳 AI chat，play 按钮隐藏
+    let onChatTap: (() -> Void)?
     @ObservedObject var audioPlayer: SessionAudioPlayerService
     let moodEmoji: String?
     let moodEmojiUrl: String?
@@ -415,31 +423,34 @@ private struct MomentInfoCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             // Scene description
-            // Action row: summary | play | share --- mood
+            // Action row: chat session → [chat][share]---[mood]
+            //             recording   → [doc][play][share]---[mood]
             HStack(spacing: 0) {
-                // Summary button
-                Button(action: onSummaryTap) {
-                    Image(systemName: "doc.text")
+                // 详情/chat 按钮
+                Button(action: { onChatTap != nil ? onChatTap!() : onSummaryTap() }) {
+                    Image(systemName: onChatTap != nil ? "bubble.left.and.bubble.right.fill" : "doc.text")
                         .font(.system(size: 22))
                         .foregroundColor(.white.opacity(0.85))
                 }
 
-                // Play/pause button
-                Button(action: { audioPlayer.togglePlayback() }) {
-                    Group {
-                        if audioPlayer.isBuffering {
-                            ProgressView()
-                                .progressViewStyle(CircularProgressViewStyle(tint: .white.opacity(0.85)))
-                                .scaleEffect(0.85)
-                                .frame(width: 22, height: 22)
-                        } else {
-                            Image(systemName: audioPlayer.isPlaying ? "pause.fill" : "play.fill")
-                                .font(.system(size: 22))
-                                .foregroundColor(.white.opacity(0.85))
+                // Play/pause 按钮（chat session 隐藏）
+                if onChatTap == nil {
+                    Button(action: { audioPlayer.togglePlayback() }) {
+                        Group {
+                            if audioPlayer.isBuffering {
+                                ProgressView()
+                                    .progressViewStyle(CircularProgressViewStyle(tint: .white.opacity(0.85)))
+                                    .scaleEffect(0.85)
+                                    .frame(width: 22, height: 22)
+                            } else {
+                                Image(systemName: audioPlayer.isPlaying ? "pause.fill" : "play.fill")
+                                    .font(.system(size: 22))
+                                    .foregroundColor(.white.opacity(0.85))
+                            }
                         }
                     }
+                    .padding(.leading, 22)
                 }
-                .padding(.leading, 22)
 
                 // Share button
                 Button(action: {
@@ -511,6 +522,8 @@ private struct MomentSkillsCard: View {
     let sessionId: String
     let sceneImages: [SceneImage]
     let baseURL: String
+    /// 非 nil 时（chat session）：点击技能跳 AI chat，不走默认 AIAssistantView
+    let onSkillTap: (() -> Void)?
     @State private var assistantCard: SkillCard?
 
     private func iconFor(_ cat: String) -> String {
@@ -547,7 +560,7 @@ private struct MomentSkillsCard: View {
             VStack(spacing: 0) {
                 ForEach(Array(skillCards.enumerated()), id: \.element.id) { idx, card in
                     Button(action: {
-                        assistantCard = card
+                        if let tap = onSkillTap { tap() } else { assistantCard = card }
                     }) {
                         HStack(spacing: 12) {
                             Rectangle()

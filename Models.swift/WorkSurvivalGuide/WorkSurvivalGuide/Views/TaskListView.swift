@@ -253,9 +253,12 @@ struct TaskListView: View {
                 )
                 viewModel.updateTask(updated)
             }
-            // 刷新列表以获取最新 finalize_status（立即 + 5s 后再刷一次，等 finalize 完成）
+            // 刷新列表：立即 + 5s + 15s，覆盖 finalize 完成时刻（关 Thinking 后约 2-3s，保守取 15s）
             viewModel.refreshTasks()
             DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
+                viewModel.refreshTasks()
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 15) {
                 viewModel.refreshTasks()
             }
         }
@@ -276,6 +279,10 @@ struct TaskListView: View {
             }
             // 触发 loadTasks → resumePendingImagePolling，开始轮询图片状态
             viewModel.refreshTasks()
+            // 15s 后再刷一次，确保 finalize 完成后 card_title / mood 能被拉取
+            DispatchQueue.main.asyncAfter(deadline: .now() + 15) {
+                viewModel.refreshTasks()
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ChatSessionDeleted"))) { notification in
             guard let sessionId = notification.object as? String else { return }
@@ -399,11 +406,14 @@ struct TaskCardRow: View {
                                         dragOffset = 0
                                     }
                                 } else if task.sessionType == "chat" {
-                                    if task.isReadyToView {
-                                        // 有生成图 → detail 页
+                                    let exitAction = UserDefaults.standard.string(
+                                        forKey: "chat_exit_action_\(task.id)"
+                                    )
+                                    if exitAction == "convert" || (exitAction == nil && task.isReadyToView) {
+                                        // Convert to Image / 已有封面（向前兼容）→ detail 页
                                         navigateToDetail = true
                                     } else {
-                                        // 无生成图 → 重入对话
+                                        // Just Close / 未退出过 → 重入对话
                                         showChatSession = true
                                     }
                                 } else if task.isReadyToView {

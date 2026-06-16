@@ -28,7 +28,9 @@ struct TaskCardView: View {
 
     /// archived 但封面图还没来：图片正在后台生成中
     private var isGeneratingImages: Bool {
-        if task.sessionType == "chat" { return false }
+        if task.sessionType == "chat" {
+            return task.coverType == "generated" && task.coverImageUrl == nil
+        }
         return task.status == .archived && task.coverImageUrl == nil
     }
 

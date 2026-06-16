@@ -292,7 +292,12 @@ class TaskListViewModel: ObservableObject {
             emotionScore: current.emotionScore,
             speakerCount: current.speakerCount,
             summary: current.summary,
+            cardTitle: current.cardTitle,
             coverImageUrl: current.coverImageUrl,
+            sessionType: current.sessionType,
+            coverType: current.coverType,
+            finalizeStatus: current.finalizeStatus,
+            emotionMood: current.emotionMood,
             progressDescription: progressDescription
         )
         tasks[index] = updated
@@ -313,7 +318,12 @@ class TaskListViewModel: ObservableObject {
             emotionScore: current.emotionScore,
             speakerCount: current.speakerCount,
             summary: summary,
+            cardTitle: current.cardTitle,
             coverImageUrl: current.coverImageUrl,
+            sessionType: current.sessionType,
+            coverType: current.coverType,
+            finalizeStatus: current.finalizeStatus,
+            emotionMood: current.emotionMood,
             progressDescription: current.progressDescription
         )
         tasks[index] = updated
@@ -392,7 +402,12 @@ class TaskListViewModel: ObservableObject {
                     emotionScore: apiTask.emotionScore,
                     speakerCount: apiTask.speakerCount,
                     summary: keepSummary ? (existingSummaries[apiTask.id].flatMap { $0 } ?? apiTask.summary) : apiTask.summary,
+                    cardTitle: apiTask.cardTitle,
                     coverImageUrl: apiTask.coverImageUrl,
+                    sessionType: apiTask.sessionType,
+                    coverType: apiTask.coverType,
+                    finalizeStatus: apiTask.finalizeStatus,
+                    emotionMood: apiTask.emotionMood,
                     progressDescription: keepProgress ? existingProgress[apiTask.id] : nil
                 )
             }
@@ -408,6 +423,7 @@ class TaskListViewModel: ObservableObject {
             ($0.status == .archived || $0.status == .completed)
             && $0.coverImageUrl == nil
             && now.timeIntervalSince($0.startTime) < 15 * 60
+            && ($0.sessionType != "chat" || $0.coverType == "generated") // chat 只在 Convert to Image 时轮询
         }
         guard !pending.isEmpty else { return }
         print("🖼️ [TaskListViewModel] 发现 \(pending.count) 个任务图片未完成，恢复轮询...")
@@ -463,51 +479,71 @@ class TaskListViewModel: ObservableObject {
         }
     }
 
+    /// 并发锁：防止多次 loadTasks() 触发多个并发 loadMissingSummaries 实例
+    private var isLoadingSummaries = false
+
     // 为archived状态且没有summary的任务异步加载summary
     private func loadMissingSummaries() {
-        // 找出所有archived状态且没有summary的任务
-        let tasksNeedingSummary = tasks.filter { task in
-            (task.status == .archived || task.status == .completed)
-            && (task.summary == nil || task.summary?.isEmpty == true)
-        }
-        
-        guard !tasksNeedingSummary.isEmpty else {
+        // 防止多次并发执行（3 次 refreshTasks 会触发 3 次）
+        guard !isLoadingSummaries else {
+            print("⏭️ [TaskListViewModel] loadMissingSummaries 正在运行，跳过重复调用")
             return
         }
-        
+
+        // chat session 的 summary 来自服务端 finalize，不通过 getTaskDetail 补充
+        let tasksNeedingSummary = tasks.filter { task in
+            (task.status == .archived || task.status == .completed)
+            && task.sessionType != "chat"
+            && (task.summary == nil || task.summary?.isEmpty == true)
+        }
+
+        guard !tasksNeedingSummary.isEmpty else { return }
+
+        isLoadingSummaries = true
         print("🔄 [TaskListViewModel] 发现 \(tasksNeedingSummary.count) 个任务需要补充summary，开始异步加载...")
-        
+
         // 使用 TaskGroup 控制并发数量，避免同时发起过多请求
         Task {
+            defer {
+                Task { @MainActor in self.isLoadingSummaries = false }
+            }
+
             // 限制并发数量为5，避免过多并发请求
             let maxConcurrent = 5
             let chunks = tasksNeedingSummary.chunked(into: maxConcurrent)
-            
+
             for chunk in chunks {
                 await withTaskGroup(of: Void.self) { group in
                     for task in chunk {
                         group.addTask {
                             do {
                                 let detail = try await self.networkManager.getTaskDetail(sessionId: task.id)
-                                
+
                                 // 缓存详情数据，供详情页使用
                                 DetailCacheManager.shared.cacheDetail(detail, for: task.id)
-                                
-                                // 更新任务的summary
+
+                                // 更新任务的summary，保留所有已有字段（避免丢失 sessionType 等关键字段）
                                 await MainActor.run {
                                     if let index = self.tasks.firstIndex(where: { $0.id == task.id }) {
+                                        let existing = self.tasks[index]
                                         let updatedTask = TaskItem(
-                                            id: task.id,
-                                            title: task.title,
-                                            startTime: task.startTime,
-                                            endTime: task.endTime,
-                                            duration: task.duration,
-                                            tags: task.tags,
-                                            status: task.status,
-                                            emotionScore: task.emotionScore,
-                                            speakerCount: task.speakerCount,
+                                            id: existing.id,
+                                            title: existing.title,
+                                            startTime: existing.startTime,
+                                            endTime: existing.endTime,
+                                            duration: existing.duration,
+                                            tags: existing.tags,
+                                            status: existing.status,
+                                            emotionScore: existing.emotionScore,
+                                            speakerCount: existing.speakerCount,
                                             summary: detail.summary,
-                                            coverImageUrl: task.coverImageUrl
+                                            cardTitle: existing.cardTitle ?? detail.cardTitle,
+                                            coverImageUrl: existing.coverImageUrl,
+                                            sessionType: existing.sessionType,
+                                            coverType: existing.coverType,
+                                            finalizeStatus: existing.finalizeStatus,
+                                            emotionMood: existing.emotionMood,
+                                            progressDescription: existing.progressDescription
                                         )
                                         self.tasks[index] = updatedTask
                                         print("✅ [TaskListViewModel] 已为任务 \(task.id) 补充summary并缓存详情")

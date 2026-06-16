@@ -246,16 +246,41 @@ struct ChatAIAssistantView: View {
         chatVM.send(text: text)
     }
 
+    // MARK: - Exit state helpers
+
+    /// 该 session 是否已经做过退出决策（Convert to Image 或 Just Close）
+    private var hasAlreadyExited: Bool {
+        let exited = UserDefaults.standard.stringArray(forKey: "chat_exited_sessions") ?? []
+        return exited.contains(sessionId)
+    }
+
+    /// 记录该 session 已做过退出决策，后续再退出直接 dismiss
+    /// action: "convert" | "just_close"
+    private func markSessionExit(action: String) {
+        var exited = UserDefaults.standard.stringArray(forKey: "chat_exited_sessions") ?? []
+        if !exited.contains(sessionId) {
+            exited.append(sessionId)
+            UserDefaults.standard.set(exited, forKey: "chat_exited_sessions")
+        }
+        UserDefaults.standard.set(action, forKey: "chat_exit_action_\(sessionId)")
+    }
+
+    // MARK: - Actions
+
     private func handleCloseTap() {
         if chatVM.isConversationEmpty {
             // 未对话 → 删除孤儿 session，不触发 finalize
             deleteOrphanSession()
+        } else if hasAlreadyExited {
+            // 已经做过退出决策（Convert to Image 或 Just Close）→ 直接退出，不再弹窗
+            dismiss()
         } else {
             showExitSheet = true
         }
     }
 
     private func handleCloseWithFinalize() {
+        markSessionExit(action: "just_close")
         isClosingSession = true
         let conversation = chatVM.conversationForServer()
         Task {
@@ -281,6 +306,7 @@ struct ChatAIAssistantView: View {
     }
 
     private func handleGenerateImage() {
+        markSessionExit(action: "convert")
         isGeneratingImage = true
         let conversation = chatVM.conversationForServer()
         Task {

@@ -1003,6 +1003,7 @@ Return ONLY valid JSON, no markdown fences:
             temperature=0.3,
             max_output_tokens=2048,
             response_mime_type="application/json",
+            thinking_config=genai.types.ThinkingConfig(thinking_budget=0),
         ),
     )
     response = await model.generate_content_async(prompt)
@@ -1222,7 +1223,7 @@ async def generate_image_from_chat(
     await db.execute(
         sa_update(Session)
         .where(Session.id == uuid.UUID(req.session_id))
-        .values(image_status="generating", finalize_status="pending")
+        .values(status="archived", image_status="generating", finalize_status="pending")
     )
     await db.commit()
 
