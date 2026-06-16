@@ -1003,7 +1003,6 @@ Return ONLY valid JSON, no markdown fences:
             temperature=0.3,
             max_output_tokens=2048,
             response_mime_type="application/json",
-            thinking_config=genai.types.ThinkingConfig(thinking_budget=0),
         ),
     )
     response = await model.generate_content_async(prompt)
