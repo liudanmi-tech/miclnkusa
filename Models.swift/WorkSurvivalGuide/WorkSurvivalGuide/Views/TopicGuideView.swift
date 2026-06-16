@@ -3,7 +3,8 @@
 //  WorkSurvivalGuide
 //
 //  AI Chat 引导面板：6 个板块卡片 + 点击后展示 3 条 topic 气泡
-//  新用户：本地 JSON 随机取 3 条
+//  JSON 从 Cloudflare R2 拉取，UserDefaults 缓存供离线使用
+//  新用户：本地缓存 JSON 随机轮换取 3 条
 //  老用户：服务端根据历史记忆个性化生成
 //
 
@@ -31,39 +32,50 @@ private struct GenZTopic: Decodable {
     let tags: [String]
 }
 
-// MARK: - 本地 JSON 加载器（单例，懒加载）
+// MARK: - R2 Topic Store（Cloudflare R2 拉取，UserDefaults 离线缓存）
 
 private final class GenZTopicStore {
     static let shared = GenZTopicStore()
-    let modules: [GenZModule]
+
+    /// R2 公开 URL（生产 bucket，静态内容无需区分测试/生产）
+    private static let r2URL = "https://pub-8a9e994d008c4d3e875ef722bded6ab5.r2.dev/static/genz_topics.json"
+    private static let cacheKey = "genz_topics_cache_v1"
+
+    private(set) var modules: [GenZModule] = []
 
     private init() {
-        guard let url = Bundle.main.url(forResource: "genz_topics", withExtension: "json"),
-              let data = try? Data(contentsOf: url),
-              let decoded = try? JSONDecoder().decode(GenZModuleData.self, from: data)
-        else {
-            modules = []
-            return
+        // 启动时从 UserDefaults 缓存恢复（离线可用）
+        if let data = UserDefaults.standard.data(forKey: Self.cacheKey),
+           let decoded = try? JSONDecoder().decode(GenZModuleData.self, from: data) {
+            modules = decoded.modules
         }
-        modules = decoded.modules
+    }
+
+    /// 从 R2 拉取最新数据，写入内存 + UserDefaults 缓存
+    func fetchFromR2() async {
+        guard let url = URL(string: Self.r2URL) else { return }
+        do {
+            let (data, response) = try await URLSession.shared.data(from: url)
+            guard let http = response as? HTTPURLResponse, http.statusCode == 200 else { return }
+            let decoded = try JSONDecoder().decode(GenZModuleData.self, from: data)
+            await MainActor.run { self.modules = decoded.modules }
+            UserDefaults.standard.set(data, forKey: Self.cacheKey)
+        } catch {
+            // 网络失败：已有缓存则继续使用
+        }
     }
 
     func module(id: String) -> GenZModule? {
         modules.first { $0.id == id }
     }
 
-    /// 从本地 JSON 取 3 条 opening_question（按 usedIndex 轮换）
+    /// 取 count 条 opening_question（按 usedIndex 轮换，避免重复）
     func nextTopics(moduleId: String, count: Int = 3) -> [String] {
         guard let mod = module(id: moduleId), !mod.topics.isEmpty else { return [] }
         let key = "chat_topic_idx_\(moduleId)"
         let startIdx = UserDefaults.standard.integer(forKey: key)
-        var result: [String] = []
         let total = mod.topics.count
-        for i in 0..<count {
-            let idx = (startIdx + i) % total
-            result.append(mod.topics[idx].opening_question)
-        }
-        // 存下次起点（推进 count 步，但不超过 total）
+        let result = (0..<count).map { mod.topics[(startIdx + $0) % total].opening_question }
         UserDefaults.standard.set((startIdx + count) % total, forKey: key)
         return result
     }
@@ -78,11 +90,10 @@ struct TopicGuideView: View {
     @State private var selectedModuleId: String? = nil
     @State private var topicBubbles: [String] = []
     @State private var isLoadingTopics = false
-    @State private var bubblesVisible = false   // 气泡依次出现的动画开关
+    @State private var bubblesVisible = false
+    @State private var isStoreLoading = false   // R2 首次拉取中（无缓存时）
 
     private let store = GenZTopicStore.shared
-
-    // 6 个模块定义（顺序固定，与设计图一致）
     private let moduleIds = ["work", "school", "romance", "friends_family", "money_future", "body_emotions"]
 
     var body: some View {
@@ -91,8 +102,10 @@ struct TopicGuideView: View {
             moduleGrid
                 .padding(.horizontal, 16)
                 .padding(.top, 12)
+                .opacity(isStoreLoading ? 0.4 : 1.0)
+                .allowsHitTesting(!isStoreLoading)
 
-            // ── 分割线 ──
+            // ── 分割线（选中后出现）──
             if selectedModuleId != nil {
                 Divider()
                     .background(Color.white.opacity(0.12))
@@ -104,6 +117,14 @@ struct TopicGuideView: View {
             topicBubblesArea
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
+        }
+        .task {
+            // 首次打开：无缓存时从 R2 拉取
+            if store.modules.isEmpty {
+                isStoreLoading = true
+                await store.fetchFromR2()
+                isStoreLoading = false
+            }
         }
     }
 
@@ -118,13 +139,13 @@ struct TopicGuideView: View {
         return LazyVGrid(columns: columns, spacing: 8) {
             ForEach(moduleIds, id: \.self) { moduleId in
                 if let mod = store.module(id: moduleId) {
-                    ModuleCardView(
-                        module: mod,
-                        isSelected: selectedModuleId == moduleId
-                    )
-                    .onTapGesture {
-                        handleModuleTap(moduleId)
-                    }
+                    ModuleCardView(module: mod, isSelected: selectedModuleId == moduleId)
+                        .onTapGesture { handleModuleTap(moduleId) }
+                } else {
+                    // 数据还未加载时的占位卡片
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(Color.white.opacity(0.07))
+                        .frame(height: 80)
                 }
             }
         }
@@ -135,7 +156,6 @@ struct TopicGuideView: View {
     @ViewBuilder
     private var topicBubblesArea: some View {
         if isLoadingTopics {
-            // 骨架加载态：3 条占位动画条
             VStack(spacing: 8) {
                 ForEach(0..<3, id: \.self) { i in
                     ShimmerBubble()
@@ -172,60 +192,46 @@ struct TopicGuideView: View {
         bubblesVisible = false
         isLoadingTopics = true
 
-        // 判断新用户 vs 老用户
         let usedKey = "chat_used_modules"
         let usedModules = UserDefaults.standard.stringArray(forKey: usedKey) ?? []
         let isReturning = usedModules.contains(moduleId)
+        let lang = Locale.preferredLanguages.first ?? "en"
 
         if isReturning {
             // 老用户：调服务端 API
-            let lang = Locale.preferredLanguages.first ?? "en"
             Task {
                 do {
-                    let resp = try await NetworkManager.shared.getChatTopics(
-                        module: moduleId, userLanguage: lang
-                    )
+                    let resp = try await NetworkManager.shared.getChatTopics(module: moduleId, userLanguage: lang)
                     await MainActor.run {
-                        if selectedModuleId == moduleId {   // 防止用户快速切换时覆盖错误模块
-                            if resp.source == "memory" && !resp.topics.isEmpty {
-                                topicBubbles = resp.topics
-                            } else {
-                                // 服务端回退 → 用本地 JSON
-                                topicBubbles = store.nextTopics(moduleId: moduleId)
-                            }
-                            isLoadingTopics = false
-                            bubblesVisible = false
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                                bubblesVisible = true
-                            }
-                        }
+                        guard selectedModuleId == moduleId else { return }
+                        topicBubbles = (resp.source == "memory" && !resp.topics.isEmpty)
+                            ? resp.topics
+                            : store.nextTopics(moduleId: moduleId)
+                        showBubbles()
                     }
                 } catch {
                     await MainActor.run {
-                        if selectedModuleId == moduleId {
-                            topicBubbles = store.nextTopics(moduleId: moduleId)
-                            isLoadingTopics = false
-                            bubblesVisible = false
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                                bubblesVisible = true
-                            }
-                        }
+                        guard selectedModuleId == moduleId else { return }
+                        topicBubbles = store.nextTopics(moduleId: moduleId)
+                        showBubbles()
                     }
                 }
             }
         } else {
-            // 新用户：本地 JSON，立即展示
-            let topics = store.nextTopics(moduleId: moduleId)
+            // 新用户：直接用本地缓存 JSON
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                if selectedModuleId == moduleId {
-                    topicBubbles = topics
-                    isLoadingTopics = false
-                    bubblesVisible = false
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                        bubblesVisible = true
-                    }
-                }
+                guard selectedModuleId == moduleId else { return }
+                topicBubbles = store.nextTopics(moduleId: moduleId)
+                showBubbles()
             }
+        }
+    }
+
+    private func showBubbles() {
+        isLoadingTopics = false
+        bubblesVisible = false
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+            bubblesVisible = true
         }
     }
 
@@ -279,7 +285,6 @@ private struct TopicBubbleButton: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 0) {
-                // 左侧彩色竖线 accent
                 Rectangle()
                     .fill(accentColor)
                     .frame(width: 3)
@@ -298,10 +303,7 @@ private struct TopicBubbleButton: View {
                 Spacer(minLength: 0)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 14)
-                    .fill(Color.white.opacity(0.09))
-            )
+            .background(RoundedRectangle(cornerRadius: 14).fill(Color.white.opacity(0.09)))
         }
         .buttonStyle(.plain)
     }
@@ -317,16 +319,11 @@ private struct ShimmerBubble: View {
             RoundedRectangle(cornerRadius: 14)
                 .fill(Color.white.opacity(0.07))
                 .frame(height: 48)
-
-            // shimmer 扫光
             GeometryReader { geo in
-                LinearGradient(
-                    colors: [.clear, .white.opacity(0.12), .clear],
-                    startPoint: .leading,
-                    endPoint: .trailing
-                )
-                .frame(width: 120)
-                .offset(x: shimmerOffset + geo.size.width * 0.3)
+                LinearGradient(colors: [.clear, .white.opacity(0.12), .clear],
+                               startPoint: .leading, endPoint: .trailing)
+                    .frame(width: 120)
+                    .offset(x: shimmerOffset + geo.size.width * 0.3)
             }
             .clipShape(RoundedRectangle(cornerRadius: 14))
         }
