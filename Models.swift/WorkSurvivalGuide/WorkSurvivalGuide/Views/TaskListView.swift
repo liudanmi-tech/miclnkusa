@@ -253,8 +253,11 @@ struct TaskListView: View {
                 )
                 viewModel.updateTask(updated)
             }
-            // 刷新列表以获取最新 finalize_status
+            // 刷新列表以获取最新 finalize_status（立即 + 5s 后再刷一次，等 finalize 完成）
             viewModel.refreshTasks()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
+                viewModel.refreshTasks()
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ChatSessionGeneratingImage"))) { notification in
             guard let sessionId = notification.object as? String else { return }
@@ -271,6 +274,8 @@ struct TaskListView: View {
                 )
                 viewModel.updateTask(updated)
             }
+            // 触发 loadTasks → resumePendingImagePolling，开始轮询图片状态
+            viewModel.refreshTasks()
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ChatSessionDeleted"))) { notification in
             guard let sessionId = notification.object as? String else { return }

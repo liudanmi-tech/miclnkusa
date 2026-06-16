@@ -422,6 +422,11 @@ class TaskListViewModel: ObservableObject {
                         guard let imgStatus = try? await self.networkManager.getImageStatus(
                             sessionId: task.id, authToken: authToken
                         ) else { continue }
+                        // failed 直接跳出，避免无限等待
+                        if imgStatus.status == "failed" {
+                            print("❌ [TaskListViewModel] 任务 \(task.id) 图片生成失败")
+                            return
+                        }
                         guard imgStatus.status == "completed", imgStatus.totalScenes > 0 else { continue }
 
                         // 图片就绪，从 scene_images 取第一个有效 URL 作为封面
@@ -429,6 +434,11 @@ class TaskListViewModel: ObservableObject {
                         let coverUrl = imgStatus.images.compactMap {
                             $0.getAccessibleImageURL(baseURL: baseURL)
                         }.first
+
+                        guard let coverUrl else {
+                            print("⚠️ [TaskListViewModel] 任务 \(task.id) status=completed 但无有效图片 URL，放弃")
+                            return
+                        }
 
                         await MainActor.run {
                             guard let idx = self.tasks.firstIndex(where: { $0.id == task.id }) else { return }
@@ -438,7 +448,9 @@ class TaskListViewModel: ObservableObject {
                                 endTime: cur.endTime, duration: cur.duration, tags: cur.tags,
                                 status: cur.status, emotionScore: cur.emotionScore,
                                 speakerCount: cur.speakerCount, summary: cur.summary,
-                                cardTitle: cur.cardTitle, coverImageUrl: coverUrl
+                                cardTitle: cur.cardTitle, coverImageUrl: coverUrl,
+                                sessionType: cur.sessionType, coverType: cur.coverType,
+                                finalizeStatus: cur.finalizeStatus, emotionMood: cur.emotionMood
                             )
                             self.saveToCache()
                             print("✅ [TaskListViewModel] 任务 \(task.id) 封面已补全，卡片解锁")

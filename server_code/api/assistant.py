@@ -981,8 +981,8 @@ CONVERSATION:
 {conv_text}
 
 Based on this conversation, generate a JSON response with exactly these 5 fields:
-1. card_title: First-person diary-style English title, 25-40 words, starting with "I"
-2. summary: First-person diary-style English summary, 50-100 words, starting with "Today"
+1. card_title: First-person English title, MAX 15 words, starting with "I"
+2. summary: First-person English summary, MAX 40 words, starting with "Today"
 3. mood_state: Exactly one of: Happy | Excited | Content | Neutral | Anxious | Frustrated | Sad | Angry | Overwhelmed
 4. emotion_type: Exactly one of: workplace_stress | relationship_tension | family_conflict | academic_pressure | self_reflection | general_venting
 5. intensity: Integer 1-10
@@ -1001,7 +1001,7 @@ Return ONLY valid JSON, no markdown fences:
         ASSISTANT_MODEL,
         generation_config=genai.GenerationConfig(
             temperature=0.3,
-            max_output_tokens=1024,
+            max_output_tokens=2048,
             response_mime_type="application/json",
         ),
     )
@@ -1026,7 +1026,38 @@ Return ONLY valid JSON, no markdown fences:
     if m:
         raw = m.group(0)
 
-    return json.loads(raw)
+    # 尝试 json.loads；失败时逐字段 regex 提取，避免截断导致整体失败
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        logger.warning(f"[finalize] json.loads failed, trying field extraction | raw_head={raw[:80]!r}")
+        _VALID_MOODS = {"Happy", "Excited", "Content", "Neutral", "Anxious", "Frustrated", "Sad", "Angry", "Overwhelmed"}
+        _VALID_EMOTIONS = {"workplace_stress", "relationship_tension", "family_conflict", "academic_pressure", "self_reflection", "general_venting"}
+
+        def _extract_str(key: str) -> str:
+            m2 = re.search(rf'"{key}"\s*:\s*"([^"]*)"', raw)
+            return m2.group(1) if m2 else ""
+
+        def _extract_int(key: str, default: int) -> int:
+            m2 = re.search(rf'"{key}"\s*:\s*(\d+)', raw)
+            return int(m2.group(1)) if m2 else default
+
+        card_title  = _extract_str("card_title") or "A chat session"
+        summary_txt = _extract_str("summary") or "A brief conversation."
+        mood        = _extract_str("mood_state")
+        if mood not in _VALID_MOODS:
+            mood = "Neutral"
+        emo         = _extract_str("emotion_type")
+        if emo not in _VALID_EMOTIONS:
+            emo = "general_venting"
+        intensity   = _extract_int("intensity", 5)
+        return {
+            "card_title":   card_title,
+            "summary":      summary_txt,
+            "mood_state":   mood,
+            "emotion_type": emo,
+            "intensity":    intensity,
+        }
 
 
 async def _async_session_finalize(session_id: str, conversation: list, user_id: str) -> None:
@@ -1054,12 +1085,12 @@ async def _async_session_finalize(session_id: str, conversation: list, user_id: 
                 session_id=uuid.UUID(session_id),
                 dialogues=[],
                 card_title=card_title,
-                conversation_summary=summary,
+                summary=summary,
             ).on_conflict_do_update(
                 index_elements=["session_id"],
                 set_={
                     "card_title": card_title,
-                    "conversation_summary": summary,
+                    "summary": summary,
                     "updated_at": sa_func.now(),
                 },
             )
@@ -1176,11 +1207,11 @@ async def generate_image_from_chat(
     if not synthetic_transcript:
         raise HTTPException(status_code=400, detail="No user messages in conversation")
 
-    # 2. 查 user profile（relationship_type="自己"）→ speaker_mapping
+    # 2. 查 user profile（relationship_type="自己"/"Self"）→ speaker_mapping
     profile_q = await db.execute(
         select(Profile).where(
             Profile.user_id == uuid.UUID(user_id),
-            Profile.relationship_type == "自己",
+            Profile.relationship_type.in_(["自己", "Self", "self"]),
         ).limit(1)
     )
     profile = profile_q.scalar_one_or_none()
@@ -1198,6 +1229,7 @@ async def generate_image_from_chat(
     # 4. fire-and-forget：生图任务
     from scene_image_generator import generate_scene_images as _gen_scene_imgs
     from main import generate_image_from_prompt as _gen_img_fn
+    from main import _fetch_profile_image_from_oss as _fetch_prof_img_fn
     _gemini_model = os.getenv("GEMINI_FLASH_MODEL", ASSISTANT_MODEL)
 
     asyncio.create_task(_gen_scene_imgs(
@@ -1207,6 +1239,7 @@ async def generate_image_from_chat(
         user_id=user_id,
         gemini_flash_model=_gemini_model,
         generate_image_fn=_gen_img_fn,
+        fetch_profile_image_fn=_fetch_prof_img_fn,
         speaker_mapping=speaker_mapping,
         max_images=1,
     ))

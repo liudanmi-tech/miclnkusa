@@ -209,6 +209,9 @@ struct TaskCardView: View {
                     ProgressView()
                         .tint(Color(hex: "#FBBF24"))
                         .scaleEffect(1.5)
+                } else if task.sessionType == "chat", let mood = task.emotionMood {
+                    Text(moodEmoji(for: mood))
+                        .font(.system(size: 48))
                 } else {
                     QuotationMarkView(size: 32, color: Color.white.opacity(0.6), opacity: 0.7, isGrayStyle: true)
                 }
@@ -221,6 +224,19 @@ struct TaskCardView: View {
                     .font(.system(size: 32))
                     .foregroundColor(Color.white.opacity(0.6))
             }
+        }
+    }
+
+    private func moodEmoji(for mood: String) -> String {
+        switch mood {
+        case "Happy", "Excited":   return "😊"
+        case "Content":            return "🙂"
+        case "Anxious":            return "😰"
+        case "Frustrated":         return "😤"
+        case "Sad":                return "😢"
+        case "Angry":              return "😠"
+        case "Overwhelmed":        return "😵"
+        default:                   return "😐"
         }
     }
 
