@@ -26,6 +26,7 @@ struct ChatAIAssistantView: View {
     // ── scroll proxy for auto-scroll to bottom ──
     @State private var scrollToBottom = false
 
+
     init(sessionId: String) {
         self.sessionId = sessionId
         _chatVM = StateObject(wrappedValue: ChatAIAssistantViewModel(sessionId: sessionId))
@@ -45,12 +46,28 @@ struct ChatAIAssistantView: View {
                             .transition(.opacity.combined(with: .move(edge: .top)))
                     }
 
-                    // 对话流
-                    chatScrollView
+                    // 引导面板：仅在对话为空时展示（messages.isEmpty）
+                    if chatVM.messages.isEmpty {
+                        ScrollView {
+                            TopicGuideView { moduleId, topicText in
+                                // 用户点击气泡 → 标记模块已用 → 发送消息
+                                chatVM.markModuleUsed(moduleId)
+                                chatVM.send(text: topicText)
+                            }
+                        }
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                    }
+
+                    // 对话流（有消息后显示）
+                    if !chatVM.messages.isEmpty {
+                        chatScrollView
+                            .transition(.opacity)
+                    }
 
                     // 底部输入栏
                     inputBar
                 }
+                .animation(.easeInOut(duration: 0.25), value: chatVM.messages.isEmpty)
 
                 // Error toast
                 if let msg = errorToast {

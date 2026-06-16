@@ -1257,3 +1257,190 @@ async def generate_image_from_chat(
 
     # 6. 立即返回 202
     return {"status": "generating", "session_id": req.session_id}
+
+
+# ─── Chat Topic Guide ─────────────────────────────────────────────────────────
+
+# 每个模块的关键词，用于从 chat session 历史中过滤相关记忆
+_MODULE_KEYWORDS: dict[str, list[str]] = {
+    "work": [
+        "工作", "老板", "同事", "加班", "KPI", "绩效", "职场", "汇报", "升职", "裁员",
+        "work", "job", "boss", "coworker", "career", "office", "meeting", "fired", "promotion",
+    ],
+    "school": [
+        "学校", "考试", "作业", "老师", "同学", "成绩", "读书", "毕业", "申请", "论文",
+        "school", "exam", "homework", "teacher", "grade", "study", "university", "thesis",
+    ],
+    "romance": [
+        "感情", "恋爱", "前任", "暗恋", "分手", "男友", "女友", "约会", "表白", "出轨",
+        "romance", "dating", "relationship", "breakup", "boyfriend", "girlfriend", "crush",
+    ],
+    "friends_family": [
+        "朋友", "家人", "父母", "妈妈", "爸爸", "兄弟", "姐妹", "闺蜜", "亲戚",
+        "friend", "family", "parent", "mom", "dad", "sibling", "relative",
+    ],
+    "money_future": [
+        "钱", "存款", "工资", "投资", "买房", "未来", "规划", "理财", "创业", "贷款",
+        "money", "salary", "saving", "invest", "future", "finance", "loan", "budget",
+    ],
+    "body_emotions": [
+        "焦虑", "抑郁", "情绪", "睡眠", "疲惫", "健康", "心情", "崩溃", "压力", "失眠",
+        "anxiety", "stress", "mental", "health", "sleep", "emotion", "tired", "burnout",
+    ],
+}
+
+_MODULE_LABELS: dict[str, str] = {
+    "work":           "Work",
+    "school":         "School",
+    "romance":        "Romance / Dating",
+    "friends_family": "Friends / Family",
+    "money_future":   "Money / Future",
+    "body_emotions":  "Body / Emotions",
+}
+
+
+def _score_memory(summary: str, card_title: str, keywords: list[str]) -> int:
+    """计算一条 session 记忆与模块关键词的相关分数（关键词命中数）"""
+    text = f"{summary or ''} {card_title or ''}".lower()
+    return sum(1 for kw in keywords if kw.lower() in text)
+
+
+async def _generate_topics_with_gemini(
+    module: str, memories: list[dict], user_language: str
+) -> list[str] | None:
+    """
+    用 Gemini Flash（无 thinking）根据用户记忆生成 3 条个性化开场问题。
+    失败时返回 None，由调用方回退到默认 JSON。
+    """
+    label = _MODULE_LABELS.get(module, module)
+
+    # 构建记忆 context（每条最多取 200 字摘要）
+    memory_lines = []
+    for i, mem in enumerate(memories, 1):
+        text = (mem.get("summary") or mem.get("card_title") or "").strip()
+        if text:
+            memory_lines.append(f"[记忆 {i}] {text[:200]}")
+    if not memory_lines:
+        return None
+
+    context_str = "\n".join(memory_lines)
+
+    # 语言指令
+    if user_language.startswith("zh"):
+        lang_instruction = "用中文（简体）回复，口语化风格。"
+    else:
+        lang_instruction = "Reply in English, conversational tone."
+
+    prompt = f"""You are an empathetic AI friend who knows this user's past experiences.
+The user is about to start a conversation about the topic: "{label}".
+
+Here are some things this user has shared in the past:
+
+{context_str}
+
+Generate exactly 3 opening questions in the style of a caring friend checking in.
+Requirements:
+1. Reference the user's actual past experiences — NOT generic questions
+2. Second-person, conversational, like a friend asking
+3. Each question ≤ 20 words (or ≤ 25 Chinese characters)
+4. Three different angles: emotional state / event follow-up / future action
+5. {lang_instruction}
+
+Output ONLY valid JSON, no other text:
+{{"questions": ["question1", "question2", "question3"]}}"""
+
+    try:
+        model = genai.GenerativeModel(
+            model_name="gemini-2.0-flash",
+            generation_config=genai.GenerationConfig(
+                temperature=0.7,
+                max_output_tokens=300,
+                response_mime_type="application/json",
+            ),
+        )
+        resp = await asyncio.get_event_loop().run_in_executor(
+            None, lambda: model.generate_content(prompt)
+        )
+        raw = resp.text.strip()
+        data = json.loads(raw)
+        questions = data.get("questions", [])
+        if isinstance(questions, list) and len(questions) >= 1:
+            return [str(q).strip() for q in questions[:3] if str(q).strip()]
+    except Exception as e:
+        logger.warning(f"[chat-topics] Gemini generation failed: {e}")
+    return None
+
+
+@router.get("/chat-topics")
+async def get_chat_topics(
+    module: str,
+    user_language: str = "en",
+    limit: int = 3,
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    GET /api/v1/assistant/chat-topics?module=work&user_language=zh-Hans
+    老用户个性化：从该用户历史 chat session 中提取相关记忆，用 Gemini 生成 3 条开场问题。
+    无相关历史时返回 source="default"，iOS 侧回退到本地 JSON。
+    """
+    id8 = user_id[:8]
+    if module not in _MODULE_KEYWORDS:
+        raise HTTPException(status_code=400, detail=f"Unknown module: {module}")
+
+    keywords = _MODULE_KEYWORDS[module]
+    logger.info(f"[chat-topics] module={module} lang={user_language} user={id8}")
+
+    # ── Step 1: 查该用户最近 30 条已完成 chat session，JOIN analysis_results ──
+    stmt = (
+        select(
+            Session.id,
+            Session.mood_state,
+            Session.created_at,
+            AnalysisResult.summary,
+            AnalysisResult.card_title,
+        )
+        .outerjoin(AnalysisResult, AnalysisResult.session_id == Session.id)
+        .where(
+            Session.user_id == uuid.UUID(user_id),
+            Session.session_type == "chat",
+            Session.status == "archived",
+        )
+        .order_by(Session.created_at.desc())
+        .limit(30)
+    )
+    result = await db.execute(stmt)
+    rows = result.all()
+    logger.info(f"[chat-topics] fetched {len(rows)} chat sessions")
+
+    # ── Step 2: 关键词打分，过滤相关记忆 ──
+    scored = []
+    for row in rows:
+        score = _score_memory(row.summary or "", row.card_title or "", keywords)
+        if score > 0:
+            scored.append({
+                "summary":    row.summary or "",
+                "card_title": row.card_title or "",
+                "score":      score,
+                "created_at": str(row.created_at),
+            })
+
+    # 按相关分降序，取 top 5
+    scored.sort(key=lambda x: (-x["score"], x["created_at"]))
+    top_memories = scored[:5]
+    logger.info(f"[chat-topics] relevant memories={len(top_memories)} for module={module}")
+
+    # ── Step 3: 无相关历史 → 返回 default，让 iOS 用本地 JSON ──
+    if not top_memories:
+        logger.info(f"[chat-topics] no relevant history → returning default")
+        return {"module": module, "topics": [], "source": "default"}
+
+    # ── Step 4: Gemini 生成个性化问题 ──
+    questions = await _generate_topics_with_gemini(module, top_memories, user_language)
+
+    if not questions:
+        logger.warning(f"[chat-topics] Gemini failed → returning default")
+        return {"module": module, "topics": [], "source": "default"}
+
+    logger.info(f"[chat-topics] generated {len(questions)} questions for module={module}")
+    return {"module": module, "topics": questions[:limit], "source": "memory"}

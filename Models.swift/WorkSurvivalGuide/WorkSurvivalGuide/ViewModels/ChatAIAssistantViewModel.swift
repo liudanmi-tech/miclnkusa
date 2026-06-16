@@ -107,6 +107,16 @@ final class ChatAIAssistantViewModel: ObservableObject {
         }
     }
 
+    /// 用户从引导面板选择了某模块后发送 topic → 标记该模块为"已用"（下次走老用户流程）
+    func markModuleUsed(_ moduleId: String) {
+        let key = "chat_used_modules"
+        var used = UserDefaults.standard.stringArray(forKey: key) ?? []
+        if !used.contains(moduleId) {
+            used.append(moduleId)
+            UserDefaults.standard.set(used, forKey: key)
+        }
+    }
+
     /// 发送一条消息
     func send(text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)

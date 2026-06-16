@@ -24,6 +24,12 @@ struct InitChatSessionResponse: Codable {
     }
 }
 
+struct ChatTopicsResponse: Codable {
+    let module: String
+    let topics: [String]
+    let source: String   // "memory" | "default"
+}
+
 struct GenerateImageFromChatResponse: Codable {
     let status: String
     let sessionId: String
@@ -2461,6 +2467,29 @@ extension NetworkManager {
     // MARK: - Chat Session APIs
 
     /// 创建 chat 类型 session，立即返回 session_id
+    /// 获取 chat 引导面板的 topic 气泡（老用户：从历史记忆个性化生成；新用户返回 source="default"）
+    func getChatTopics(module: String, userLanguage: String) async throws -> ChatTopicsResponse {
+        let token = getAuthToken()
+        guard !token.isEmpty else {
+            throw NSError(domain: "NetworkError", code: 401, userInfo: [NSLocalizedDescriptionKey: "请先登录"])
+        }
+        var components = URLComponents(string: "\(baseURLForRead)/assistant/chat-topics")!
+        components.queryItems = [
+            URLQueryItem(name: "module", value: module),
+            URLQueryItem(name: "user_language", value: userLanguage),
+        ]
+        var request = URLRequest(url: components.url!)
+        request.httpMethod = "GET"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.timeoutInterval = 10
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+            throw NSError(domain: "NetworkError", code: code, userInfo: [NSLocalizedDescriptionKey: "chat-topics failed (\(code))"])
+        }
+        return try JSONDecoder().decode(ChatTopicsResponse.self, from: data)
+    }
+
     func initChatSession() async throws -> InitChatSessionResponse {
         let token = getAuthToken()
         guard !token.isEmpty else {
