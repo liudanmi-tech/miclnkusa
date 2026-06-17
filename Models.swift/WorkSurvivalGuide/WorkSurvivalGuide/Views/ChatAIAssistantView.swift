@@ -6,8 +6,12 @@
 //
 
 import SwiftUI
+import Speech
+import AVFoundation
 
 // MARK: - ChatAIAssistantView
+
+private enum ChatInputMode { case voice, text }
 
 struct ChatAIAssistantView: View {
     let sessionId: String
@@ -25,6 +29,11 @@ struct ChatAIAssistantView: View {
 
     // ── scroll proxy for auto-scroll to bottom ──
     @State private var scrollToBottom = false
+
+    // ── voice input ──
+    @State private var inputMode: ChatInputMode = .voice
+    @State private var isRecording: Bool = false
+    @StateObject private var voiceService = VoiceInputService()
 
 
     init(sessionId: String) {
@@ -229,6 +238,96 @@ struct ChatAIAssistantView: View {
     // MARK: - Input Bar
 
     private var inputBar: some View {
+        Group {
+            switch inputMode {
+            case .voice:
+                voiceInputBar
+            case .text:
+                textInputBar
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background(Color.black.opacity(0.6))
+        .animation(.spring(response: 0.3, dampingFraction: 0.82), value: inputMode)
+        .animation(.spring(response: 0.25, dampingFraction: 0.8), value: isRecording)
+    }
+
+    // ── 语音模式（默认）──
+    private var voiceInputBar: some View {
+        HStack(spacing: 12) {
+            if isRecording {
+                // 录音中：声波胶囊（单击 = 停止并发送）
+                Button(action: sendVoiceMessage) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "mic.fill")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(.white.opacity(0.75))
+                        ChatVoiceWaveformView()
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 13)
+                    .background(
+                        Capsule()
+                            .fill(Color.white.opacity(0.12))
+                            .overlay(Capsule().stroke(Color.white.opacity(0.2), lineWidth: 1))
+                    )
+                }
+                .buttonStyle(.plain)
+                .transition(.opacity.combined(with: .scale(scale: 0.96)))
+
+                // 取消按钮
+                Button(action: cancelRecording) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundColor(.white.opacity(0.7))
+                        .frame(width: 40, height: 40)
+                        .background(Circle().fill(Color.white.opacity(0.1)))
+                }
+                .buttonStyle(.plain)
+                .transition(.opacity.combined(with: .scale(scale: 0.9)))
+
+            } else {
+                // 待机：大胶囊"Hold to speak"（单击 = 开始录音）
+                Button(action: startRecording) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "mic.fill")
+                            .font(.system(size: 14))
+                            .foregroundColor(.white.opacity(0.5))
+                        Text("Hold to speak")
+                            .font(.system(size: 16, design: .rounded))
+                            .foregroundColor(.white.opacity(0.35))
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 13)
+                    .background(
+                        Capsule()
+                            .fill(Color.white.opacity(0.07))
+                            .overlay(Capsule().stroke(Color.white.opacity(0.1), lineWidth: 1))
+                    )
+                }
+                .buttonStyle(.plain)
+                .disabled(chatVM.isStreaming)
+                .transition(.opacity.combined(with: .scale(scale: 0.96)))
+
+                // 键盘按钮（切文字模式）
+                Button(action: { inputMode = .text }) {
+                    Image(systemName: "keyboard")
+                        .font(.system(size: 15))
+                        .foregroundColor(.white.opacity(0.55))
+                        .frame(width: 40, height: 40)
+                        .background(Circle().fill(Color.white.opacity(0.08)))
+                }
+                .buttonStyle(.plain)
+                .transition(.opacity)
+            }
+        }
+    }
+
+    // ── 文字模式 ──
+    private var textInputBar: some View {
         HStack(spacing: 12) {
             TextField("Message...", text: $inputText, axis: .vertical)
                 .lineLimit(1...5)
@@ -240,18 +339,36 @@ struct ChatAIAssistantView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 20))
                 .disabled(chatVM.isStreaming)
 
-            Button(action: sendMessage) {
-                Image(systemName: "arrow.up.circle.fill")
-                    .font(.system(size: 30))
-                    .foregroundColor(inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || chatVM.isStreaming
-                        ? .white.opacity(0.25)
-                        : .white)
+            if chatVM.isStreaming {
+                // 流式生成中：停止按钮
+                Button(action: { chatVM.cancelStream() }) {
+                    Image(systemName: "stop.fill")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundColor(.white)
+                        .frame(width: 38, height: 38)
+                        .background(Circle().fill(Color.white.opacity(0.15)))
+                }
+                .buttonStyle(.plain)
+            } else if inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                // 空文字：麦克风按钮（切回语音模式）
+                Button(action: { inputMode = .voice }) {
+                    Image(systemName: "mic.fill")
+                        .font(.system(size: 15))
+                        .foregroundColor(.white.opacity(0.55))
+                        .frame(width: 38, height: 38)
+                        .background(Circle().fill(Color.white.opacity(0.08)))
+                }
+                .buttonStyle(.plain)
+            } else {
+                // 有内容：发送按钮
+                Button(action: sendMessage) {
+                    Image(systemName: "arrow.up.circle.fill")
+                        .font(.system(size: 30))
+                        .foregroundColor(.white)
+                }
+                .buttonStyle(.plain)
             }
-            .disabled(inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || chatVM.isStreaming)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-        .background(Color.black.opacity(0.6))
     }
 
     // MARK: - Actions
@@ -261,6 +378,30 @@ struct ChatAIAssistantView: View {
         guard !text.isEmpty else { return }
         inputText = ""
         chatVM.send(text: text)
+    }
+
+    private func startRecording() {
+        withAnimation(.spring(response: 0.28, dampingFraction: 0.8)) {
+            isRecording = true
+        }
+        voiceService.startRecording()
+    }
+
+    private func sendVoiceMessage() {
+        voiceService.stopRecording { transcribed in
+            withAnimation(.spring(response: 0.28, dampingFraction: 0.8)) {
+                self.isRecording = false
+            }
+            guard let text = transcribed, !text.isEmpty else { return }
+            self.chatVM.send(text: text)
+        }
+    }
+
+    private func cancelRecording() {
+        voiceService.stopRecording { _ in }
+        withAnimation(.spring(response: 0.28, dampingFraction: 0.8)) {
+            isRecording = false
+        }
     }
 
     // MARK: - Exit state helpers
@@ -413,5 +554,36 @@ private struct StreamingDotView: View {
         .onReceive(timer) { _ in
             phase = (phase + 1) % 3
         }
+    }
+}
+
+// MARK: - Chat Voice Waveform
+
+private struct ChatVoiceWaveformView: View {
+    private let barCount = 22
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 0.1)) { context in
+            HStack(alignment: .center, spacing: 2.5) {
+                ForEach(0..<barCount, id: \.self) { i in
+                    let h = barHeight(index: i, date: context.date)
+                    Capsule()
+                        .fill(Color.white.opacity(0.72))
+                        .frame(width: 2.5, height: h)
+                        .animation(.spring(response: 0.28, dampingFraction: 0.62), value: h)
+                }
+            }
+            .frame(height: 28)
+            .clipped()
+            .frame(maxWidth: .infinity)
+        }
+    }
+
+    private func barHeight(index: Int, date: Date) -> CGFloat {
+        let t = date.timeIntervalSinceReferenceDate
+        let f1 = 3.8 + Double(index) * 0.21
+        let f2 = 7.3 + Double(index) * 0.16
+        let v = (sin(t * f1) + sin(t * f2 + Double(index) * 0.9) * 0.55 + 1.55) / 3.1
+        return max(3, CGFloat(v) * 26)
     }
 }
