@@ -1078,6 +1078,13 @@ async def _async_session_finalize(session_id: str, conversation: list, user_id: 
         emotion_type  = result.get("emotion_type", "general_venting")
         intensity     = int(result.get("intensity", 5))
 
+        # 将文字 mood_state 映射为 0-100 数值，供 weekly-stats mood_series 使用
+        _MOOD_SCORE_MAP = {
+            "Excited": 88, "Happy": 80, "Content": 70, "Neutral": 55,
+            "Anxious": 38, "Frustrated": 30, "Sad": 22, "Angry": 18, "Overwhelmed": 20,
+        }
+        mood_score = _MOOD_SCORE_MAP.get(mood_state, 55)
+
         async with AsyncSessionLocal() as db:
             # UPSERT analysis_results（session 可能已有记录，防重）
             stmt = pg_insert(AnalysisResult).values(
@@ -1086,11 +1093,13 @@ async def _async_session_finalize(session_id: str, conversation: list, user_id: 
                 dialogues=[],
                 card_title=card_title,
                 summary=summary,
+                mood_score=mood_score,
             ).on_conflict_do_update(
                 index_elements=["session_id"],
                 set_={
                     "card_title": card_title,
                     "summary": summary,
+                    "mood_score": mood_score,
                     "updated_at": sa_func.now(),
                 },
             )
@@ -1110,7 +1119,7 @@ async def _async_session_finalize(session_id: str, conversation: list, user_id: 
             await db.commit()
 
         logger.info(
-            f"[CHAT:{id8}] finalize done | mood={mood_state} "
+            f"[CHAT:{id8}] finalize done | mood={mood_state} score={mood_score} "
             f"emotion_type={emotion_type} intensity={intensity} "
             f"card_title_len={len(card_title)}"
         )
