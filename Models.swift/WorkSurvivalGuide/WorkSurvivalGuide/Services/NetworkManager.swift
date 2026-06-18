@@ -1021,6 +1021,118 @@ class NetworkManager {
         }
     }
 
+    // MARK: - AI Assistant Chat Audio (SSE, multipart/form-data)
+
+    /// 向 AI Assistant 发送语音消息（原始 .m4a Data，multipart 上传），SSE 流式接收回复。
+    /// SSE 事件格式与 streamAssistantChat 完全相同，iOS 侧 callback 签名一致。
+    @discardableResult
+    func streamAssistantChatAudio(
+        sessionId: String,
+        skillId: String,
+        history: [[String: String]],
+        userLanguage: String = "en",
+        audioData: Data,
+        onTranscript:  @escaping @Sendable (String) -> Void = { _ in },
+        onToken:       @escaping @Sendable (String) -> Void,
+        onSuggestions: @escaping @Sendable ([String]) -> Void,
+        onDone:        @escaping @Sendable () -> Void,
+        onError:       @escaping @Sendable (String) -> Void
+    ) -> Task<Void, Never> {
+        let token = getAuthToken()
+        guard !token.isEmpty else { onError("未登录，请先登录"); return Task {} }
+        guard let url = URL(string: "\(baseURLForWrite)/assistant/chat-audio") else {
+            onError("Invalid URL"); return Task {}
+        }
+
+        let boundary = "Boundary-\(UUID().uuidString)"
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = 180
+
+        // 构建 multipart body
+        var body = Data()
+        func field(_ name: String, _ value: String) {
+            body.append("--\(boundary)\r\n".data(using: .utf8)!)
+            body.append("Content-Disposition: form-data; name=\"\(name)\"\r\n\r\n".data(using: .utf8)!)
+            body.append("\(value)\r\n".data(using: .utf8)!)
+        }
+
+        field("session_id", sessionId)
+        field("skill_id", skillId)
+        field("user_language", userLanguage)
+        field("is_chat_session", "true")
+
+        // history as JSON string
+        let historyJson = (try? JSONSerialization.data(withJSONObject: history)).flatMap {
+            String(data: $0, encoding: .utf8)
+        } ?? "[]"
+        field("history_json", historyJson)
+
+        // audio file part
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"audio\"; filename=\"voice.m4a\"\r\n".data(using: .utf8)!)
+        body.append("Content-Type: audio/m4a\r\n\r\n".data(using: .utf8)!)
+        body.append(audioData)
+        body.append("\r\n".data(using: .utf8)!)
+        body.append("--\(boundary)--\r\n".data(using: .utf8)!)
+
+        request.httpBody = body
+
+        return Task {
+            do {
+                let (asyncBytes, response) = try await URLSession.shared.bytes(for: request)
+                guard let http = response as? HTTPURLResponse else {
+                    await MainActor.run { onError("Invalid response") }; return
+                }
+                guard http.statusCode == 200 else {
+                    if http.statusCode == 403 {
+                        var bodyData = Data()
+                        for try await byte in asyncBytes { bodyData.append(byte) }
+                        let bodyStr = String(data: bodyData, encoding: .utf8) ?? ""
+                        await MainActor.run {
+                            onError(bodyStr.contains("chat_limit_reached") ? "chat_limit_reached" : "Server error: 403")
+                        }
+                    } else {
+                        await MainActor.run { onError("Server error: \(http.statusCode)") }
+                    }
+                    return
+                }
+
+                for try await line in asyncBytes.lines {
+                    guard line.hasPrefix("data: ") else { continue }
+                    let jsonStr = String(line.dropFirst(6))
+                    guard let data = jsonStr.data(using: .utf8),
+                          let event = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                          let type = event["type"] as? String else { continue }
+
+                    switch type {
+                    case "transcript":
+                        let text = event["text"] as? String ?? ""
+                        if !text.isEmpty { await MainActor.run { onTranscript(text) } }
+                    case "token":
+                        let content = event["content"] as? String ?? ""
+                        await MainActor.run { onToken(content) }
+                    case "suggestions":
+                        let items = event["items"] as? [String] ?? []
+                        await MainActor.run { onSuggestions(items) }
+                    case "done":
+                        await MainActor.run { onDone() }; return
+                    case "error":
+                        let msg = event["content"] as? String ?? "Unknown error"
+                        await MainActor.run { onError(msg) }; return
+                    default: break
+                    }
+                }
+                await MainActor.run { onDone() }
+            } catch {
+                await MainActor.run { onError(error.localizedDescription) }
+            }
+        }
+    }
+
     // 获取心情趋势（跨对话）
     func getEmotionTrend(limit: Int = 30) async throws -> EmotionTrendResponse {
         if config.useMockData {

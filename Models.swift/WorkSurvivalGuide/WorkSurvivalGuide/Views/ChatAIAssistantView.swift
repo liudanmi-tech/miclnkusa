@@ -26,6 +26,11 @@ struct ChatAIAssistantView: View {
     // ── scroll proxy for auto-scroll to bottom ──
     @State private var scrollToBottom = false
 
+    // ── voice input ──
+    @State private var inputMode: ChatInputMode = .voice
+    @State private var isRecording: Bool = false
+    @StateObject private var audioRecorder = GeminiAudioRecorder()
+
     init(sessionId: String) {
         self.sessionId = sessionId
         _chatVM = StateObject(wrappedValue: ChatAIAssistantViewModel(sessionId: sessionId))
@@ -246,6 +251,29 @@ struct ChatAIAssistantView: View {
         chatVM.send(text: text)
     }
 
+    private func startRecording() {
+        withAnimation(.spring(response: 0.28, dampingFraction: 0.8)) {
+            isRecording = true
+        }
+        audioRecorder.startRecording()
+    }
+
+    private func sendVoiceMessage() {
+        let result = audioRecorder.stopRecording()
+        withAnimation(.spring(response: 0.28, dampingFraction: 0.8)) {
+            isRecording = false
+        }
+        guard let (data, fileURL) = result else { return }
+        chatVM.sendAudio(audioData: data, fileURL: fileURL)
+    }
+
+    private func cancelRecording() {
+        audioRecorder.cancelRecording()
+        withAnimation(.spring(response: 0.28, dampingFraction: 0.8)) {
+            isRecording = false
+        }
+    }
+
     // MARK: - Exit state helpers
 
     /// 该 session 是否已经做过退出决策（Convert to Image 或 Just Close）
@@ -352,13 +380,27 @@ private struct ChatBubble: View {
     var isUser: Bool { message.role == .user }
 
     var body: some View {
-        HStack(alignment: .bottom, spacing: 0) {
-            if isUser { Spacer(minLength: 60) }
+        // 语音消息：transcript 未到达时（占位符）显示波形气泡；
+        // transcript 到达后 content 已更新为真实文字，走普通文字气泡
+        if message.isVoice, let path = message.audioFileURL,
+           message.content == "[Voice message]" {
+            VoiceMessageBubble(fileURLPath: path)
+        } else {
+            HStack(alignment: .bottom, spacing: 0) {
+                if isUser { Spacer(minLength: 60) }
 
-            Text(message.content)
-                .font(.system(size: 15, design: .rounded))
-                .foregroundColor(.white)
-                .multilineTextAlignment(isUser ? .trailing : .leading)
+                HStack(spacing: 6) {
+                    // 若该条消息原为语音输入，加小麦克风图标提示
+                    if message.isVoice {
+                        Image(systemName: "mic.fill")
+                            .font(.system(size: 11))
+                            .foregroundColor(.white.opacity(0.6))
+                    }
+                    Text(message.content)
+                        .font(.system(size: 15, design: .rounded))
+                        .foregroundColor(.white)
+                        .multilineTextAlignment(isUser ? .trailing : .leading)
+                }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
                 .background(
@@ -368,7 +410,8 @@ private struct ChatBubble: View {
                             : Color.white.opacity(0.1))
                 )
 
-            if !isUser { Spacer(minLength: 60) }
+                if !isUser { Spacer(minLength: 60) }
+            }
         }
     }
 }
@@ -396,5 +439,158 @@ private struct StreamingDotView: View {
         .onReceive(timer) { _ in
             phase = (phase + 1) % 3
         }
+    }
+}
+
+// MARK: - Chat Voice Waveform
+
+private struct ChatVoiceWaveformView: View {
+    private let barCount = 22
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 0.1)) { context in
+            HStack(alignment: .center, spacing: 2.5) {
+                ForEach(0..<barCount, id: \.self) { i in
+                    let h = barHeight(index: i, date: context.date)
+                    Capsule()
+                        .fill(Color.white.opacity(0.72))
+                        .frame(width: 2.5, height: h)
+                        .animation(.spring(response: 0.28, dampingFraction: 0.62), value: h)
+                }
+            }
+            .frame(height: 28)
+            .clipped()
+            .frame(maxWidth: .infinity)
+        }
+    }
+
+    private func barHeight(index: Int, date: Date) -> CGFloat {
+        let t = date.timeIntervalSinceReferenceDate
+        let f1 = 3.8 + Double(index) * 0.21
+        let f2 = 7.3 + Double(index) * 0.16
+        let v = (sin(t * f1) + sin(t * f2 + Double(index) * 0.9) * 0.55 + 1.55) / 3.1
+        return max(3, CGFloat(v) * 26)
+    }
+}
+
+// MARK: - Voice Message Player (ObservableObject)
+
+private final class VoiceMessagePlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
+    @Published var isPlaying = false
+    @Published var elapsed: TimeInterval = 0
+    @Published var duration: TimeInterval = 0
+
+    private var player: AVAudioPlayer?
+    private var timer: Timer?
+
+    func load(path: String) {
+        let url = URL(fileURLWithPath: path)
+        guard let p = try? AVAudioPlayer(contentsOf: url) else { return }
+        p.delegate = self
+        p.prepareToPlay()
+        player = p
+        duration = p.duration
+    }
+
+    func toggle() { isPlaying ? stop() : play() }
+
+    func stop() {
+        player?.stop()
+        timer?.invalidate()
+        timer = nil
+        isPlaying = false
+        elapsed = 0
+    }
+
+    private func play() {
+        guard let player else { return }
+        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
+        try? AVAudioSession.sharedInstance().setActive(true)
+        player.currentTime = 0
+        player.play()
+        isPlaying = true
+        elapsed = 0
+        let t = Timer(timeInterval: 0.1, repeats: true) { [weak self] _ in
+            guard let self, let p = self.player else { return }
+            self.elapsed = p.currentTime
+        }
+        RunLoop.main.add(t, forMode: .common)
+        timer = t
+    }
+
+    func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully _: Bool) {
+        stop()
+    }
+}
+
+// MARK: - Voice Message Bubble
+
+private struct VoiceMessageBubble: View {
+    let fileURLPath: String
+    @StateObject private var vm = VoiceMessagePlayer()
+
+    private let barCount = 18
+
+    var body: some View {
+        HStack(alignment: .bottom, spacing: 0) {
+            Spacer(minLength: 60)
+
+            Button(action: { vm.toggle() }) {
+                HStack(spacing: 10) {
+                    // Play / Stop icon
+                    Image(systemName: vm.isPlaying ? "stop.fill" : "play.fill")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundColor(.white)
+                        .frame(width: 18, height: 18)
+
+                    // Waveform bars
+                    HStack(alignment: .center, spacing: 2) {
+                        ForEach(0..<barCount, id: \.self) { i in
+                            Capsule()
+                                .fill(Color.white.opacity(vm.isPlaying ? 0.9 : 0.55))
+                                .frame(width: 2.5, height: staticBarHeight(index: i))
+                                .animation(
+                                    vm.isPlaying
+                                        ? .easeInOut(duration: 0.3).repeatForever().delay(Double(i) * 0.04)
+                                        : .default,
+                                    value: vm.isPlaying
+                                )
+                        }
+                    }
+                    .frame(height: 24)
+
+                    // Duration / elapsed
+                    Text(vm.isPlaying ? formatTime(vm.elapsed) : formatTime(vm.duration))
+                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                        .foregroundColor(.white.opacity(0.8))
+                        .frame(minWidth: 28, alignment: .trailing)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(
+                    RoundedRectangle(cornerRadius: 16)
+                        .fill(Color(hex: "#2D4A5E"))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 16)
+                                .stroke(Color.white.opacity(0.15), lineWidth: 1)
+                        )
+                )
+            }
+            .buttonStyle(.plain)
+            .onAppear { vm.load(path: fileURLPath) }
+            .onDisappear { vm.stop() }
+        }
+    }
+
+    /// 静态波形高度（模拟自然分布）
+    private func staticBarHeight(index: Int) -> CGFloat {
+        let heights: [CGFloat] = [6, 10, 16, 20, 18, 22, 14, 8, 12, 20, 24, 18, 10, 16, 20, 14, 8, 6]
+        guard index < heights.count else { return 10 }
+        return heights[index]
+    }
+
+    private func formatTime(_ t: TimeInterval) -> String {
+        let s = max(0, Int(t.rounded()))
+        return "\(s)\""
     }
 }

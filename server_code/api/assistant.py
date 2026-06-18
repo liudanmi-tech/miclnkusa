@@ -15,7 +15,7 @@ from typing import List, Optional
 
 import httpx
 import google.generativeai as genai
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Form, File, UploadFile
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -210,6 +210,12 @@ def _build_prompt(
             f"Write 1-2 sentences naturally transitioning into this topic, briefly explaining how \"{skill_name}\" can help, "
             f"without repeating previous conversation content, and end with a targeted question. Keep the tone light and natural."
         )
+    elif message == "__VOICE__":
+        task_desc = (
+            "The user sent a voice message (the audio is attached at the start of this request). "
+            "Listen to what they said and respond naturally as their workplace AI assistant. "
+            "Empathize with their situation and provide helpful, targeted advice."
+        )
     else:
         task_desc = (
             f"User says: {message}\n\n"
@@ -345,6 +351,64 @@ async def _stream_gemini(prompt: str, image_base64_list: Optional[List[str]] = N
         yield event_type, content
         if event_type in ("done", "error"):
             break
+
+
+async def _stream_gemini_with_audio(prompt: str, audio_bytes: bytes, audio_mime_type: str = "audio/m4a"):
+    """在线程中运行 Gemini 流式生成（音频输入），通过 asyncio.Queue 桥接到协程。
+    audio_bytes 直接传给 SDK inline_data，无需 base64 编码。"""
+    loop = asyncio.get_running_loop()
+    queue: asyncio.Queue = asyncio.Queue()
+
+    def _run():
+        try:
+            genai.configure(api_key=GEMINI_API_KEY)
+            model = genai.GenerativeModel(ASSISTANT_MODEL, safety_settings=_GEMINI_SAFETY)
+            audio_part = genai.protos.Part(
+                inline_data=genai.protos.Blob(
+                    mime_type=audio_mime_type,
+                    data=audio_bytes,
+                )
+            )
+            contents = [audio_part, prompt]
+            response = model.generate_content(contents, stream=True)
+            for chunk in response:
+                try:
+                    text = chunk.text
+                except (ValueError, AttributeError):
+                    text = None
+                if text:
+                    loop.call_soon_threadsafe(queue.put_nowait, ("token", text))
+            loop.call_soon_threadsafe(queue.put_nowait, ("done", None))
+        except Exception as exc:
+            loop.call_soon_threadsafe(queue.put_nowait, ("error", str(exc)))
+
+    thread = threading.Thread(target=_run, daemon=True)
+    thread.start()
+
+    while True:
+        event_type, content = await queue.get()
+        yield event_type, content
+        if event_type in ("done", "error"):
+            break
+
+
+async def _transcribe_audio(audio_bytes: bytes, audio_mime_type: str) -> str:
+    """Quick non-streaming Gemini call to get the user's speech as text.
+    Returns the raw transcription; empty string on failure."""
+    def _run():
+        genai.configure(api_key=GEMINI_API_KEY)
+        _model = genai.GenerativeModel(ASSISTANT_MODEL, safety_settings=_GEMINI_SAFETY)
+        audio_part = genai.protos.Part(
+            inline_data=genai.protos.Blob(mime_type=audio_mime_type, data=audio_bytes)
+        )
+        resp = _model.generate_content(
+            [audio_part,
+             "Transcribe exactly what the user said in this audio clip. "
+             "Output only the transcription in the original language, nothing else."]
+        )
+        return (resp.text or "").strip()
+
+    return await asyncio.to_thread(_run)
 
 
 async def _generate_suggestions(context: str, skill_name: str) -> List[str]:
@@ -954,6 +1018,249 @@ async def assistant_chat(
     )
 
 
+# ─── /chat-audio：语音输入版 /chat ──────────────────────────────────────────────
+
+@router.post("/assistant/chat-audio")
+async def assistant_chat_audio(
+    session_id: str = Form(...),
+    skill_id: str = Form(...),
+    history_json: str = Form("[]"),
+    is_chat_session: bool = Form(True),
+    user_language: Optional[str] = Form("en"),
+    audio: UploadFile = File(...),
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    语音输入版 /chat：接收 multipart/form-data 原始音频（m4a），
+    直接传给 Gemini inline_data（无 base64 转换），返回与 /chat 相同格式的 SSE 流。
+    """
+    # 0. 解析 history
+    history: List[ChatHistoryItem] = []
+    try:
+        history = [ChatHistoryItem(**h) for h in json.loads(history_json)]
+    except Exception:
+        pass
+
+    # 0. 轮数限制
+    _CHAT_LIMITS = {"free": 10, "pro": 50}
+    _user_q = await db.execute(select(User).where(User.id == uuid.UUID(user_id)))
+    _user = _user_q.scalar_one_or_none()
+    if _user:
+        _tier = getattr(_user, "subscription_tier", None) or "free"
+        _expires = getattr(_user, "subscription_expires_at", None)
+        if _tier == "pro" and _expires:
+            _exp = _expires if _expires.tzinfo else _expires.replace(tzinfo=timezone.utc)
+            if _exp < datetime.now(timezone.utc):
+                _tier = "free"
+        _max_turns = _CHAT_LIMITS.get(_tier, _CHAT_LIMITS["free"])
+        if len(history) // 2 >= _max_turns:
+            raise HTTPException(status_code=403, detail="chat_limit_reached")
+
+    # 读取音频 bytes
+    audio_bytes = await audio.read()
+    audio_mime = audio.content_type or "audio/m4a"
+    logger.info(f"[AUDIO:{session_id[:8]}] received | size={len(audio_bytes)} mime={audio_mime}")
+
+    if not audio_bytes:
+        raise HTTPException(status_code=400, detail="Empty audio file")
+
+    # 1. Strategy
+    strategy_q = await db.execute(
+        select(StrategyAnalysis).where(StrategyAnalysis.session_id == uuid.UUID(session_id))
+    )
+    strategy = strategy_q.scalar_one_or_none()
+    if not strategy:
+        skill_name = "Emotion Recognition"
+        skill_content_json = "{}"
+    else:
+        skill_cards: list = strategy.skill_cards or []
+        target_card = next((c for c in skill_cards if c.get("skill_id") == skill_id), None)
+        skill_name = target_card.get("skill_name", skill_id) if target_card else skill_id
+        skill_content_json = (
+            json.dumps(target_card.get("content", {}), ensure_ascii=False, indent=2)
+            if target_card else "{}"
+        )
+
+    # 2. 对话摘要
+    conv_summary = ""
+    try:
+        ar_q = await db.execute(
+            select(AnalysisResult).where(AnalysisResult.session_id == uuid.UUID(session_id))
+        )
+        ar = ar_q.scalar_one_or_none()
+        if ar:
+            conv_summary = ar.conversation_summary or ar.summary or ""
+    except Exception as exc:
+        logger.warning(f"[AUDIO:{session_id[:8]}] conv summary failed: {exc}")
+
+    # 3. Memory context（用摘要或技能名作为查询 key，因为音频内容服务器侧未知）
+    memory_used = False
+    memory_context = ""
+    try:
+        from services.knowledge_graph import get_ai_context_kg
+        mem_query = conv_summary[:200] or skill_name
+        memory_context = await asyncio.wait_for(
+            get_ai_context_kg(mem_query, user_id, db),
+            timeout=3.0,
+        )
+        memory_used = bool(memory_context)
+    except asyncio.TimeoutError:
+        logger.warning(f"[AUDIO:{session_id[:8]}] KG timeout，跳过")
+    except Exception as exc:
+        logger.warning(f"[AUDIO:{session_id[:8]}] KG failed: {exc}")
+
+    # 4. Skill resource + baseline text
+    history_turns = len(history) // 2
+    skill_resource = _load_skill_resource(skill_id) if history_turns < 3 else ""
+
+    baseline_text = ""
+    _SYSTEM_SKILLS = {"emotion_recognition", "depression_prevention"}
+    _strategy_skill_id = skill_id
+    if strategy:
+        _non_sys = [c for c in (strategy.skill_cards or []) if c.get("skill_id") not in _SYSTEM_SKILLS]
+        if _non_sys:
+            _strategy_skill_id = _non_sys[0]["skill_id"]
+    try:
+        from sqlalchemy import text as sa_text
+        _bn_row = await db.execute(
+            sa_text("SELECT baseline_text, baseline_complete FROM skill_notes WHERE user_id = :uid AND skill_id = :sid"),
+            {"uid": uuid.UUID(user_id), "sid": _strategy_skill_id},
+        )
+        _bn = _bn_row.fetchone()
+        if _bn and _bn[1]:
+            baseline_text = _bn[0] or ""
+    except Exception as exc:
+        logger.warning(f"[AUDIO:{session_id[:8]}] baseline load failed: {exc}")
+
+    # 5. Build prompt（message="__VOICE__" → _build_prompt 里的专用 branch）
+    prompt = _build_prompt(
+        skill_name=skill_name,
+        skill_content_json=skill_content_json,
+        conversation_summary=conv_summary,
+        memory_context=memory_context,
+        history=history,
+        message="__VOICE__",
+        user_language=user_language,
+        skill_resource=skill_resource,
+        baseline_text=baseline_text,
+    )
+
+    # 6. SSE 生成器
+    async def event_generator():
+        yield _sse({"type": "meta", "skill_name": skill_name, "memory_used": memory_used})
+
+        # 先转写音频 → 发 transcript 事件给 iOS，iOS 用来更新语音消息内容，
+        # 这样 generate-image-from-chat 收到的 conversation 就是真实文字而非占位符
+        transcribed_text = ""
+        try:
+            transcribed_text = await asyncio.wait_for(
+                _transcribe_audio(audio_bytes, audio_mime), timeout=15.0
+            )
+            if transcribed_text:
+                yield _sse({"type": "transcript", "text": transcribed_text})
+                logger.info(f"[AUDIO:{session_id[:8]}] transcript yielded | len={len(transcribed_text)}")
+        except Exception as _exc:
+            logger.warning(f"[AUDIO:{session_id[:8]}] transcription failed: {_exc}")
+
+        full_text_parts = []
+        suggestions_raw = ""
+        in_suggestions = False
+        pending_buffer = ""
+        MARKER_START = "[SUGGESTIONS]"
+        MARKER_END = "[/SUGGESTIONS]"
+
+        async for event_type, content in _stream_gemini_with_audio(prompt, audio_bytes, audio_mime):
+            if event_type == "error":
+                logger.error(f"[AUDIO:{session_id[:8]}] Gemini error: {content}")
+                yield _sse({"type": "error", "content": content})
+                return
+            if event_type == "done":
+                break
+
+            if in_suggestions:
+                suggestions_raw += content
+                continue
+
+            pending_buffer += content
+            if MARKER_START in pending_buffer:
+                idx = pending_buffer.index(MARKER_START)
+                before = pending_buffer[:idx]
+                if before:
+                    full_text_parts.append(before)
+                    yield _sse({"type": "token", "content": before})
+                suggestions_raw = pending_buffer[idx + len(MARKER_START):]
+                pending_buffer = ""
+                in_suggestions = True
+                continue
+
+            safe_len = max(0, len(pending_buffer) - len(MARKER_START))
+            if safe_len > 0:
+                safe_chunk = pending_buffer[:safe_len]
+                full_text_parts.append(safe_chunk)
+                yield _sse({"type": "token", "content": safe_chunk})
+                pending_buffer = pending_buffer[safe_len:]
+
+        if pending_buffer and MARKER_START not in pending_buffer:
+            full_text_parts.append(pending_buffer)
+            yield _sse({"type": "token", "content": pending_buffer})
+
+        full_text = "".join(full_text_parts)
+
+        # Suggestions
+        suggestions: List[str] = []
+        if MARKER_END in suggestions_raw:
+            raw_json = suggestions_raw.split(MARKER_END)[0].strip()
+            try:
+                parsed = json.loads(raw_json)
+                suggestions = parsed.get("items", []) if isinstance(parsed, dict) else parsed
+            except Exception:
+                pass
+        if not suggestions and full_text:
+            suggestions = await _generate_suggestions(full_text, skill_name)
+        if suggestions:
+            yield _sse({"type": "suggestions", "items": suggestions[:4]})
+
+        yield _sse({"type": "done"})
+
+        # KG write（用转写文本替代 "[Voice message]" 占位符）
+        if full_text:
+            try:
+                from services.knowledge_graph import save_kg_from_chat
+                history_text = "\n".join(
+                    f"{'User' if h.role == 'user' else 'AI'}: {h.content}"
+                    for h in history[-6:]
+                )
+                round_content = (
+                    f"Skill context: {skill_name}\n"
+                    f"Conversation summary: {conv_summary[:200]}\n"
+                    f"---\n{history_text}\n"
+                    f"User: {transcribed_text or '[Voice message]'}\nAI: {full_text[:500]}"
+                )
+                asyncio.create_task(
+                    save_kg_from_chat(
+                        content=round_content,
+                        user_id=user_id,
+                        session_id=session_id,
+                        skill_id=skill_id,
+                        skill_name=skill_name,
+                    )
+                )
+                logger.info(f"[AUDIO:{session_id[:8]}] KG write triggered")
+            except Exception as exc:
+                logger.warning(f"[AUDIO:{session_id[:8]}] KG write failed: {exc}")
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )
+
+
 # ─── Phase 3：退出后处理 ────────────────────────────────────────────────────────
 
 async def _call_gemini_finalize(session_id: str, conversation: list) -> dict:
@@ -1226,6 +1533,23 @@ async def generate_image_from_chat(
         .values(status="archived", image_status="generating", finalize_status="pending")
     )
     await db.commit()
+
+    # 3b. Chat session 无 strategy_analysis，提前创建最小记录，
+    #     让 generate_scene_images 能正常写入 scene_images（否则图片会因找不到记录而丢失）
+    #     visual_data / strategies 为 NOT NULL，需传空 JSON 对象占位
+    await db.execute(
+        pg_insert(StrategyAnalysis)
+        .values(
+            id=uuid.uuid4(),
+            session_id=uuid.UUID(req.session_id),
+            visual_data={},
+            strategies={},
+            skill_cards=[],
+        )
+        .on_conflict_do_nothing(index_elements=["session_id"])
+    )
+    await db.commit()
+    logger.info(f"[CHAT:{id8}] strategy_analysis stub created for scene_image storage")
 
     # 4. fire-and-forget：生图任务
     from scene_image_generator import generate_scene_images as _gen_scene_imgs

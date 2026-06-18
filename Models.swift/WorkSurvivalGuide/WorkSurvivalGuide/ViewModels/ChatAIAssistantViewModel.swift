@@ -122,6 +122,19 @@ final class ChatAIAssistantViewModel: ObservableObject {
         streamRequest(message: trimmed)
     }
 
+    /// 发送语音消息。fileURL 用于消息气泡本地回放；audioData 用于上传服务器。
+    func sendAudio(audioData: Data, fileURL: URL) {
+        guard !isStreaming else { return }
+
+        if messages.isEmpty {
+            isMatchingSkills = true
+            hasReceivedSkillTags = false
+        }
+
+        messages.append(.voice(fileURL: fileURL.path))
+        streamAudioRequest(audioData: audioData)
+    }
+
     /// 停止当前生成，保留已输出内容
     func cancelStream() {
         streamTask?.cancel()
@@ -236,6 +249,92 @@ final class ChatAIAssistantViewModel: ObservableObject {
                     if !self.hasReceivedSkillTags && self.messages.count <= 2 {
                         self.startSkillTagsCompensation()
                     }
+                }
+            },
+            onError: { [weak self] err in
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    self.typewriterTask?.cancel()
+                    self.typewriterTask = nil
+                    self.streamingText = ""
+                    self.displayedStreamingText = ""
+                    self.isStreaming = false
+                    if err == "chat_limit_reached" {
+                        if SubscriptionManager.shared.isPro {
+                            self.showProLimitToast = true
+                        } else {
+                            self.showPaywall = true
+                        }
+                    } else {
+                        self.errorMessage = err
+                    }
+                }
+            }
+        )
+    }
+
+    /// 语音消息请求（复用 streamRequest 的回调链）
+    private func streamAudioRequest(audioData: Data) {
+        streamTask?.cancel()
+        typewriterTask?.cancel()
+        typewriterTask = nil
+        suggestions = []
+        isStreaming = true
+        streamingText = ""
+        displayedStreamingText = ""
+        errorMessage = nil
+
+        // history 包含刚追加的 "🎤 Voice message" user bubble
+        let history: [[String: String]] = messages.compactMap { msg in
+            guard !msg.isMeme else { return nil }
+            return ["role": msg.role == .user ? "user" : "assistant",
+                    "content": msg.content]
+        }
+
+        let deviceLanguage = Locale.preferredLanguages.first?.components(separatedBy: "-").first ?? "en"
+
+        streamTask = NetworkManager.shared.streamAssistantChatAudio(
+            sessionId: sessionId,
+            skillId: currentSkillId,
+            history: history,
+            userLanguage: deviceLanguage,
+            audioData: audioData,
+            onTranscript: { [weak self] text in
+                Task { @MainActor [weak self] in
+                    guard let self, !text.isEmpty else { return }
+                    // 用转写文本替换语音消息的占位内容，使 generate-image-from-chat 能获取真实内容
+                    if let idx = self.messages.lastIndex(where: { $0.isVoice }) {
+                        self.messages[idx] = self.messages[idx].withTranscript(text)
+                    }
+                }
+            },
+            onToken: { [weak self] token in
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    self.streamingText += token
+                    self.ensureTypewriterRunning()
+                }
+            },
+            onSuggestions: { [weak self] items in
+                Task { @MainActor [weak self] in self?.suggestions = items }
+            },
+            onDone: { [weak self] in
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    self.typewriterTask?.cancel()
+                    self.typewriterTask = nil
+                    if !self.streamingText.isEmpty {
+                        self.messages.append(AssistantMessage(role: .assistant, content: self.streamingText))
+                    }
+                    if let memeURL = self.pendingMemeURL {
+                        self.messages.append(.meme(url: memeURL))
+                        self.pendingMemeURL = nil
+                    }
+                    self.streamingText = ""
+                    self.displayedStreamingText = ""
+                    self.isStreaming = false
+                    self.isMatchingSkills = false
+                    self.persistMessages()
                 }
             },
             onError: { [weak self] err in
