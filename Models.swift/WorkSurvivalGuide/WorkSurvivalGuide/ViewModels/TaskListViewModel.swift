@@ -230,7 +230,10 @@ class TaskListViewModel: ObservableObject {
         print("📝 [TaskListViewModel] 当前任务数量: \(tasks.count)")
 
         tasks.insert(task, at: 0) // 添加到列表顶部
-        setProcessing(sessionId: task.id) // 新录音上传后立即锁定
+        // chat session 不占用录音锁，只有真实录音任务才锁定
+        if task.sessionType != "chat" {
+            setProcessing(sessionId: task.id)
+        }
 
         print("✅ [TaskListViewModel] 任务已添加，当前任务数量: \(tasks.count)")
     }

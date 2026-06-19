@@ -19,7 +19,7 @@ struct WeeklyStatsCarouselView: View {
     private var selfEmojiType: String { profileVM.selfEmojiType }
 
     enum CardType: Int, Identifiable {
-        case mood = 0, radar = 1, social = 2
+        case mood = 0, radar = 1
         var id: Int { rawValue }
     }
 
@@ -44,17 +44,13 @@ struct WeeklyStatsCarouselView: View {
                 )
                 .tag(1)
                 .onTapGesture { detailCard = .radar }
-
-                SocialEnergyCard(stats: vm.stats, isLoading: vm.isLoading)
-                    .tag(2)
-                    .onTapGesture { detailCard = .social }
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
             .frame(height: 290)
 
             // Page dots
             HStack(spacing: 6) {
-                ForEach(0..<3, id: \.self) { i in
+                ForEach(0..<2, id: \.self) { i in
                     Circle()
                         .fill(activeCard == i ? Color.white.opacity(0.8) : Color.white.opacity(0.25))
                         .frame(width: activeCard == i ? 6 : 4, height: activeCard == i ? 6 : 4)
@@ -659,8 +655,6 @@ struct WeeklyStatsDetailSheet: View {
                                 switch selectedCard {
                                 case .mood:
                                     MoodDetailChart(vm: vm, highlightedSessionId: $highlightedSessionId, emojiType: selfEmojiType)
-                                case .social:
-                                    SocialDetailChart(vm: vm)
                                 case .radar:
                                     EmptyView()
                                 }
@@ -676,8 +670,7 @@ struct WeeklyStatsDetailSheet: View {
                     }
                 }
                 .navigationTitle(
-                    selectedCard == .mood  ? "Mood Details" :
-                    selectedCard == .radar ? "Skills Radar" : "Social Details"
+                    selectedCard == .mood ? "Mood Details" : "Skills Radar"
                 )
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbarColorScheme(.dark, for: .navigationBar)
@@ -700,14 +693,11 @@ struct WeeklyStatsDetailSheet: View {
         guard let sessions = vm.stats?.sessions else { return [] }
         switch selectedCard {
         case .mood:
-            // 按日期排序（最新在前），与时间轴图表对应
             return sessions
                 .filter { $0.mood_score != nil }
                 .sorted { lhs, rhs in
                     (lhs.created_at ?? "") > (rhs.created_at ?? "")
                 }
-        case .social:
-            return sessions.sorted { $0.duration_sec > $1.duration_sec }
         case .radar:
             return []
         }
@@ -1107,15 +1097,6 @@ struct WeeklySessionRow: View {
                         .font(.system(size: 11, weight: .bold, design: .rounded))
                         .foregroundColor(WeeklyStatsViewModel.moodColor(for: session.mood_polarity))
                 }
-            }
-        case .social:
-            VStack(spacing: 2) {
-                Text("\(session.duration_sec / 60)")
-                    .font(.system(size: 14, weight: .bold, design: .rounded))
-                    .foregroundColor(.white.opacity(0.7))
-                Text("min")
-                    .font(.system(size: 10))
-                    .foregroundColor(.white.opacity(0.35))
             }
         case .radar:
             EmptyView()

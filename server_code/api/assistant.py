@@ -24,7 +24,7 @@ from datetime import datetime, timezone
 from pydantic import BaseModel
 
 from database.connection import get_db
-from database.models import AnalysisResult, StrategyAnalysis, User, Session
+from database.models import AnalysisResult, StrategyAnalysis, User, Session, SkillExecution
 from auth.jwt_handler import get_current_user_id
 
 logger = logging.getLogger(__name__)
@@ -639,6 +639,22 @@ async def _match_skills_serial(
         ]
         logger.info(f"[CHAT:{id8}] skill_matching done | tags={[t['skill_id'] for t in skill_tags]}")
 
+        # 从 skills_config.json 推导真实 scene_category（取匹配最多的 category）
+        import json as _json, os as _os
+        _cfg_path = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "../skills_config.json")
+        try:
+            with open(_cfg_path) as _f:
+                _skills_cfg = _json.load(_f)
+            _cat_counter: dict = {}
+            for s in stubs:
+                _cat = (_skills_cfg.get("system_skills", {}).get(s["skill_id"]) or {}).get("category")
+                if _cat and _cat not in ("system",):
+                    _cat_counter[_cat] = _cat_counter.get(_cat, 0) + 1
+            primary_scene = max(_cat_counter, key=_cat_counter.get) if _cat_counter else "personal_growth"
+        except Exception:
+            primary_scene = "personal_growth"
+        logger.info(f"[CHAT:{id8}] primary_scene resolved | scene={primary_scene}")
+
         # UPSERT strategy_analysis
         async with AsyncSessionLocal() as db:
             stmt = pg_insert(StrategyAnalysis).values(
@@ -648,7 +664,7 @@ async def _match_skills_serial(
                 strategies=[],
                 applied_skills=[{"skill_id": s["skill_id"], "priority": 100} for s in stubs],
                 skill_cards=stubs,
-                scene_category="chat",
+                scene_category=primary_scene,
                 scene_confidence=1.0,
             ).on_conflict_do_update(
                 index_elements=["session_id"],
@@ -1310,7 +1326,6 @@ Return ONLY valid JSON, no markdown fences:
             temperature=0.3,
             max_output_tokens=2048,
             response_mime_type="application/json",
-            thinking_config=genai.types.ThinkingConfig(thinking_budget=0),
         ),
     )
     response = await model.generate_content_async(prompt)
@@ -1378,6 +1393,37 @@ async def _async_session_finalize(session_id: str, conversation: list, user_id: 
 
     id8 = session_id[:8]
     logger.info(f"[CHAT:{id8}] finalize started | conv_len={len(conversation)}")
+
+    # ── Step 1: 写入 skill_executions（独立于 Gemini，不受其失败影响）──
+    try:
+        async with AsyncSessionLocal() as db:
+            sa_row = (await db.execute(
+                select(StrategyAnalysis).where(StrategyAnalysis.session_id == uuid.UUID(session_id))
+            )).scalar_one_or_none()
+
+            if sa_row and sa_row.applied_skills:
+                _SKIP_SKILLS = {"emotion_recognition", "depression_prevention"}
+                _scene = sa_row.scene_category or "personal_growth"
+                _written = 0
+                for applied in sa_row.applied_skills:
+                    _sid = applied.get("skill_id") if isinstance(applied, dict) else None
+                    if not _sid or _sid in _SKIP_SKILLS:
+                        continue
+                    db.add(SkillExecution(
+                        session_id=uuid.UUID(session_id),
+                        skill_id=_sid,
+                        scene_category=_scene,
+                        confidence_score=0.8,
+                        execution_time_ms=0,
+                        success=True,
+                    ))
+                    _written += 1
+                await db.commit()
+                logger.info(f"[CHAT:{id8}] skill_executions written | count={_written} scene={_scene}")
+    except Exception as _e:
+        logger.error(f"[CHAT:{id8}] skill_executions write failed | error={_e}")
+
+    # ── Step 2: Gemini 生成 card_title / summary / mood（可独立失败）──
     try:
         result = await _call_gemini_finalize(session_id, conversation)
         card_title    = result.get("card_title", "")

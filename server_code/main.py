@@ -5607,7 +5607,7 @@ async def get_skills_radar(
             if sa and isinstance(sa.skill_cards, list):
                 for card in sa.skill_cards:
                     if isinstance(card, dict) and card.get("content_type") == "emotion":
-                        c = card.get("content", {})
+                        c = card.get("content") or {}
                         mood = _normalize_mood(c.get("mood_state", "Neutral"))
                         _mood_freq[mood] = _mood_freq.get(mood, 0) + 1
                         _sigh_total += c.get("sigh_count", 0)
