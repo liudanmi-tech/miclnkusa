@@ -105,7 +105,7 @@ struct SubscriptionStatusView: View {
                 .clipShape(Capsule())
 
             if !manager.isPro && !manager.isExpired {
-                Text("Upgrade to unlock more recordings & profiles")
+                Text("Upgrade for more AI chats & image conversions")
                     .font(.system(size: 13))
                     .foregroundColor(.white.opacity(0.5))
                     .multilineTextAlignment(.center)
@@ -126,10 +126,16 @@ struct SubscriptionStatusView: View {
     private var usageSection: some View {
         VStack(spacing: 16) {
             usageRow(
-                icon: "mic.fill",
-                label: "Records",
-                used: manager.usedCount,
-                limit: manager.monthlyLimit
+                icon: "bubble.left.and.bubble.right.fill",
+                label: "AI Chat",
+                used: manager.chatCount,
+                limit: manager.chatLimit   // -1 = unlimited (yearly)
+            )
+            usageRow(
+                icon: "photo.fill",
+                label: "Convert to Image",
+                used: manager.imageCount,
+                limit: manager.imageLimit
             )
             usageRow(
                 icon: "person.2.fill",
@@ -143,17 +149,25 @@ struct SubscriptionStatusView: View {
         .clipShape(RoundedRectangle(cornerRadius: 16))
     }
 
+    /// limit == -1 表示无限（Yearly AI Chat）
     private func usageRow(icon: String, label: String, used: Int, limit: Int) -> some View {
-        VStack(spacing: 8) {
+        let isUnlimited = limit == -1
+        let ratio: CGFloat = isUnlimited ? 0.12 : (limit > 0 ? min(CGFloat(used) / CGFloat(limit), 1.0) : 0)
+        let barColor: Color = isUnlimited
+            ? Color(hex: "#34D399")
+            : (ratio >= 1.0 ? Color(hex: "#EF4444") : Color(hex: "#F59E0B"))
+        let countText: String = isUnlimited ? "\(used) / ∞" : "\(used) / \(limit)"
+
+        return VStack(spacing: 8) {
             HStack {
                 Image(systemName: icon)
                     .font(.system(size: 13))
-                    .foregroundColor(Color(hex: "#F59E0B"))
+                    .foregroundColor(barColor)
                 Text(label)
                     .font(.system(size: 13, weight: .medium))
                     .foregroundColor(.white.opacity(0.75))
                 Spacer()
-                Text("\(used) / \(limit)")
+                Text(countText)
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundColor(.white)
             }
@@ -162,9 +176,8 @@ struct SubscriptionStatusView: View {
                     Capsule()
                         .fill(Color.white.opacity(0.12))
                         .frame(height: 6)
-                    let ratio = limit > 0 ? min(CGFloat(used) / CGFloat(limit), 1.0) : 0
                     Capsule()
-                        .fill(ratio >= 1.0 ? Color(hex: "#EF4444") : Color(hex: "#F59E0B"))
+                        .fill(barColor)
                         .frame(width: geo.size.width * ratio, height: 6)
                 }
             }
