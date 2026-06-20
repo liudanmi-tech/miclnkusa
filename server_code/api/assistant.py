@@ -1749,6 +1749,11 @@ async def generate_image_from_chat(
     from main import _fetch_profile_image_from_oss as _fetch_prof_img_fn
     _gemini_model = os.getenv("GEMINI_FLASH_MODEL", ASSISTANT_MODEL)
 
+    # Pro 用户最多生成 3 张，Free 用户限 1 张
+    _user_r = await db.execute(select(User).where(User.id == uuid.UUID(user_id)))
+    _user = _user_r.scalar_one_or_none()
+    _max_images = 3 if (_user and _user.subscription_tier == "pro") else 1
+
     asyncio.create_task(_gen_scene_imgs(
         transcript=synthetic_transcript,
         style_key=req.style_key,
@@ -1758,11 +1763,11 @@ async def generate_image_from_chat(
         generate_image_fn=_gen_img_fn,
         fetch_profile_image_fn=_fetch_prof_img_fn,
         speaker_mapping=speaker_mapping,
-        max_images=1,
+        max_images=_max_images,
     ))
     logger.info(
         f"[CHAT:{id8}] scene_image triggered | style={req.style_key} "
-        f"profile_id={profile_id[:8] if profile_id else 'none'}"
+        f"max_images={_max_images} profile_id={profile_id[:8] if profile_id else 'none'}"
     )
 
     # 5. fire-and-forget：退出后处理（与 close-chat-session 路径相同）
