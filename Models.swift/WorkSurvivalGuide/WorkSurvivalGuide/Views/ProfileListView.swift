@@ -471,6 +471,21 @@ struct ProfileListView: View {
         .sheet(isPresented: $showEmojiTypePicker, onDismiss: {
             // 立即写入本地（UserDefaults），不依赖 profiles 是否已加载
             ProfileViewModel.shared.setSelfEmojiType(selfEmojiType)
+            // Self Portrait：触发情绪头像生成（若已有档案照片），并在生成完成后刷新缓存
+            if selfEmojiType == "self" {
+                SelfEmojiURLCache.shared.reset()
+                Task {
+                    // 先尝试加载已有头像
+                    await SelfEmojiURLCache.shared.load()
+                    // 若头像为空，触发服务端重新生成（约 30s），再刷新
+                    if SelfEmojiURLCache.shared.urls.isEmpty {
+                        try? await NetworkManager.shared.triggerEmotionAvatarGeneration()
+                        try? await Task.sleep(nanoseconds: 35_000_000_000)
+                        SelfEmojiURLCache.shared.reset()
+                        await SelfEmojiURLCache.shared.load()
+                    }
+                }
+            }
             // 再同步到服务端 Self 档案
             guard let selfProfile = ProfileViewModel.shared.profiles
                 .first(where: { $0.relationship.lowercased() == "self" }),

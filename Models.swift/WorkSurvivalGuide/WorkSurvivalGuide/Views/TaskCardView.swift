@@ -16,6 +16,8 @@ struct TaskCardView: View {
     /// loading 倒计时已过秒数
     @State private var loadingElapsed: Int = 0
     @State private var loadTimer: Timer?
+    @ObservedObject private var profileVM = ProfileViewModel.shared
+    @ObservedObject private var selfCache = SelfEmojiURLCache.shared
 
     private var baseURL: String {
         NetworkManager.shared.getBaseURL()
@@ -212,8 +214,15 @@ struct TaskCardView: View {
                         .tint(Color(hex: "#FBBF24"))
                         .scaleEffect(1.5)
                 } else if task.sessionType == "chat", let mood = task.emotionMood {
-                    Text(moodEmoji(for: mood))
-                        .font(.system(size: 48))
+                    let slot = moodSlot(for: mood)
+                    if let url = chatMoodImageURL(slot: slot) {
+                        ImageLoaderView(imageUrl: url, imageBase64: nil, contentMode: .fill)
+                            .frame(width: 60, height: 60)
+                            .clipShape(Circle())
+                    } else {
+                        Text(moodEmoji(for: mood))
+                            .font(.system(size: 48))
+                    }
                 } else {
                     QuotationMarkView(size: 32, color: Color.white.opacity(0.6), opacity: 0.7, isGrayStyle: true)
                 }
@@ -239,6 +248,30 @@ struct TaskCardView: View {
         case "Angry":              return "😠"
         case "Overwhelmed":        return "😵"
         default:                   return "😐"
+        }
+    }
+
+    private func moodSlot(for mood: String) -> String {
+        switch mood.lowercased() {
+        case "excited":                         return "very_happy"
+        case "happy", "content":               return "happy"
+        case "anxious", "frustrated", "angry": return "slightly_sad"
+        case "sad", "overwhelmed":             return "sad"
+        default:                               return "neutral"
+        }
+    }
+
+    private func chatMoodImageURL(slot: String) -> String? {
+        let emojiType = profileVM.selfEmojiType
+        switch emojiType {
+        case "self":
+            return selfCache.url(for: slot)
+        case "dog", "cat":
+            let base = NetworkManager.shared.getBaseURL()
+            let apiBase = base.hasSuffix("/api/v1") ? String(base.dropLast(7)) : base
+            return "\(apiBase)/api/v1/emoji-presets/\(emojiType)/\(slot)"
+        default:
+            return nil
         }
     }
 

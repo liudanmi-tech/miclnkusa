@@ -130,15 +130,18 @@ class SelfEmojiURLCache: ObservableObject {
     static let shared = SelfEmojiURLCache()
     @Published var urls: [String: String] = [:]   // slot → presigned URL (non-nil only)
     private var loaded = false
+    private var loading = false   // 防止并发重复请求
 
     private init() {}
 
     func load() async {
-        guard !loaded else { return }
-        loaded = true
+        guard !loaded && !loading else { return }
+        loading = true
         if let fetched = try? await NetworkManager.shared.fetchEmotionAvatarUrls() {
             urls = fetched.compactMapValues { $0 }
         }
+        loaded = true
+        loading = false
     }
 
     func url(for slot: String) -> String? { urls[slot] }
@@ -146,5 +149,6 @@ class SelfEmojiURLCache: ObservableObject {
     func reset() {
         urls = [:]
         loaded = false
+        // loading 不清：进行中的请求自然完成后置 false
     }
 }

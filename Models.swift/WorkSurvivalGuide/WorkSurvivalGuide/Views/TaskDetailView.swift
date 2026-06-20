@@ -173,8 +173,9 @@ struct TaskDetailView: View {
             .onDisappear {
                 audioPlayer.stop()
             }
-            .task {
+            .task(id: profileVM.selfEmojiType) {
                 if profileVM.selfEmojiType == "self" {
+                    SelfEmojiURLCache.shared.reset()
                     await SelfEmojiURLCache.shared.load()
                 }
             }

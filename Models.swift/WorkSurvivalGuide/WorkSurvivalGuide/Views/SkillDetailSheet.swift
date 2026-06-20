@@ -10,6 +10,14 @@ struct SkillDetailSheet: View {
     let isSelected: Bool
     let onToggle: () -> Void
     @Environment(\.dismiss) private var dismiss
+    @StateObject private var contentVM: SkillNoteResourceViewModel
+
+    init(skill: SkillCatalogItem, isSelected: Bool, onToggle: @escaping () -> Void) {
+        self.skill = skill
+        self.isSelected = isSelected
+        self.onToggle = onToggle
+        _contentVM = StateObject(wrappedValue: SkillNoteResourceViewModel(skillId: skill.skillId))
+    }
 
     private var baseColor: Color {
         Color(hex: skill.coverColor ?? "#636e72")
@@ -23,7 +31,6 @@ struct SkillDetailSheet: View {
         )
     }
 
-    /// 将 cover_image（文件名或完整 URL）转为可访问的代理 URL
     private var coverProxyURL: URL? {
         guard let raw = skill.coverImage, !raw.isEmpty else { return nil }
         let filename = raw.hasPrefix("http")
@@ -38,12 +45,11 @@ struct SkillDetailSheet: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
 
-                    // ── Hero 封面图（有 cover_image 显示生成图，否则显示渐变色占位）──
+                    // ── Hero 封面 ──
                     ZStack(alignment: .bottomLeading) {
                         if let proxyURL = coverProxyURL {
                             ZStack {
-                                gradientCover   // 加载中/失败时渐变色兜底
-                                // 详情页高 210pt 全屏宽，传 420 保证清晰度
+                                gradientCover
                                 SkillCoverImage(url: proxyURL, maxDisplayDimension: 420)
                             }
                             .frame(height: 210)
@@ -55,7 +61,6 @@ struct SkillDetailSheet: View {
                                 .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                         }
 
-                        // Tagline 叠加在封面底部
                         if let tagline = skill.proContent?.tagline {
                             LinearGradient(
                                 colors: [.clear, .black.opacity(0.55)],
@@ -92,65 +97,38 @@ struct SkillDetailSheet: View {
                     .padding(.horizontal, 20)
                     .padding(.top, 20)
 
-                    if let pro = skill.proContent {
-                        // ── 理论基础（书单）──
-                        if let books = pro.books, !books.isEmpty {
-                            ProSection(icon: "books.vertical.fill", iconColor: Color(hex: "#A29BFE"), title: "Theory") {
-                                VStack(alignment: .leading, spacing: 8) {
-                                    ForEach(books, id: \.self) { book in
-                                        HStack(alignment: .top, spacing: 10) {
-                                            Text("📖")
-                                                .font(.system(size: 14))
-                                            Text(book)
-                                                .font(.system(size: 14, design: .rounded))
-                                                .foregroundColor(.white.opacity(0.85))
-                                                .fixedSize(horizontal: false, vertical: true)
-                                        }
-                                    }
-                                }
-                            }
-                        }
+                    // ── Note 卡片 ──
+                    SkillEditableCard(
+                        icon: "note.text",
+                        iconColor: Color(hex: "#A29BFE"),
+                        title: "Note",
+                        isDefault: contentVM.noteIsDefault,
+                        content: contentVM.noteContent,
+                        isLoading: contentVM.isLoading,
+                        isSaving: contentVM.isSaving,
+                        onSave: { contentVM.saveNote($0) }
+                    )
+                    .padding(.top, 24)
 
-                        // ── 数据支撑 ──
-                        if let research = pro.research, !research.isEmpty {
-                            ProSection(icon: "chart.bar.fill", iconColor: Color(hex: "#00B894"), title: "Evidence") {
-                                Text(research)
-                                    .font(.system(size: 14, design: .rounded))
-                                    .foregroundColor(.white.opacity(0.85))
-                                    .lineSpacing(5)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
-                        }
+                    // ── Resource 卡片 ──
+                    SkillEditableCard(
+                        icon: "books.vertical.fill",
+                        iconColor: Color(hex: "#00B894"),
+                        title: "Resource",
+                        isDefault: contentVM.resourceIsDefault,
+                        content: contentVM.resourceContent,
+                        isLoading: contentVM.isLoading,
+                        isSaving: contentVM.isSaving,
+                        onSave: { contentVM.saveResource($0) }
+                    )
+                    .padding(.top, 24)
 
-                        // ── 真实案例 ──
-                        if let cs = pro.casestudy, !cs.isEmpty {
-                            ProSection(icon: "person.fill.checkmark", iconColor: Color(hex: "#FDCB6E"), title: "Real Case") {
-                                Text(cs)
-                                    .font(.system(size: 14, design: .rounded))
-                                    .foregroundColor(.white.opacity(0.85))
-                                    .lineSpacing(5)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
-                        }
-
-                        // ── 已验证效果 ──
-                        if let effects = pro.effects, !effects.isEmpty {
-                            ProSection(icon: "checkmark.seal.fill", iconColor: baseColor, title: "Verified Results") {
-                                VStack(alignment: .leading, spacing: 8) {
-                                    ForEach(effects, id: \.self) { effect in
-                                        HStack(alignment: .top, spacing: 10) {
-                                            Image(systemName: "arrow.up.right.circle.fill")
-                                                .font(.system(size: 14))
-                                                .foregroundColor(baseColor)
-                                            Text(effect)
-                                                .font(.system(size: 14, weight: .medium, design: .rounded))
-                                                .foregroundColor(.white.opacity(0.9))
-                                                .fixedSize(horizontal: false, vertical: true)
-                                        }
-                                    }
-                                }
-                            }
-                        }
+                    if let err = contentVM.errorMessage {
+                        Text(err)
+                            .font(.system(size: 13))
+                            .foregroundColor(.red.opacity(0.8))
+                            .padding(.horizontal, 20)
+                            .padding(.top, 12)
                     }
 
                     Spacer(minLength: 40)
@@ -158,10 +136,7 @@ struct SkillDetailSheet: View {
             }
             .scrollIndicators(.hidden)
             .safeAreaInset(edge: .bottom) {
-                Button(action: {
-                    onToggle()
-                    dismiss()
-                }) {
+                Button(action: { onToggle(); dismiss() }) {
                     HStack(spacing: 8) {
                         Image(systemName: isSelected ? "checkmark.circle.fill" : "plus.circle.fill")
                             .font(.system(size: 18))
@@ -190,47 +165,10 @@ struct SkillDetailSheet: View {
                     }
                 }
             }
+            .onAppear { contentVM.load() }
         }
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
         .preferredColorScheme(.dark)
-    }
-}
-
-// MARK: - 专业内容区块容器
-
-private struct ProSection<Content: View>: View {
-    let icon: String
-    let iconColor: Color
-    let title: String
-    @ViewBuilder let content: () -> Content
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 7) {
-                Image(systemName: icon)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(iconColor)
-                Text(title)
-                    .font(.system(size: 13, weight: .bold, design: .rounded))
-                    .foregroundColor(.white.opacity(0.55))
-                    .textCase(.uppercase)
-                    .tracking(0.8)
-            }
-
-            content()
-                .padding(14)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(Color(white: 0.1))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .stroke(Color.white.opacity(0.07), lineWidth: 0.5)
-                        )
-                )
-        }
-        .padding(.horizontal, 20)
-        .padding(.top, 24)
     }
 }

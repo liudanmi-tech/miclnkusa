@@ -317,20 +317,18 @@ struct OnboardingSubSkillDetailSheet: View {
     let skill: OnboardingSubSkill
     @Environment(\.dismiss) private var dismiss
     @AppStorage("onboarding_subskills") private var savedSubSkills = ""
+    @StateObject private var contentVM: SkillNoteResourceViewModel
+
+    init(skill: OnboardingSubSkill) {
+        self.skill = skill
+        _contentVM = StateObject(wrappedValue: SkillNoteResourceViewModel(skillId: skill.id))
+    }
 
     private func unsubscribe() {
         var ids = savedSubSkills.split(separator: ",").map(String.init).filter { !$0.isEmpty }
         ids.removeAll { $0 == skill.id }
         savedSubSkills = ids.joined(separator: ",")
         dismiss()
-    }
-
-    private var tips: [String] {
-        skillTips[skill.id] ?? [
-            "Use the recording feature to practice a real conversation.",
-            "After recording, AI will analyze your communication patterns.",
-            "Review the feedback and try again in your next conversation."
-        ]
     }
 
     var body: some View {
@@ -351,46 +349,35 @@ struct OnboardingSubSkillDetailSheet: View {
                         }
                         .padding(.top, 8)
 
-                        // HOW IT WORKS
-                        VStack(alignment: .leading, spacing: 12) {
-                            Text("HOW IT WORKS")
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundColor(.white.opacity(0.35))
-                                .tracking(1.2)
+                        // NOTE 卡片
+                        SkillEditableCard(
+                            icon: "note.text",
+                            iconColor: Color(hex: "#A29BFE"),
+                            title: "Note",
+                            isDefault: contentVM.noteIsDefault,
+                            content: contentVM.noteContent,
+                            isLoading: contentVM.isLoading,
+                            isSaving: contentVM.isSaving,
+                            onSave: { contentVM.saveNote($0) }
+                        )
 
-                            VStack(spacing: 10) {
-                                ForEach(Array(tips.enumerated()), id: \.offset) { _, tip in
-                                    HStack(alignment: .top, spacing: 12) {
-                                        Circle()
-                                            .fill(Color(hex: "#45B7D1").opacity(0.7))
-                                            .frame(width: 6, height: 6)
-                                            .padding(.top, 6)
-                                        Text(tip)
-                                            .font(.system(size: 14))
-                                            .foregroundColor(.white.opacity(0.8))
-                                    }
-                                }
-                            }
+                        // RESOURCE 卡片
+                        SkillEditableCard(
+                            icon: "books.vertical.fill",
+                            iconColor: Color(hex: "#00B894"),
+                            title: "Resource",
+                            isDefault: contentVM.resourceIsDefault,
+                            content: contentVM.resourceContent,
+                            isLoading: contentVM.isLoading,
+                            isSaving: contentVM.isSaving,
+                            onSave: { contentVM.saveResource($0) }
+                        )
+
+                        if let err = contentVM.errorMessage {
+                            Text(err)
+                                .font(.system(size: 13))
+                                .foregroundColor(.red.opacity(0.8))
                         }
-                        .padding(16)
-                        .background(Color.white.opacity(0.06))
-                        .cornerRadius(14)
-
-                        // PRACTICE
-                        VStack(alignment: .leading, spacing: 10) {
-                            Text("PRACTICE")
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundColor(.white.opacity(0.35))
-                                .tracking(1.2)
-
-                            Text("Record a real conversation where this skill is relevant. The AI will analyze your patterns and give you actionable feedback.")
-                                .font(.system(size: 14))
-                                .foregroundColor(.white.opacity(0.7))
-                                .lineSpacing(3)
-                        }
-                        .padding(16)
-                        .background(Color.white.opacity(0.06))
-                        .cornerRadius(14)
 
                         Spacer(minLength: 32)
                     }
@@ -423,226 +410,10 @@ struct OnboardingSubSkillDetailSheet: View {
                 }
             }
             .toolbarColorScheme(.dark, for: .navigationBar)
+            .onAppear { contentVM.load() }
         }
     }
 
-    private let skillTips: [String: [String]] = [
-        "salary_negotiation": [
-            "Research market rates before the conversation using Glassdoor or Levels.fyi.",
-            "Anchor high — the first number sets the range.",
-            "Use silence strategically: after stating your ask, wait for their response."
-        ],
-        "difficult_boss": [
-            "Document specific incidents with dates and context.",
-            "Focus on impact to the team/project, not personal feelings.",
-            "Ask clarifying questions to surface their expectations explicitly."
-        ],
-        "work_boundaries": [
-            "Be direct and brief — long explanations invite negotiation.",
-            "Use 'I won't' instead of 'I can't' to own your boundary.",
-            "Offer an alternative when possible to soften the no."
-        ],
-        "performance_reviews": [
-            "Prepare a list of accomplishments with measurable impact before the meeting.",
-            "Ask for specific feedback, not just ratings.",
-            "Follow up in writing to confirm any commitments made."
-        ],
-        "feedback": [
-            "Use the SBI model: Situation, Behavior, Impact.",
-            "Separate the person from the behavior when giving feedback.",
-            "Ask 'What would you do differently?' instead of telling them what to change."
-        ],
-        "job_interviews": [
-            "Use the STAR method: Situation, Task, Action, Result.",
-            "Prepare 3-5 stories that can answer behavioral questions.",
-            "Research the company's recent news and reference it in your answers."
-        ],
-        "coworker_conflicts": [
-            "Address issues privately before escalating to management.",
-            "Focus on the shared goal, not who's right.",
-            "Assume positive intent until proven otherwise."
-        ],
-        "remote_work": [
-            "Over-communicate progress — don't wait to be asked for updates.",
-            "Set clear response time expectations in your bio or calendar.",
-            "Use async-friendly formats: loom videos, detailed written updates."
-        ],
-        "roommate_conflicts": [
-            "Address issues within 24 hours before resentment builds.",
-            "Use 'I notice...' instead of 'You always...'",
-            "Agree on house rules in writing at the start."
-        ],
-        "professor_email": [
-            "Keep emails under 100 words — professors read hundreds a week.",
-            "Reference the class name and section in the subject line.",
-            "Show you've already tried to find the answer before asking."
-        ],
-        "group_projects": [
-            "Establish roles and deadlines in the first meeting.",
-            "Use a shared doc to track who owns what.",
-            "Address slackers early — wait too long and it becomes resentment."
-        ],
-        "making_friends": [
-            "Proximity + repetition is the formula — show up consistently.",
-            "Ask follow-up questions about things they mentioned before.",
-            "Be the one to suggest a specific plan, not just 'we should hang out.'"
-        ],
-        "asking_extensions": [
-            "Ask before the deadline, not after.",
-            "Be honest about the reason — professors respect transparency.",
-            "Propose your own new deadline to show you're in control."
-        ],
-        "academic_burnout": [
-            "Identify what's draining you: workload, purpose, or environment.",
-            "Schedule non-negotiable rest — recovery is part of performance.",
-            "Talk to an advisor or counselor before it compounds."
-        ],
-        "internship_interview": [
-            "Research the company's products and recent news beforehand.",
-            "Have 2-3 questions ready that show genuine curiosity.",
-            "Follow up with a thank-you email within 24 hours."
-        ],
-        "networking": [
-            "Lead with genuine curiosity about their work, not asks.",
-            "Follow up within 48 hours with something specific from your conversation.",
-            "Give before you ask — share a resource, make an intro, offer help."
-        ],
-        "partner_communication": [
-            "Use 'I feel...' statements instead of 'You always...'",
-            "Pick the right time — don't bring up big topics when tired or hungry.",
-            "Aim to understand, not to win the argument."
-        ],
-        "talking_stage": [
-            "Be clear about your intentions early — saves everyone time.",
-            "Consistency matters more than intensity.",
-            "If you're unsure how they feel, just ask directly."
-        ],
-        "ghosting_rejection": [
-            "A brief, honest message is kinder than silence.",
-            "You don't owe anyone a detailed explanation.",
-            "Give yourself time before responding if you're upset."
-        ],
-        "situationship": [
-            "Name what you want clearly — vague hints don't work.",
-            "Be prepared for any answer, including one you don't want.",
-            "The conversation itself tells you a lot about compatibility."
-        ],
-        "dtr_conversation": [
-            "Choose a calm, private moment — not after a conflict.",
-            "Be honest about what you're looking for, not what you think they want to hear.",
-            "If they can't answer, that is an answer."
-        ],
-        "breakups": [
-            "Do it in person or by call — not text.",
-            "Be kind but clear — vague language gives false hope.",
-            "Don't offer friendship in the moment if you don't mean it."
-        ],
-        "friendship_conflicts": [
-            "Address it directly with the person, not through mutual friends.",
-            "Give it a day before reaching out if emotions are high.",
-            "Decide if this is a pattern or a one-time thing — that changes your approach."
-        ],
-        "coming_out": [
-            "Choose someone you trust first — you don't have to do it all at once.",
-            "You get to control when, how, and to whom.",
-            "Have a support person ready for after difficult conversations."
-        ],
-        "parent_boundaries": [
-            "Be direct and brief — long explanations invite negotiation.",
-            "Use 'I won't' instead of 'I can't' to own your boundary.",
-            "Offer an alternative when possible to soften the no."
-        ],
-        "immigrant_family": [
-            "Acknowledge their sacrifices before bringing up your needs.",
-            "Find common values (safety, success, respect) to anchor the conversation.",
-            "Use concrete examples, not abstract concepts like 'independence.'"
-        ],
-        "family_money": [
-            "Talk about money when everyone is calm, not during a crisis.",
-            "Use numbers and facts, not emotions.",
-            "Establish clear agreements in writing, even for family loans."
-        ],
-        "coparenting": [
-            "Keep the kids completely out of adult disagreements.",
-            "Communicate in writing to avoid misunderstandings.",
-            "Focus on what's best for the child, not winning against your ex."
-        ],
-        "parent_teen": [
-            "Listen twice as much as you talk.",
-            "Pick your battles — not everything needs a rule.",
-            "Share your own mistakes — it builds trust and relatability."
-        ],
-        "coming_out_family": [
-            "Plan the conversation when you're in a safe, stable place.",
-            "Have a backup plan if the reaction is difficult.",
-            "You are not responsible for managing their feelings."
-        ],
-        "assertiveness": [
-            "Use the 3-part formula: state the fact, your feeling, your need.",
-            "Match your body language to your words — eye contact matters.",
-            "Practice with low-stakes situations first."
-        ],
-        "imposter_syndrome": [
-            "Keep a 'wins' document — write down every compliment and achievement.",
-            "Recognize that most people feel this way, especially high achievers.",
-            "Separate feelings from facts: feeling unqualified ≠ being unqualified."
-        ],
-        "social_anxiety": [
-            "Prepare 3 questions before any event to start conversations.",
-            "Focus on curiosity about others, not how you're coming across.",
-            "It's okay to leave early — giving yourself that permission reduces anxiety."
-        ],
-        "burnout_recovery": [
-            "Start by doing less, not trying harder.",
-            "Identify which type of rest you need: physical, mental, emotional, or social.",
-            "Recovery takes longer than you expect — be patient with yourself."
-        ],
-        "anger_management": [
-            "Name the emotion — labeling it reduces its intensity.",
-            "Buy time: 'I need a moment before I respond.'",
-            "Look for the need underneath the anger — what are you actually protecting?"
-        ],
-        "friend_crisis": [
-            "Ask directly: 'Are you thinking about hurting yourself?'",
-            "Listen without trying to fix — presence matters more than solutions.",
-            "Connect them to professional help: 988 Suicide & Crisis Lifeline."
-        ],
-        "dealing_criticism": [
-            "Pause before responding — a few seconds makes a big difference.",
-            "Ask clarifying questions to understand the feedback fully.",
-            "Separate useful critique from how it was delivered."
-        ],
-        "boundary_setting": [
-            "Be direct and brief — long explanations invite negotiation.",
-            "Use 'I won't' instead of 'I can't' to own your boundary.",
-            "Offer an alternative when possible to soften the no."
-        ],
-        "healthcare_advocacy": [
-            "Write down your symptoms and questions before the appointment.",
-            "Ask 'What are all the options?' not just 'What do you recommend?'",
-            "Request everything in writing — especially diagnoses and treatment plans."
-        ],
-        "customer_service": [
-            "Stay calm and factual — emotion gives them an excuse to dismiss you.",
-            "Ask for a supervisor if the first rep can't help.",
-            "Know your consumer rights — many companies have policies they don't advertise."
-        ],
-        "money_conversations": [
-            "Address it early — awkward now beats resentment later.",
-            "Propose a specific system instead of leaving it vague.",
-            "Keep a shared record of who owes what."
-        ],
-        "neighbor_conflicts": [
-            "Start with a friendly, in-person conversation before formal action.",
-            "Document incidents with dates and times if they continue.",
-            "Know your local noise and parking ordinances before citing them."
-        ],
-        "landlord_comm": [
-            "Always communicate in writing — email creates a paper trail.",
-            "Know your tenant rights in your state before negotiating.",
-            "Be specific about timelines: 'By Friday' beats 'soon.'"
-        ],
-    ]
 }
 
 // MARK: - Header (unchanged)
@@ -878,6 +649,130 @@ struct CustomSkillDetailSheet: View {
             }
             .toolbarColorScheme(.dark, for: .navigationBar)
         }
+    }
+}
+
+// MARK: - Skill Editable Card (Note / Resource)
+
+struct SkillEditableCard: View {
+    let icon: String
+    let iconColor: Color
+    let title: String
+    let isDefault: Bool
+    let content: String
+    let isLoading: Bool
+    let isSaving: Bool
+    let onSave: (String) -> Void
+
+    @State private var showEditor = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 7) {
+                Image(systemName: icon)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(iconColor)
+                Text(title.uppercased())
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundColor(.white.opacity(0.4))
+                    .tracking(1.0)
+                if isDefault {
+                    Text("DEFAULT")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(iconColor.opacity(0.7))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Capsule().fill(iconColor.opacity(0.15)))
+                }
+                Spacer()
+                Button(action: { showEditor = true }) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "pencil").font(.system(size: 12))
+                        Text("Edit").font(.system(size: 12, weight: .medium))
+                    }
+                    .foregroundColor(iconColor)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(Capsule().fill(iconColor.opacity(0.15)))
+                }
+                .buttonStyle(.plain)
+            }
+
+            Group {
+                if isLoading {
+                    HStack(spacing: 8) {
+                        ProgressView().tint(.white.opacity(0.5))
+                        Text("Loading…").font(.system(size: 13)).foregroundColor(.white.opacity(0.4))
+                    }
+                    .frame(height: 40)
+                } else {
+                    Text(content.isEmpty ? "Tap Edit to add content." : content)
+                        .font(.system(size: 13, design: .monospaced))
+                        .foregroundColor(content.isEmpty ? .white.opacity(0.3) : .white.opacity(0.82))
+                        .lineSpacing(4)
+                        .lineLimit(8)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Color(white: 0.1))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .stroke(Color.white.opacity(0.07), lineWidth: 0.5)
+                    )
+            )
+        }
+        .sheet(isPresented: $showEditor) {
+            SkillContentEditorSheet(
+                title: title,
+                iconColor: iconColor,
+                initialText: content,
+                isSaving: isSaving,
+                onSave: { text in onSave(text); showEditor = false }
+            )
+        }
+    }
+}
+
+struct SkillContentEditorSheet: View {
+    let title: String
+    let iconColor: Color
+    let initialText: String
+    let isSaving: Bool
+    let onSave: (String) -> Void
+
+    @State private var editText: String = ""
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            TextEditor(text: $editText)
+                .font(.system(size: 14, design: .monospaced))
+                .foregroundColor(.white.opacity(0.9))
+                .scrollContentBackground(.hidden)
+                .background(Color.black)
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+                .navigationTitle(title)
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button("Cancel") { dismiss() }.foregroundColor(.white.opacity(0.6))
+                    }
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button(action: { onSave(editText) }) {
+                            if isSaving { ProgressView().tint(.white) }
+                            else { Text("Save").font(.system(size: 15, weight: .semibold)).foregroundColor(iconColor) }
+                        }
+                        .disabled(isSaving)
+                    }
+                }
+        }
+        .preferredColorScheme(.dark)
+        .onAppear { editText = initialText }
     }
 }
 

@@ -237,3 +237,25 @@ struct SkillPreferencesResponse: Codable {
     let message: String
     let data: SkillPreferencesData?
 }
+
+// MARK: - Skill User Content (Note / Resource)
+
+struct SkillUserContent: Codable {
+    let noteContent: String
+    let resourceContent: String
+    let noteIsDefault: Bool
+    let resourceIsDefault: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case noteContent      = "note_content"
+        case resourceContent  = "resource_content"
+        case noteIsDefault    = "note_is_default"
+        case resourceIsDefault = "resource_is_default"
+    }
+}
+
+struct SkillUserContentResponse: Codable {
+    let code: Int
+    let message: String
+    let data: SkillUserContent?
+}

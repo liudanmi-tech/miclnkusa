@@ -221,8 +221,9 @@ private struct MoodCurveCard: View {
                 }
             }
         }
-        .task {
+        .task(id: emojiType) {
             if emojiType == "self" {
+                SelfEmojiURLCache.shared.reset()
                 await SelfEmojiURLCache.shared.load()
             }
         }
