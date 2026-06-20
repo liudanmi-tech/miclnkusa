@@ -126,7 +126,10 @@ struct ChatAIAssistantView: View {
             isPresented: $showExitSheet,
             titleVisibility: .visible
         ) {
-            Button("Convert to image") { handleGenerateImage() }
+            // image quota 耗尽时隐藏 "Convert to image"，直接只留 Just close
+            if SubscriptionManager.shared.canGenerateImage {
+                Button("Convert to image") { handleGenerateImage() }
+            }
             Button("Just close") { handleCloseWithFinalize() }
             Button("Keep chatting", role: .cancel) {}
         } message: {

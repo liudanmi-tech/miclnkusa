@@ -20,7 +20,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pydantic import BaseModel
 
 from database.connection import get_db
@@ -28,6 +28,83 @@ from database.models import AnalysisResult, StrategyAnalysis, User, Session, Ski
 from auth.jwt_handler import get_current_user_id
 
 logger = logging.getLogger(__name__)
+
+# ─── Quota Config ─────────────────────────────────────────────────────────────
+
+_PLAN_QUOTA = {
+    "com.miclnk.pro.weekly":  {"plan": "weekly",  "chat_limit": 30,   "image_limit": 7,   "period_days": 7},
+    "com.miclnk.pro.monthly": {"plan": "monthly", "chat_limit": 100,  "image_limit": 30,  "period_days": 30},
+    "com.miclnk.pro.yearly":  {"plan": "yearly",  "chat_limit": None, "image_limit": 365, "period_days": 365},
+}
+
+
+async def _get_quota_status(user_id: str, db: AsyncSession) -> dict:
+    """
+    返回用户当前配额状态。
+    结构：{plan, chat_limit(None=无限), image_limit, period_start(None=终身), used_chat, used_image}
+    """
+    from sqlalchemy import func as sa_func
+
+    user_q = await db.execute(select(User).where(User.id == uuid.UUID(user_id)))
+    user = user_q.scalar_one_or_none()
+
+    quota: dict = {"plan": "free", "chat_limit": 5, "image_limit": 5, "period_start": None}
+
+    if user:
+        tier = getattr(user, "subscription_tier", None) or "free"
+        expires = getattr(user, "subscription_expires_at", None)
+        product_id = getattr(user, "subscription_product_id", None)
+        sub_period_start = getattr(user, "sub_period_start", None)
+
+        # 过期检查
+        if tier == "pro" and expires:
+            exp = expires if expires.tzinfo else expires.replace(tzinfo=timezone.utc)
+            if exp < datetime.now(timezone.utc):
+                tier = "free"
+                product_id = None
+
+        if tier == "pro" and product_id and product_id in _PLAN_QUOTA:
+            pq = _PLAN_QUOTA[product_id]
+            quota["plan"] = pq["plan"]
+            quota["chat_limit"] = pq["chat_limit"]   # None = 无限
+            quota["image_limit"] = pq["image_limit"]
+
+            # 计算当前周期 start（基于 sub_period_start 滚动）
+            if sub_period_start:
+                now = datetime.now(timezone.utc)
+                sp = sub_period_start if sub_period_start.tzinfo else sub_period_start.replace(tzinfo=timezone.utc)
+                elapsed_days = max(0, (now - sp).days)
+                periods_elapsed = elapsed_days // pq["period_days"]
+                quota["period_start"] = sp + timedelta(days=periods_elapsed * pq["period_days"])
+            else:
+                now = datetime.now(timezone.utc)
+                quota["period_start"] = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+    # 统计 used_chat（free 无日期过滤 = 终身计数）
+    chat_q = select(sa_func.count(Session.id)).where(
+        Session.user_id == uuid.UUID(user_id),
+        Session.session_type == "chat",
+    )
+    if quota["period_start"]:
+        chat_q = chat_q.where(Session.created_at >= quota["period_start"])
+    quota["used_chat"] = (await db.execute(chat_q)).scalar() or 0
+
+    # 统计 used_image
+    img_q = select(sa_func.count(Session.id)).where(
+        Session.user_id == uuid.UUID(user_id),
+        Session.session_type == "chat",
+        Session.cover_image_url.isnot(None),
+    )
+    if quota["period_start"]:
+        img_q = img_q.where(Session.created_at >= quota["period_start"])
+    quota["used_image"] = (await db.execute(img_q)).scalar() or 0
+
+    logger.info(
+        f"[quota] user={user_id[:8]} plan={quota['plan']} "
+        f"chat={quota['used_chat']}/{quota['chat_limit']} "
+        f"image={quota['used_image']}/{quota['image_limit']}"
+    )
+    return quota
 
 # ─── Skill Resource Loader ───────────────────────────────────────────────────
 
@@ -610,6 +687,16 @@ async def init_chat_session(
     Phase 1 of chat session implementation.
     """
     logger.info(f"[CHAT:new] init_chat_session | user_id={user_id[:8]}")
+
+    # ── 配额检查：chat 次数 ──────────────────────────────────────────────────
+    quota = await _get_quota_status(user_id, db)
+    if quota["chat_limit"] is not None and quota["used_chat"] >= quota["chat_limit"]:
+        logger.warning(
+            f"[CHAT:new] chat_limit_reached | user={user_id[:8]} "
+            f"used={quota['used_chat']} limit={quota['chat_limit']} plan={quota['plan']}"
+        )
+        raise HTTPException(status_code=403, detail="chat_limit_reached")
+    # ────────────────────────────────────────────────────────────────────────
 
     try:
         session = Session(
@@ -1596,6 +1683,16 @@ async def generate_image_from_chat(
     logger.info(
         f"[CHAT:{id8}] generate_image_from_chat | conv_len={len(req.conversation)} style={req.style_key}"
     )
+
+    # ── 配额检查：image 次数 ─────────────────────────────────────────────────
+    quota = await _get_quota_status(user_id, db)
+    if quota["used_image"] >= quota["image_limit"]:
+        logger.warning(
+            f"[CHAT:{id8}] image_limit_reached | user={user_id[:8]} "
+            f"used={quota['used_image']} limit={quota['image_limit']} plan={quota['plan']}"
+        )
+        raise HTTPException(status_code=403, detail="image_limit_reached")
+    # ────────────────────────────────────────────────────────────────────────
 
     # 1. 构造 synthetic_transcript（仅 role=="user" 消息，AI 回复跳过）
     #    单说话人 → generate_scene_images 自动进入场景2（旁白模式）

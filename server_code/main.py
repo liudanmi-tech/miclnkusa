@@ -5080,24 +5080,84 @@ async def get_subscription_status(
     )
     monthly_count = cnt.scalar() or 0
 
-    # 档案数量
-    _PROFILE_LIMITS = {"free": 2, "pro": 15}
-    profile_limit = _PROFILE_LIMITS.get(tier, _PROFILE_LIMITS["free"])
+    # 档案数量（按 product_id 细分4档）
+    _PROFILE_LIMITS_BY_PLAN = {
+        "com.miclnk.pro.weekly":  7,
+        "com.miclnk.pro.monthly": 15,
+        "com.miclnk.pro.yearly":  30,
+    }
+    product_id = getattr(user, "subscription_product_id", None)
+    if tier == "pro" and product_id and product_id in _PROFILE_LIMITS_BY_PLAN:
+        profile_limit = _PROFILE_LIMITS_BY_PLAN[product_id]
+    elif tier == "pro":
+        profile_limit = 15  # pro 但无具体 product_id，兜底用 monthly
+    else:
+        profile_limit = 2   # free
+
     pcnt = await db.execute(
         select(func.count(Profile.id)).where(Profile.user_id == uuid.UUID(user_id))
     )
     profile_count = pcnt.scalar() or 0
 
+    # Chat / Image 配额（复用 _PLAN_QUOTA 逻辑）
+    from datetime import timedelta as _td
+    _PLAN_QUOTA_SUB = {
+        "com.miclnk.pro.weekly":  {"plan": "weekly",  "chat_limit": 30,   "image_limit": 7,   "period_days": 7},
+        "com.miclnk.pro.monthly": {"plan": "monthly", "chat_limit": 100,  "image_limit": 30,  "period_days": 30},
+        "com.miclnk.pro.yearly":  {"plan": "yearly",  "chat_limit": None, "image_limit": 365, "period_days": 365},
+    }
+    sub_period_start = getattr(user, "sub_period_start", None)
+    if tier == "pro" and product_id and product_id in _PLAN_QUOTA_SUB:
+        pq = _PLAN_QUOTA_SUB[product_id]
+        chat_plan = pq["plan"]
+        chat_limit = pq["chat_limit"]
+        image_limit = pq["image_limit"]
+        if sub_period_start:
+            sp = sub_period_start if sub_period_start.tzinfo else sub_period_start.replace(tzinfo=_tz.utc)
+            elapsed = max(0, (datetime.now(_tz.utc) - sp).days)
+            period_start_chat = sp + _td(days=(elapsed // pq["period_days"]) * pq["period_days"])
+        else:
+            _n = datetime.now(_tz.utc)
+            period_start_chat = _n.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    else:
+        chat_plan = "free"
+        chat_limit = 5
+        image_limit = 5
+        period_start_chat = None  # free = 终身，无日期过滤
+
+    _chat_q = select(func.count(Session.id)).where(
+        Session.user_id == uuid.UUID(user_id),
+        Session.session_type == "chat",
+    )
+    if period_start_chat:
+        _chat_q = _chat_q.where(Session.created_at >= period_start_chat)
+    chat_count = (await db.execute(_chat_q)).scalar() or 0
+
+    _img_q = select(func.count(Session.id)).where(
+        Session.user_id == uuid.UUID(user_id),
+        Session.session_type == "chat",
+        Session.cover_image_url.isnot(None),
+    )
+    if period_start_chat:
+        _img_q = _img_q.where(Session.created_at >= period_start_chat)
+    image_count = (await db.execute(_img_q)).scalar() or 0
+
     resp = {
         "tier": tier,
+        "plan": chat_plan,
         "expires_at": expires_at.isoformat() if expires_at else None,
         "monthly_recording_count": monthly_count,
         "monthly_limit": limits["monthly_limit"],
         "images_per_recording": limits["images_per_recording"],
         "profile_count": profile_count,
         "profile_limit": profile_limit,
+        "subscription_product_id": product_id,
+        "chat_count": chat_count,
+        "chat_limit": chat_limit,
+        "image_count": image_count,
+        "image_limit": image_limit,
     }
-    logger.info(f"[Subscription/status] user={user_id} tier={tier} expires={expires_at} resp={resp}")
+    logger.info(f"[Subscription/status] user={user_id} tier={tier} plan={chat_plan} chat={chat_count}/{chat_limit} img={image_count}/{image_limit}")
     return resp
 
 

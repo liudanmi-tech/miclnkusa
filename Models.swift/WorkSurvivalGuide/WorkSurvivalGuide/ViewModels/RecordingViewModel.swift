@@ -38,6 +38,12 @@ class RecordingViewModel: ObservableObject {
         isCreatingSession = true
         Task { @MainActor in
             defer { self.isCreatingSession = false }
+            // 配额检查（在 MainActor 上访问 SubscriptionManager）
+            guard SubscriptionManager.shared.canStartChat else {
+                print("⚠️ [RecordingViewModel] chat_limit_reached (local check) — showPaywall")
+                self.showPaywall = true
+                return
+            }
             do {
                 let response = try await NetworkManager.shared.initChatSession()
                 let startTime = Date()
@@ -61,7 +67,13 @@ class RecordingViewModel: ObservableObject {
                 )
                 self.chatSessionId = response.sessionId
             } catch {
-                print("❌ [RecordingViewModel] createChatSession 失败: \(error.localizedDescription)")
+                let nsErr = error as NSError
+                if nsErr.code == 403 {
+                    print("⚠️ [RecordingViewModel] createChatSession 403 — showPaywall")
+                    self.showPaywall = true
+                } else {
+                    print("❌ [RecordingViewModel] createChatSession 失败: \(error.localizedDescription)")
+                }
             }
         }
     }

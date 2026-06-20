@@ -1652,6 +1652,17 @@ class NetworkManager {
         if let statusCode = response.response?.statusCode {
             print("📊 [NetworkManager] 创建档案 HTTP 状态码: \(statusCode)")
             if statusCode != 201 && statusCode != 200 {
+                // 403：解析 detail 区分 free/pro 档案超限
+                if statusCode == 403, let data = response.data,
+                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                   let detail = json["detail"] as? String {
+                    print("❌ [NetworkManager] 创建档案 403 detail=\(detail)")
+                    throw NSError(
+                        domain: "NetworkError",
+                        code: 403,
+                        userInfo: [NSLocalizedDescriptionKey: detail]
+                    )
+                }
                 if let data = response.data, let errorString = String(data: data, encoding: .utf8) {
                     print("❌ [NetworkManager] 创建档案错误响应: \(errorString)")
                 }
@@ -2358,6 +2369,7 @@ struct EmptyResponse: Codable {
 
 struct SubscriptionStatusResponse: Codable {
     let tier: String
+    let plan: String?          // "free" / "weekly" / "monthly" / "yearly"
     let expiresAt: String?
     let monthlyRecordingCount: Int
     let monthlyLimit: Int
@@ -2365,9 +2377,14 @@ struct SubscriptionStatusResponse: Codable {
     let profileCount: Int?
     let profileLimit: Int?
     let subscriptionProductId: String?
+    let chatCount: Int?        // 本周期已用 AI chat 次数
+    let chatLimit: Int?        // 本周期 AI chat 上限（nil = 无限）
+    let imageCount: Int?       // 本周期已生成图片次数
+    let imageLimit: Int?       // 本周期生图上限
 
     enum CodingKeys: String, CodingKey {
         case tier
+        case plan
         case expiresAt = "expires_at"
         case monthlyRecordingCount = "monthly_recording_count"
         case monthlyLimit = "monthly_limit"
@@ -2375,6 +2392,10 @@ struct SubscriptionStatusResponse: Codable {
         case profileCount = "profile_count"
         case profileLimit = "profile_limit"
         case subscriptionProductId = "subscription_product_id"
+        case chatCount = "chat_count"
+        case chatLimit = "chat_limit"
+        case imageCount = "image_count"
+        case imageLimit = "image_limit"
     }
 }
 

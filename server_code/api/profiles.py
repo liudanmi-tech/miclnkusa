@@ -330,24 +330,37 @@ async def create_profile(
     db: AsyncSession = Depends(get_db)
 ):
     """创建新档案"""
-    # ── 档案数量限制 ──────────────────────────────────────────────────────────
-    _PROFILE_LIMITS = {"free": 2, "pro": 15}
+    # ── 档案数量限制（按 product_id 细分4档）────────────────────────────────
+    _PROFILE_LIMITS_BY_PRODUCT = {
+        "com.miclnk.pro.weekly":  7,
+        "com.miclnk.pro.monthly": 15,
+        "com.miclnk.pro.yearly":  30,
+    }
     _user_result = await db.execute(select(User).where(User.id == uuid.UUID(user_id)))
     _user = _user_result.scalar_one_or_none()
     if _user:
         _tier = getattr(_user, "subscription_tier", None) or "free"
         _expires = getattr(_user, "subscription_expires_at", None)
+        _product_id = getattr(_user, "subscription_product_id", None)
         if _tier == "pro" and _expires:
             _exp = _expires if _expires.tzinfo else _expires.replace(tzinfo=timezone.utc)
             if _exp < datetime.now(timezone.utc):
                 _tier = "free"
-        _max = _PROFILE_LIMITS.get(_tier, _PROFILE_LIMITS["free"])
+                _product_id = None
+        if _tier == "pro" and _product_id and _product_id in _PROFILE_LIMITS_BY_PRODUCT:
+            _max = _PROFILE_LIMITS_BY_PRODUCT[_product_id]
+        elif _tier == "pro":
+            _max = 15  # pro 无具体 product_id，兜底
+        else:
+            _max = 2   # free
         _cnt_result = await db.execute(
             select(func.count(Profile.id)).where(Profile.user_id == uuid.UUID(user_id))
         )
         _profile_count = _cnt_result.scalar() or 0
         if _profile_count >= _max:
-            raise HTTPException(status_code=403, detail=f"Profile limit reached ({_max})")
+            # free 用户 → 引导升级；pro 用户 → toast 提示
+            _detail = "profile_free_limit_reached" if _tier == "free" else "profile_pro_limit_reached"
+            raise HTTPException(status_code=403, detail=_detail)
     # ─────────────────────────────────────────────────────────────────────────
     audio_session_id = None
     if profile_data.audio_session_id and str(profile_data.audio_session_id).strip():

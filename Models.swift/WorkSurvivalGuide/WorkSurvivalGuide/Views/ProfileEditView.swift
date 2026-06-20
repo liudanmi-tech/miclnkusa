@@ -535,7 +535,7 @@ struct ProfileEditView: View {
                     if showSelfLimitToast {
                         toastLabel(text: "Only one \"Self\" profile can be created.")
                     } else if showProLimitToast {
-                        toastLabel(text: "You've reached the maximum number of profiles (15).")
+                        toastLabel(text: "You've reached the profile limit for your subscription.")
                     }
                 }
                 .padding(.top, 12)
@@ -705,16 +705,21 @@ struct ProfileEditView: View {
             } catch {
                 await MainActor.run {
                     isSaving = false
-                    print("❌ [ProfileEditView] 保存失败: \(error)")
-                    print("   错误类型: \(type(of: error))")
-                    print("   错误描述: \(error.localizedDescription)")
-                    if let nsError = error as NSError? {
-                        print("   错误代码: \(nsError.code)")
-                        print("   错误域: \(nsError.domain)")
-                        print("   用户信息: \(nsError.userInfo)")
+                    let nsErr = error as NSError
+                    print("❌ [ProfileEditView] 保存失败: code=\(nsErr.code) desc=\(nsErr.localizedDescription)")
+                    if nsErr.code == 403 {
+                        let detail = nsErr.localizedDescription
+                        if detail == "profile_free_limit_reached" {
+                            // Free 用户超限 → 弹订阅墙
+                            showSubscriptionView = true
+                        } else {
+                            // Pro 用户超限 → Toast 提示
+                            showProLimitToast = true
+                        }
+                    } else {
+                        errorMessage = nsErr.localizedDescription
+                        showError = true
                     }
-                    errorMessage = error.localizedDescription
-                    showError = true
                 }
             }
         }

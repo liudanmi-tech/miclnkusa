@@ -31,6 +31,18 @@ class SubscriptionManager: ObservableObject {
     @Published var profileLimit: Int = 2
     @Published var currentProductId: String? = nil
 
+    // Chat / Image 配额
+    @Published var plan: String = "free"      // "free" / "weekly" / "monthly" / "yearly"
+    @Published var chatCount: Int = 0
+    @Published var chatLimit: Int = 5         // -1 = 无限
+    @Published var imageCount: Int = 0
+    @Published var imageLimit: Int = 5
+
+    /// 是否还能发起新的 AI Chat 会话
+    var canStartChat: Bool { chatLimit == -1 || chatCount < chatLimit }
+    /// 是否还能生成对话图片
+    var canGenerateImage: Bool { imageLimit > 0 && imageCount < imageLimit }
+
     private var transactionListenerTask: Task<Void, Error>?
 
     private init() {
@@ -200,6 +212,14 @@ class SubscriptionManager: ObservableObject {
             expiresAt = status.expiresAt
             profileCount = status.profileCount ?? 0
             profileLimit = status.profileLimit ?? 2
+            // Chat / Image 配额
+            plan = status.plan ?? "free"
+            chatCount = status.chatCount ?? 0
+            chatLimit = status.chatLimit ?? 5   // nil（yearly无限）映射为 -1
+            imageCount = status.imageCount ?? 0
+            imageLimit = status.imageLimit ?? 5
+            // chatLimit nil = yearly 无限，用 -1 标记
+            if status.chatLimit == nil { chatLimit = -1 }
             saveToCache(tier: status.tier, limit: status.monthlyLimit)
             if let pid = status.subscriptionProductId, !pid.isEmpty {
                 currentProductId = pid  // 后端是权威来源，不再查 StoreKit 避免被沙盒缓存覆盖
