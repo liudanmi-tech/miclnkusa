@@ -673,7 +673,7 @@ class NetworkManager {
         print("🌐 [Real] 使用真实 API 获取策略分析 forceRegenerate=\(forceRegenerate)")
         var url: String
         if forceRegenerate {
-            let styleKey = UserDefaults.standard.string(forKey: "image_style") ?? "ghibli"
+            let styleKey = UserDefaults.standard.string(forKey: "image_style") ?? "spider_verse"
             let encoded = styleKey.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? styleKey
             url = "\(baseURLForWrite)/tasks/sessions/\(sessionId)/strategies?force_regenerate=true&image_style=\(encoded)"
             print("🎨 [NetworkManager] 强制重新生成，使用风格: \(styleKey) URL: \(url)")
@@ -1434,8 +1434,58 @@ class NetworkManager {
         }
     }
 
+    // MARK: - Skill User Content (Note / Resource)
+
+    func getSkillUserContent(skillId: String) async throws -> SkillUserContent {
+        guard hasValidToken() else {
+            throw NSError(domain: "NetworkError", code: 401,
+                          userInfo: [NSLocalizedDescriptionKey: "请先登录"])
+        }
+        let resp = await AF.request(
+            "\(baseURLForRead)/skills/\(skillId)/user-content",
+            headers: ["Authorization": "Bearer \(getAuthToken())"],
+            requestModifier: { $0.timeoutInterval = 15 }
+        ).serializingData().response
+        guard let data = resp.data else {
+            throw NSError(domain: "NetworkError", code: -1,
+                          userInfo: [NSLocalizedDescriptionKey: "空响应"])
+        }
+        let decoded = try JSONDecoder().decode(SkillUserContentResponse.self, from: data)
+        guard decoded.code == 200, let content = decoded.data else {
+            throw NSError(domain: "NetworkError", code: decoded.code,
+                          userInfo: [NSLocalizedDescriptionKey: decoded.message])
+        }
+        return content
+    }
+
+    func updateSkillUserContent(skillId: String,
+                                noteContent: String? = nil,
+                                resourceContent: String? = nil) async throws {
+        guard hasValidToken() else {
+            throw NSError(domain: "NetworkError", code: 401,
+                          userInfo: [NSLocalizedDescriptionKey: "请先登录"])
+        }
+        var body: [String: Any] = [:]
+        if let n = noteContent     { body["note_content"]     = n }
+        if let r = resourceContent { body["resource_content"] = r }
+        let resp = await AF.request(
+            "\(baseURLForWrite)/skills/\(skillId)/user-content",
+            method: .put,
+            parameters: body,
+            encoding: JSONEncoding.default,
+            headers: ["Authorization": "Bearer \(getAuthToken())",
+                      "Content-Type": "application/json"],
+            requestModifier: { $0.timeoutInterval = 15 }
+        ).serializingData().response
+        let statusCode = resp.response?.statusCode ?? 0
+        guard statusCode == 200 else {
+            throw NSError(domain: "NetworkError", code: statusCode,
+                          userInfo: [NSLocalizedDescriptionKey: "保存失败 HTTP \(statusCode)"])
+        }
+    }
+
     // MARK: - 档案管理API
-    
+
     // 获取档案列表
     func getProfilesList() async throws -> ProfileListResponse {
         // 如果使用 Mock 数据
@@ -1752,6 +1802,23 @@ class NetworkManager {
         return updatedProfile
     }
     
+    // 触发从已有 Self 档案照片重新生成情绪头像（fire-and-forget on server，~30s 后完成）
+    func triggerEmotionAvatarGeneration() async throws {
+        let response = try await AF.request(
+            "\(baseURLForWrite)/profiles/emotion-avatars/generate",
+            method: .post,
+            headers: ["Authorization": "Bearer \(getAuthToken())"],
+            requestModifier: { $0.timeoutInterval = 30 }
+        )
+        .serializingData()
+        .response
+
+        if let statusCode = response.response?.statusCode, statusCode >= 400 {
+            let detail = (try? JSONDecoder().decode([String: String].self, from: response.data ?? Data()))?["detail"] ?? "Generation failed"
+            throw NSError(domain: "EmotionAvatar", code: statusCode, userInfo: [NSLocalizedDescriptionKey: detail])
+        }
+    }
+
     // 获取当前用户全部情绪头像预签名 URL（dict: slot → presigned URL or nil）
     func fetchEmotionAvatarUrls() async throws -> [String: String?] {
         let response = try await AF.request(

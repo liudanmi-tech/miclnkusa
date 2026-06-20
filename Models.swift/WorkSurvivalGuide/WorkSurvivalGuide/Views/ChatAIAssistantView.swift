@@ -20,9 +20,10 @@ struct ChatAIAssistantView: View {
     @StateObject private var chatVM: ChatAIAssistantViewModel
     @Environment(\.dismiss) private var dismiss
 
-    @AppStorage("image_style") private var selectedImageStyle: String = "ghibli"
+    @AppStorage("image_style") private var selectedImageStyle: String = "spider_verse"
 
     @State private var inputText = ""
+    @FocusState private var isInputFocused: Bool
     @State private var showExitSheet = false
     @State private var isClosingSession = false
     @State private var isGeneratingImage = false
@@ -139,6 +140,7 @@ struct ChatAIAssistantView: View {
         }
         .animation(.easeInOut(duration: 0.2), value: chatVM.skillTags.isEmpty)
         .animation(.easeInOut(duration: 0.2), value: chatVM.baselinePhase)
+        .animation(.easeInOut(duration: 0.3), value: chatVM.suggestions.isEmpty)
         .onChange(of: chatVM.messages.count) { _ in scrollToBottom = true }
     }
 
@@ -217,6 +219,12 @@ struct ChatAIAssistantView: View {
                         .id("streaming_indicator")
                     }
 
+                    // 猜你想问 chips（流结束后显示）
+                    if !chatVM.isStreaming && !chatVM.suggestions.isEmpty {
+                        suggestedQuestionsView
+                            .transition(.opacity.combined(with: .move(edge: .bottom)))
+                    }
+
                     Color.clear.frame(height: 8).id("bottom_anchor")
                 }
                 .padding(.horizontal, 16)
@@ -231,7 +239,50 @@ struct ChatAIAssistantView: View {
             .onChange(of: chatVM.displayedStreamingText) { _ in
                 proxy.scrollTo("bottom_anchor", anchor: .bottom)
             }
+            .onChange(of: chatVM.suggestions.count) { count in
+                if count > 0 { scrollToBottom = true }
+            }
         }
+    }
+
+    // MARK: - Suggested Questions
+
+    private var suggestedQuestionsView: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Text("You might ask:")
+                .font(.system(size: 11, weight: .medium, design: .rounded))
+                .foregroundColor(.white.opacity(0.4))
+                .padding(.leading, 2)
+
+            ForEach(chatVM.suggestions, id: \.self) { question in
+                Button(action: {
+                    inputText = question
+                    inputMode = .text
+                    isInputFocused = true
+                }) {
+                    HStack(spacing: 10) {
+                        Text(question)
+                            .font(.system(size: 14, design: .rounded))
+                            .foregroundColor(.white.opacity(0.82))
+                            .multilineTextAlignment(.leading)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        Image(systemName: "arrow.up.circle")
+                            .font(.system(size: 15))
+                            .foregroundColor(.white.opacity(0.35))
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(Color.white.opacity(0.07))
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10)
+                            .stroke(Color.white.opacity(0.1), lineWidth: 0.5)
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .animation(.easeInOut(duration: 0.2), value: chatVM.suggestions.count)
     }
 
     // MARK: - Input Bar
@@ -311,8 +362,11 @@ struct ChatAIAssistantView: View {
                 .disabled(chatVM.isStreaming)
                 .transition(.opacity.combined(with: .scale(scale: 0.96)))
 
-                // 键盘按钮（切文字模式）
-                Button(action: { inputMode = .text }) {
+                // 键盘按钮（切文字模式，直接呼出键盘）
+                Button(action: {
+                    inputMode = .text
+                    isInputFocused = true
+                }) {
                     Image(systemName: "keyboard")
                         .font(.system(size: 15))
                         .foregroundColor(.white.opacity(0.55))
@@ -336,6 +390,7 @@ struct ChatAIAssistantView: View {
                 .padding(.vertical, 10)
                 .background(Color.white.opacity(0.1))
                 .clipShape(RoundedRectangle(cornerRadius: 20))
+                .focused($isInputFocused)
                 .disabled(chatVM.isStreaming)
 
             if chatVM.isStreaming {

@@ -18,8 +18,9 @@ private struct ScrollOffsetPreferenceKey: PreferenceKey {
 
 struct TaskListView: View {
     @ObservedObject private var viewModel = TaskListViewModel.shared
+    @ObservedObject private var profileVM = ProfileViewModel.shared
     @State private var showStylePicker = false
-    @AppStorage("image_style") private var selectedImageStyle: String = "ghibli"
+    @AppStorage("image_style") private var selectedImageStyle: String = "spider_verse"
     @State private var scrollOffset: CGFloat = 999
     @State private var toastMessage: String? = nil
     @State private var showLiveSession = false
@@ -205,10 +206,19 @@ struct TaskListView: View {
             .frame(maxWidth: .infinity, alignment: .top)
         }
         .onAppear {
-            // hasLoaded=false 时请求（包含：无缓存首次加载、有缓存需后台刷新两种情况）
-            // hasLoaded=true 时跳过（server 已成功响应过，数据是最新的）
             if !viewModel.hasLoaded && !viewModel.isLoading {
                 viewModel.loadTasks()
+            }
+            // 首次出现时加载（load() 内部有 loaded guard，已加载则跳过，不 reset）
+            if profileVM.selfEmojiType == "self" {
+                Task { await SelfEmojiURLCache.shared.load() }
+            }
+        }
+        .onChange(of: profileVM.selfEmojiType) { newType in
+            // 只有 style 真正改变时才 reset + reload
+            if newType == "self" {
+                SelfEmojiURLCache.shared.reset()
+                Task { await SelfEmojiURLCache.shared.load() }
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("TaskUploaded"))) { _ in
