@@ -31,6 +31,8 @@ This is a **full-stack mobile app**: iOS client (SwiftUI) + Python backend (Fast
 ├── Models.swift/WorkSurvivalGuide/   ← iOS Xcode project (edit here, NOT iOS_Code_Files/)
 ├── server_code/                       ← Python FastAPI backend
 │   ├── main.py                        ← Monolith entry point (~5700 lines)
+│   ├── scene_image_generator.py       ← Scene extraction + image generation (top-level, not in api/)
+│   ├── database/models.py             ← SQLAlchemy ORM models (must match actual DB schema)
 │   ├── api/                           ← Modularized API routes
 │   │   ├── assistant.py               ← AI chat endpoints
 │   │   ├── live_sessions.py           ← Live recording endpoints
@@ -87,10 +89,23 @@ tail -f ~/gemini-audio-service.log
 
 **Deployment — no git on server, use scp:**
 ```bash
-scp server_code/api/assistant.py gemini-server:~/api/assistant.py
+# api/ files and top-level files deploy to home dir, then sudo copy to /opt/
+scp server_code/api/assistant.py gemini-server:~/assistant.py
+ssh gemini-server "sudo cp ~/assistant.py /opt/gemini-audio-service/api/assistant.py"
+
 scp server_code/main.py gemini-server:~/main.py
-# Then restart:
+# main.py lives directly at /opt/gemini-audio-service/main.py
+
+# database/models.py needs sudo copy:
+scp server_code/database/models.py gemini-server:~/models_db.py
+ssh gemini-server "sudo cp ~/models_db.py /opt/gemini-audio-service/database/models.py"
+
 ssh gemini-server "sudo systemctl restart gemini-audio.service"
+```
+
+**DB migrations** — server uses PostgreSQL local to VM. Run via:
+```bash
+ssh gemini-server "sudo -u postgres psql gemini_audio_db_test -c 'ALTER TABLE ...'"
 ```
 
 **Run locally:**
@@ -133,6 +148,14 @@ python3 scripts/test_gemini_connection.py
 
 **Critical:** `TaskListViewModel.addNewTask()` must NOT call `setProcessing()` for chat sessions (`sessionType == "chat"`) — doing so locks the recording button.
 
+### Convert to Image Flow (AI Chat exit)
+
+1. iOS calls `POST /assistant/generate-image-from-chat` with full conversation
+2. Server fire-and-forget: `generate_scene_images()` in `scene_image_generator.py` — extracts 1-3 scenes, generates images, uploads to R2
+3. Image URL written to **both** `strategy_analysis.scene_images` AND `sessions.cover_image_url` (Moment list thumbnail reads `cover_image_url`)
+4. Server fire-and-forget: `_async_session_finalize()` — calls Gemini once to generate `card_title`, `mood_state`, `emotion_type`. **Only user messages** are passed (AI replies excluded to avoid diluting emotion signal)
+5. `max_images`: Pro users get 3, Free users get 1 — determined by querying `user.subscription_tier` at call time
+
 ### Live Session Flow
 
 1. iOS → `POST /api/v1/live/sessions` → WebSocket audio stream
@@ -140,6 +163,22 @@ python3 scripts/test_gemini_connection.py
 3. Per turn: extract audio by timestamp → voice embedding → match against profiles
 4. SSE events pushed to iOS: `speaker_identified`, `turn_completed`, `session_end`
 5. After end: background task runs Gemini post-processing (summary, image generation)
+
+### Subscription Quota System
+
+Quotas are stored on the `users` table and computed in `GET /subscription/status`:
+- **Free**: 5 AI chat sessions (lifetime), 5 convert-to-image (lifetime), 2 profiles → paywall on limit
+- **Weekly** (`com.miclnk.pro.weekly`): 30 chats / 7 days, 7 images / 7 days, 7 profiles
+- **Monthly** (`com.miclnk.pro.monthly`): 100 chats / 30 days, 30 images / 30 days, 15 profiles
+- **Yearly** (`com.miclnk.pro.yearly`): unlimited chats, 365 images / 365 days, 30 profiles
+
+Counts are computed from the `sessions` table: `session_type='chat'` for chat count; `session_type='chat' AND cover_image_url IS NOT NULL` for image count. Rolling period tracked via `users.sub_period_start`.
+
+`SubscriptionManager.swift` maps `chatLimit = nil` (yearly unlimited) to `-1`. `canStartChat: Bool { chatLimit == -1 || chatCount < chatLimit }`.
+
+Profile 403 error details: `profile_free_limit_reached` → show paywall; `profile_pro_limit_reached` → show toast.
+
+**ORM gotcha:** `users` table has columns `apple_original_transaction_id`, `subscription_product_id`, `sub_period_start` that must be declared in `database/models.py` — the ORM model was historically out of sync with the actual DB schema, causing 500s on `/subscription/verify`.
 
 ### Skill Matching
 
