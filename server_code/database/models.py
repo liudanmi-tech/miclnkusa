@@ -26,6 +26,9 @@ class User(Base):
     is_active = Column(Boolean, default=True)
     subscription_tier = Column(String(50), default="free", nullable=False, server_default="free")
     subscription_expires_at = Column(DateTime(timezone=True), nullable=True)
+    apple_original_transaction_id = Column(String(255), nullable=True, unique=True, index=True)
+    subscription_product_id = Column(String(100), nullable=True)  # com.miclnk.pro.weekly/monthly/yearly
+    sub_period_start = Column(DateTime(timezone=True), nullable=True)  # 当前订阅周期起始时间（用于配额滚动计算）
 
     # 关系
     sessions = relationship("Session", back_populates="user", cascade="all, delete-orphan")

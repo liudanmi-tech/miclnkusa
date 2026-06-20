@@ -5254,9 +5254,15 @@ async def verify_subscription(
         raise HTTPException(status_code=409, detail="This subscription is already bound to another account")
     # ─────────────────────────────────────────────────────────────────────────
 
+    # sub_period_start：首次绑定或换套餐时重置；已绑定同套餐时保持不变（保持滚动周期连续）
+    old_product_id = getattr(user, "subscription_product_id", None)
+    old_period_start = getattr(user, "sub_period_start", None)
+    if old_product_id != product_id or old_period_start is None:
+        user.sub_period_start = datetime.now(_tz.utc)
     user.subscription_tier = tier
     user.subscription_expires_at = expires_at
     user.apple_original_transaction_id = original_transaction_id
+    user.subscription_product_id = product_id
     await db.commit()
 
     logger.info(f"[Subscription] 验证成功 user={user_id} product={product_id} tier={tier} expires={expires_at.date()}")
