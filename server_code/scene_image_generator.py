@@ -565,6 +565,14 @@ async def generate_scene_images(
                 sa.scene_images = scene_images
                 await db.commit()
                 logger.info(f"[场景生图] 已更新 scene_images session={session_id} 总耗时={time.time()-t_start:.2f}s")
+                # 同步写 cover_image_url，供 Moment 列表封面展示
+                first_url = next((s["image_url"] for s in scene_images if s.get("image_url")), None)
+                if first_url:
+                    sess_cover = await db.get(Session, _uuid.UUID(session_id))
+                    if sess_cover and not sess_cover.cover_image_url:
+                        sess_cover.cover_image_url = first_url
+                        await db.commit()
+                        logger.info(f"[场景生图] cover_image_url 已写入 session={session_id}")
             else:
                 # StrategyAnalysis 尚未创建（技能还在跑），暂存到 analysis_stage_detail
                 sess2 = await db.get(Session, _uuid.UUID(session_id))
@@ -586,6 +594,13 @@ async def generate_scene_images(
                         sa_retry.scene_images = scene_images
                         await db.commit()
                         logger.info(f"[场景生图] 兜底重试成功，scene_images 已写入, session={session_id}")
+                        first_url = next((s["image_url"] for s in scene_images if s.get("image_url")), None)
+                        if first_url:
+                            sess_cover = await db.get(Session, _uuid.UUID(session_id))
+                            if sess_cover and not sess_cover.cover_image_url:
+                                sess_cover.cover_image_url = first_url
+                                await db.commit()
+                                logger.info(f"[场景生图] cover_image_url 已写入(重试路径) session={session_id}")
                         break
                 else:
                     logger.warning(f"[场景生图] 兜底重试超时，strategy_analysis 未出现, session={session_id}")
