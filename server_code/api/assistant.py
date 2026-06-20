@@ -1420,7 +1420,9 @@ async def _call_gemini_finalize(session_id: str, conversation: list) -> dict:
     单次 Gemini Flash 调用：从完整对话生成 card_title / summary / mood_state / emotion_type / intensity。
     返回解析后的 dict；失败时 raise。
     """
-    if not conversation:
+    # 只取用户发言，排除 AI 回复，避免 AI 平和语气稀释情绪信号
+    user_msgs = [m for m in conversation if m.get('role') == 'user']
+    if not user_msgs:
         return {
             "card_title": "A brief chat session",
             "summary": "A short conversation.",
@@ -1428,18 +1430,17 @@ async def _call_gemini_finalize(session_id: str, conversation: list) -> dict:
             "emotion_type": "general_venting",
             "intensity": 5,
         }
-
     conv_text = "\n".join(
-        f"{'User' if m.get('role') == 'user' else 'AI'}: {m.get('content', '')}"
-        for m in conversation[:20]
+        f"User: {m.get('content', '')}"
+        for m in user_msgs[:20]
     )
 
-    prompt = f"""You are analyzing a conversation between a user and an AI mental wellness assistant.
+    prompt = f"""You are analyzing what a user shared during a conversation with an AI wellness assistant.
 
-CONVERSATION:
+USER'S MESSAGES:
 {conv_text}
 
-Based on this conversation, generate a JSON response with exactly these 5 fields:
+Based on what the user said, generate a JSON response with exactly these 5 fields:
 1. card_title: First-person English title, MAX 15 words, starting with "I"
 2. summary: First-person English summary, MAX 40 words, starting with "Today"
 3. mood_state: Exactly one of: Happy | Excited | Content | Neutral | Anxious | Frustrated | Sad | Angry | Overwhelmed
