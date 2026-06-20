@@ -601,6 +601,7 @@ struct WeeklyStatsDetailSheet: View {
 
     @State private var selectedCard: WeeklyStatsCarouselView.CardType
     @State private var highlightedSessionId: String? = nil   // 来自图表点击
+    @State private var chatResumeTarget: ChatResumeTarget? = nil   // chat session 重入
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var profileVM = ProfileViewModel.shared
     @ObservedObject private var radarVM = SkillsRadarViewModel.shared
@@ -681,6 +682,10 @@ struct WeeklyStatsDetailSheet: View {
                     }
                 }
             }
+            .fullScreenCover(item: $chatResumeTarget) { target in
+                let _ = print("[MoodTrend] fullScreenCover presented, sessionId=\(target.id.prefix(8))")
+                ChatAIAssistantView(sessionId: target.id)
+            }
             .presentationDetents([.large])
             .task(id: radarStartDate + radarEndDate) {
                 await radarVM.load(startDate: radarStartDate, endDate: radarEndDate)
@@ -717,16 +722,35 @@ struct WeeklyStatsDetailSheet: View {
                     } else {
                         ForEach(filteredSessions) { session in
                             if let task = session.toTaskItem() {
-                                NavigationLink(destination: TaskDetailView(task: task)) {
-                                    WeeklySessionRow(
-                                        session: session,
-                                        cardType: selectedCard,
-                                        isHighlighted: session.session_id == highlightedSessionId,
-                                        emojiType: selfEmojiType
-                                    )
+                                let _ = print("[MoodTrend] session=\(session.session_id.prefix(8)) session_type=\(session.session_type ?? "nil") task.sessionType=\(task.sessionType ?? "nil") coverImageUrl=\(task.coverImageUrl ?? "nil")")
+                                if task.sessionType == "chat" && task.coverImageUrl == nil {
+                                    // chat + 无封面图（just close）→ 重入对话
+                                    Button {
+                                        print("[MoodTrend] Button tapped → chatResumeTarget=\(task.id.prefix(8))")
+                                        chatResumeTarget = ChatResumeTarget(id: task.id)
+                                    } label: {
+                                        WeeklySessionRow(
+                                            session: session,
+                                            cardType: selectedCard,
+                                            isHighlighted: session.session_id == highlightedSessionId,
+                                            emojiType: selfEmojiType
+                                        )
+                                    }
+                                    .buttonStyle(.plain)
+                                    .id(session.session_id)
+                                } else {
+                                    // 录音/live/chat+有封面图 → 详情页
+                                    NavigationLink(destination: TaskDetailView(task: task)) {
+                                        WeeklySessionRow(
+                                            session: session,
+                                            cardType: selectedCard,
+                                            isHighlighted: session.session_id == highlightedSessionId,
+                                            emojiType: selfEmojiType
+                                        )
+                                    }
+                                    .buttonStyle(.plain)
+                                    .id(session.session_id)
                                 }
-                                .buttonStyle(.plain)
-                                .id(session.session_id)
                             } else {
                                 WeeklySessionRow(
                                     session: session,
@@ -1169,7 +1193,13 @@ private extension WeeklySession {
             summary: nil,
             cardTitle: card_title ?? title,
             coverImageUrl: thumbnail_url,
+            sessionType: session_type,
             progressDescription: nil
         )
     }
+}
+
+/// chat session 重入目标，供 fullScreenCover(item:) 使用
+private struct ChatResumeTarget: Identifiable {
+    let id: String
 }

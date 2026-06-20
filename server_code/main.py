@@ -5406,6 +5406,7 @@ async def get_weekly_stats(
                 "top_skill_id": top_skill_id,
                 "top_skill_confidence": top_skill_conf,
                 "thumbnail_url": _stats_thumbnail(sa, str(s.id), api_base),
+                "session_type": s.session_type,
             })
 
         # mood_series: one entry per day in range

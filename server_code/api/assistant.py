@@ -1569,6 +1569,13 @@ async def _async_session_finalize(session_id: str, conversation: list, user_id: 
         emotion_type  = result.get("emotion_type", "general_venting")
         intensity     = int(result.get("intensity", 5))
 
+        # mood_state → mood_score 整数，供 /weekly-stats mood_series 使用
+        _MOOD_TO_SCORE = {
+            "Excited": 90, "Happy": 82, "Content": 68, "Neutral": 50,
+            "Anxious": 32, "Frustrated": 28, "Sad": 22, "Angry": 18, "Overwhelmed": 15,
+        }
+        mood_score = _MOOD_TO_SCORE.get(mood_state, 50)
+
         async with AsyncSessionLocal() as db:
             # UPSERT analysis_results（session 可能已有记录，防重）
             stmt = pg_insert(AnalysisResult).values(
@@ -1577,11 +1584,13 @@ async def _async_session_finalize(session_id: str, conversation: list, user_id: 
                 dialogues=[],
                 card_title=card_title,
                 summary=summary,
+                mood_score=mood_score,
             ).on_conflict_do_update(
                 index_elements=["session_id"],
                 set_={
                     "card_title": card_title,
                     "summary": summary,
+                    "mood_score": mood_score,
                     "updated_at": sa_func.now(),
                 },
             )
