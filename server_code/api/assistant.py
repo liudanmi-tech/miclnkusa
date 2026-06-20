@@ -61,13 +61,14 @@ def _load_skill_note(skill_id: str) -> str:
 
 def _extract_note_questions(note_content: str) -> str:
     """
-    从 note.md 中提取 'AI 初始化问卷话术' 段落的问题文本，
+    从 note.md 中提取问卷话术段落的问题文本，
     用于直接输出给用户（跳过 Gemini）。
-    提取范围：## AI 初始化问卷话术 下方，到下一个 --- 分隔符之前。
+    支持中英文标题：'AI 初始化问卷话术' 或 'AI Onboarding Script'
+    提取范围：## 标题 下方，到下一个 --- 分隔符之前。
     """
     import re
     m = re.search(
-        r"## AI 初始化问卷话术\s*\n(.*?)(?:\n---|\Z)",
+        r"## (?:AI 初始化问卷话术|AI Onboarding Script)\s*\n(.*?)(?:\n---|\Z)",
         note_content,
         re.DOTALL,
     )
@@ -411,30 +412,67 @@ async def _transcribe_audio(audio_bytes: bytes, audio_mime_type: str) -> str:
     return await asyncio.to_thread(_run)
 
 
-async def _generate_suggestions(context: str, skill_name: str) -> List[str]:
-    """Generate follow-up suggestions based on the current reply (non-streaming, fast call)"""
-    prompt = (
-        f"Based on the following AI Assistant reply about the {skill_name} skill:\n\n"
-        f'"{context[:600]}"\n\n'
-        f"Generate 4 short follow-up questions the user might ask (in English, under 15 words each).\n"
-        f"Output only a JSON array, no other content.\n"
-        f'Example: ["question1","question2","question3","question4"]'
-    )
+async def _generate_suggested_questions(
+    user_message: str,
+    ai_reply: str,
+    history: list,
+    skill_name: str,
+    language: str,
+) -> List[str]:
+    """从用户角度生成3个猜你想问（主流结束后调用，基于AI本次回复内容）"""
+    lang_code = (language or "en").lower().split("-")[0]
+    recent = history[-4:] if len(history) > 4 else history
+    ctx_lines = []
+    for m in recent:
+        # history items may be Pydantic models (attr access) or dicts
+        if hasattr(m, "get"):
+            role_val = m.get("role", "user")
+            content_val = m.get("content", "")
+        else:
+            role_val = getattr(m, "role", "user")
+            content_val = getattr(m, "content", "")
+        role_label = "用户" if role_val == "user" else "AI"
+        ctx_lines.append(f"{role_label}: {str(content_val)[:120]}")
+    ctx = "\n".join(ctx_lines)
+
+    if lang_code == "zh":
+        prompt = (
+            f"对话背景（最近几轮）：\n{ctx}\n\n"
+            f"用户刚才说：{user_message[:200]}\n\n"
+            f"AI刚才的回复：{ai_reply[:400]}\n\n"
+            f"根据以上对话，生成3个用户接下来可能想问的问题。要求：\n"
+            f"- 站在用户角度，用第一人称（如：我该如何...、如果...怎么办、怎么才能...）\n"
+            f"- 每个问题不超过20字\n"
+            f"- 紧扣AI刚才回复的内容，自然延伸\n"
+            f"- 仅输出JSON数组，不要任何其他文字\n"
+            f'示例：["我该怎么和领导沟通这件事？","如果对方不接受怎么办？","有没有具体的话术？"]'
+        )
+    else:
+        prompt = (
+            f"Conversation context (recent turns):\n{ctx}\n\n"
+            f"User just said: {user_message[:200]}\n\n"
+            f"AI just replied: {ai_reply[:400]}\n\n"
+            f"Based on the above, generate 3 questions the user might want to ask next. Requirements:\n"
+            f"- From the user's first-person perspective (e.g., 'How do I...', 'What if...', 'Should I...', 'Can I...')\n"
+            f"- Under 15 words each\n"
+            f"- Directly related to what the AI just said, naturally extending it\n"
+            f"- Output only a JSON array, no other text\n"
+            f'Example: ["How do I bring this up without sounding defensive?","What if my manager disagrees?","Are there specific phrases I can use?"]'
+        )
     try:
         genai.configure(api_key=GEMINI_API_KEY)
         model = genai.GenerativeModel(ASSISTANT_MODEL, safety_settings=_GEMINI_SAFETY)
         resp = await asyncio.to_thread(model.generate_content, prompt)
         raw = resp.text.strip()
-        # 去掉可能的 markdown 代码块
         if raw.startswith("```"):
             raw = raw.split("```")[1]
             if raw.startswith("json"):
                 raw = raw[4:]
         items = json.loads(raw)
-        if isinstance(items, list) and len(items) >= 4:
-            return items[:4]
+        if isinstance(items, list) and len(items) >= 3:
+            return items[:3]
     except Exception as exc:
-        logger.warning(f"[assistant] suggestions 生成失败: {exc}")
+        logger.warning(f"[assistant] suggested_questions 生成失败: {exc}")
     return []
 
 
@@ -877,10 +915,13 @@ async def assistant_chat(
             if _note_text:
                 logger.info(f"[CHAT:{req.session_id[:8]}] baseline_ask: streaming note questions directly | chars={len(_note_text)}")
                 yield _sse({"type": "token", "content": _note_text})
-            yield _sse({"type": "baseline_init", "skill_id": _strategy_skill_id, "phase": "ask"})
-            logger.info(f"[CHAT:{req.session_id[:8]}] baseline_init SSE | skill={_strategy_skill_id} phase=ask")
-            yield _sse({"type": "done"})
-            return
+                yield _sse({"type": "baseline_init", "skill_id": _strategy_skill_id, "phase": "ask"})
+                logger.info(f"[CHAT:{req.session_id[:8]}] baseline_init SSE | skill={_strategy_skill_id} phase=ask")
+                yield _sse({"type": "done"})
+                return
+            else:
+                # note.md 中没有找到问卷段落，fall through 到 Gemini 生成回复
+                logger.warning(f"[CHAT:{req.session_id[:8]}] baseline_ask: no question section in note.md, falling through to Gemini")
 
         full_text_parts = []
         suggestions_raw = ""
@@ -932,22 +973,24 @@ async def assistant_chat(
 
         full_text = "".join(full_text_parts)
 
-        # 解析 suggestions
-        suggestions: List[str] = []
-        if MARKER_END in suggestions_raw:
-            raw_json = suggestions_raw.split(MARKER_END)[0].strip()
+        # 猜你想问：主流结束后用 full_text 启动独立调用，基于AI本次回复
+        if req.message not in ("__INIT__", "__SWITCH__") and full_text:
             try:
-                parsed = json.loads(raw_json)
-                suggestions = parsed.get("items", []) if isinstance(parsed, dict) else parsed
-            except Exception:
-                pass
-
-        # 若 Gemini 未输出 suggestions，单独调用生成
-        if not suggestions and full_text:
-            suggestions = await _generate_suggestions(full_text, skill_name)
-
-        if suggestions:
-            yield _sse({"type": "suggestions", "items": suggestions[:4]})
+                _sugg_items = await asyncio.wait_for(
+                    _generate_suggested_questions(
+                        req.message or "",
+                        full_text,
+                        list(req.history or []),
+                        skill_name,
+                        req.user_language or "en",
+                    ),
+                    timeout=8.0,
+                )
+                if _sugg_items:
+                    yield _sse({"type": "suggestions", "items": _sugg_items})
+                    logger.info(f"[CHAT:{req.session_id[:8]}] suggested_questions sent | count={len(_sugg_items)}")
+            except asyncio.TimeoutError:
+                logger.warning(f"[CHAT:{req.session_id[:8]}] suggested_questions timeout, skipping")
 
         # 解析 [MEME:category]（隐藏在 suggestions_raw 末尾，不会出现在用户可见文本中）
         if req.message not in ("__INIT__", "__SWITCH__"):
@@ -1223,19 +1266,25 @@ async def assistant_chat_audio(
 
         full_text = "".join(full_text_parts)
 
-        # Suggestions
-        suggestions: List[str] = []
-        if MARKER_END in suggestions_raw:
-            raw_json = suggestions_raw.split(MARKER_END)[0].strip()
+        # 猜你想问：主流结束后用 full_text 启动独立调用
+        _sugg_msg = transcribed_text or ""
+        if _sugg_msg and full_text:
             try:
-                parsed = json.loads(raw_json)
-                suggestions = parsed.get("items", []) if isinstance(parsed, dict) else parsed
-            except Exception:
-                pass
-        if not suggestions and full_text:
-            suggestions = await _generate_suggestions(full_text, skill_name)
-        if suggestions:
-            yield _sse({"type": "suggestions", "items": suggestions[:4]})
+                _sugg_items = await asyncio.wait_for(
+                    _generate_suggested_questions(
+                        _sugg_msg[:200],
+                        full_text,
+                        list(history or []),
+                        skill_name,
+                        user_language or "en",
+                    ),
+                    timeout=8.0,
+                )
+                if _sugg_items:
+                    yield _sse({"type": "suggestions", "items": _sugg_items})
+                    logger.info(f"[AUDIO:{session_id[:8]}] suggested_questions sent | count={len(_sugg_items)}")
+            except asyncio.TimeoutError:
+                logger.warning(f"[AUDIO:{session_id[:8]}] suggested_questions timeout, skipping")
 
         yield _sse({"type": "done"})
 
@@ -1531,7 +1580,7 @@ async def close_chat_session(
 class GenerateImageFromChatRequest(BaseModel):
     session_id: str
     conversation: List[ChatHistoryItem] = []
-    style_key: str = "ghibli"
+    style_key: str = "spider_verse"
 
 
 @router.post("/assistant/generate-image-from-chat", status_code=202)

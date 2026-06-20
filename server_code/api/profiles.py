@@ -932,3 +932,62 @@ async def get_emotion_avatar_urls(
         result[emotion] = url
 
     return result
+
+
+@router.post("/emotion-avatars/generate", summary="从已有 Self 档案照片重新触发情绪头像生成")
+async def trigger_emotion_avatar_generation(
+    user_id: str = Depends(get_current_user_id),
+):
+    """
+    fire-and-forget 触发情绪头像重新生成。
+    用于用户选择 Self Portrait 风格时，从已有档案照片生成 5 种情绪头像。
+    若无 Self 档案或未上传照片，返回 404。
+    """
+    import httpx as _httpx
+
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(Profile).where(
+                Profile.user_id == uuid.UUID(user_id),
+                Profile.relationship_type == "Self"
+            )
+        )
+        self_profile = result.scalar_one_or_none()
+
+    if not self_profile:
+        raise HTTPException(status_code=404, detail="No self profile found")
+    if not self_profile.photo_url:
+        raise HTTPException(status_code=404, detail="No photo in self profile. Please upload a photo first.")
+
+    photo_url = self_profile.photo_url
+    logger.info(f"[情绪头像] 手动触发重新生成 user_id={user_id}")
+
+    # 从 R2 下载照片
+    try:
+        from main import USE_OSS, s3_client, OSS_BUCKET_NAME
+        r2_public = os.getenv("R2_PUBLIC_URL", "").rstrip("/")
+
+        if r2_public and photo_url.startswith(r2_public):
+            # R2 直连
+            oss_key = photo_url[len(r2_public):].lstrip("/").split("?")[0]
+            obj = await asyncio.to_thread(
+                s3_client.get_object, Bucket=OSS_BUCKET_NAME, Key=oss_key
+            )
+            photo_bytes = await asyncio.to_thread(obj["Body"].read)
+            content_type = obj.get("ContentType", "image/jpeg")
+        else:
+            # HTTP 下载（API 代理 URL 等）
+            async with _httpx.AsyncClient(timeout=30) as client:
+                resp = await client.get(photo_url)
+                resp.raise_for_status()
+                photo_bytes = resp.content
+                content_type = resp.headers.get("content-type", "image/jpeg").split(";")[0]
+    except Exception as e:
+        logger.error(f"[情绪头像] 下载档案照片失败: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch profile photo: {e}")
+
+    asyncio.create_task(
+        _generate_emotion_avatars_task(user_id, photo_bytes, content_type or "image/jpeg")
+    )
+
+    return {"status": "generating"}

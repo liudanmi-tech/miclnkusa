@@ -5,8 +5,7 @@
     "campus_life": "academic or student life — professors, roommates, group projects, internships, campus social",
     "relationships": "romantic or platonic relationship — dating, breakups, friendships, coming out",
     "family": "family dynamics — parents, immigration, family finances, co-parenting, teens",
-    "personal_growth": "personal development or mental wellbeing — assertiveness, anxiety, anger, self-worth",
-    "life_skills": "practical daily life — healthcare, customer service, money, neighbors, landlord"
+    "personal_growth": "personal development or mental wellbeing — assertiveness, anxiety, anger, self-worth"
   },
   "system_skills": {
     "salary_negotiation": {
@@ -387,56 +386,6 @@
         "focus": "setting or defending personal limits in relationships",
         "sub_skill_cn": "边界设定",
         "angle": "how to state your limits clearly and hold them under pressure"
-      }
-    },
-    "healthcare_advocacy": {
-      "category": "life_skills",
-      "name": "Healthcare Advocacy",
-      "exec_template": "_exec_life_skills",
-      "exec_context": {
-        "focus": "advocating for yourself in a medical or healthcare context",
-        "sub_skill_cn": "医疗自我倡导",
-        "angle": "how to ask the right questions, push back on dismissal, and get the care you need"
-      }
-    },
-    "customer_service": {
-      "category": "life_skills",
-      "name": "Customer Service Disputes",
-      "exec_template": "_exec_life_skills",
-      "exec_context": {
-        "focus": "resolving a complaint or dispute with a company or service",
-        "sub_skill_cn": "消费维权",
-        "angle": "how to escalate effectively, stay calm, and get results"
-      }
-    },
-    "money_conversations": {
-      "category": "life_skills",
-      "name": "Money Conversations",
-      "exec_template": "_exec_life_skills",
-      "exec_context": {
-        "focus": "talking about money, splitting costs, or financial boundaries with non-family",
-        "sub_skill_cn": "金钱对话",
-        "angle": "how to bring up money without awkwardness and reach fair agreements"
-      }
-    },
-    "neighbor_conflicts": {
-      "category": "life_skills",
-      "name": "Neighbor Conflicts",
-      "exec_template": "_exec_life_skills",
-      "exec_context": {
-        "focus": "conflict or issue with a neighbor",
-        "sub_skill_cn": "邻里冲突",
-        "angle": "how to raise concerns directly, de-escalate tension, and maintain civil coexistence"
-      }
-    },
-    "landlord_comm": {
-      "category": "life_skills",
-      "name": "Landlord Communication",
-      "exec_template": "_exec_life_skills",
-      "exec_context": {
-        "focus": "tenant-landlord communication — repairs, deposits, lease disputes",
-        "sub_skill_cn": "租房沟通",
-        "angle": "how to document issues, assert rights, and negotiate without losing housing"
       }
     }
   },

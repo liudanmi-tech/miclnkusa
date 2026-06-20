@@ -1026,7 +1026,7 @@ def generate_image_from_prompt(
     model = genai.GenerativeModel(IMAGE_GEN_MODEL, safety_settings=_GEMINI_SAFETY)
 
     # 构建 prompt：风格前缀 + 主体描述
-    key = (style_key or "ghibli").strip().lower()
+    key = (style_key or "spider_verse").strip().lower()
     style_prefix = IMAGE_STYLE_MAP.get(key, IMAGE_STYLE_MAP["ghibli"])
     logger.info(f"[图片生成] style_key={style_key} -> key={key} model={IMAGE_GEN_MODEL}")
 
