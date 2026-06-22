@@ -2457,15 +2457,17 @@ async def get_task_list(
                     img_url = first_v.get("image_url") if isinstance(first_v, dict) else getattr(first_v, "image_url", None)
                     if img_url and isinstance(img_url, str) and ("oss" in img_url or "geminipicture" in img_url.lower()):
                         cover_map[sid] = f"{api_base}/api/v1/images/{sid}/0"
-                # 兜底：从 scene_images[0] 取封面（新版并行生图流程）
+                # 兜底：从 scene_images 取封面（新版并行生图流程）
                 if sid not in cover_map:
                     scene_imgs = sa.scene_images
                     if isinstance(scene_imgs, list) and len(scene_imgs) > 0:
+                        _first_index = None
                         for si in scene_imgs:
                             si_dict = si if isinstance(si, dict) else {}
                             si_url = si_dict.get("image_url")
                             si_idx = si_dict.get("index")
                             if si_url and isinstance(si_url, str):
+                                # 优先找有实际 URL 的 scene（跳过 image_url=null 的失败 scene）
                                 # 兼容所有 URL 格式：从末尾提取数字索引
                                 # 代理 URL: /api/v1/images/{sid}/1000
                                 # R2 CDN:  r2.dev/images/{uid}/{sid}/1000.png
@@ -2474,10 +2476,11 @@ async def get_task_list(
                                 if _m:
                                     cover_map[sid] = f"{api_base}/api/v1/images/{sid}/{_m.group(1)}"
                                     break
-                            elif si_idx is not None:
-                                # 没有 URL 但有 index，直接用 index 构建代理 URL
-                                cover_map[sid] = f"{api_base}/api/v1/images/{sid}/{si_idx}"
-                                break
+                            elif si_idx is not None and _first_index is None:
+                                _first_index = si_idx  # 记录第一个 index，URL 遍历完后兜底
+                        if sid not in cover_map and _first_index is not None:
+                            # 所有 scene 都没有 URL，用第一个 index 兜底
+                            cover_map[sid] = f"{api_base}/api/v1/images/{sid}/{_first_index}"
         
         task_items = [
             TaskItem(
