@@ -16,6 +16,8 @@ private enum ChatInputMode { case voice, text }
 
 struct ChatAIAssistantView: View {
     let sessionId: String
+    /// true = 从 Moment 列表重入已有 session；false = 全新创建的 session
+    let isExistingSession: Bool
 
     @StateObject private var chatVM: ChatAIAssistantViewModel
     @Environment(\.dismiss) private var dismiss
@@ -37,8 +39,9 @@ struct ChatAIAssistantView: View {
     @State private var isRecording: Bool = false
     @StateObject private var audioRecorder = GeminiAudioRecorder()
 
-    init(sessionId: String) {
+    init(sessionId: String, isExistingSession: Bool = false) {
         self.sessionId = sessionId
+        self.isExistingSession = isExistingSession
         _chatVM = StateObject(wrappedValue: ChatAIAssistantViewModel(sessionId: sessionId))
     }
 
@@ -95,10 +98,10 @@ struct ChatAIAssistantView: View {
                     .zIndex(99)
                 }
 
-                // Loading overlay for close/generate
-                if isClosingSession || isGeneratingImage {
+                // Loading overlay for history / close / generate
+                if chatVM.isLoadingHistory || isClosingSession || isGeneratingImage {
                     Color.black.opacity(0.5).ignoresSafeArea()
-                    ProgressView(isGeneratingImage ? "Starting image generation..." : "Saving...")
+                    ProgressView(chatVM.isLoadingHistory ? "Loading history..." : isGeneratingImage ? "Starting image generation..." : "Saving...")
                         .foregroundColor(.white)
                         .tint(.white)
                 }
@@ -140,6 +143,11 @@ struct ChatAIAssistantView: View {
             set: { if !$0 { chatVM.errorMessage = nil } }
         )) {
             Button("OK") {}
+        }
+        .task {
+            if isExistingSession {
+                await chatVM.loadHistory()
+            }
         }
         .animation(.easeInOut(duration: 0.2), value: chatVM.skillTags.isEmpty)
         .animation(.easeInOut(duration: 0.2), value: chatVM.baselinePhase)
@@ -480,15 +488,28 @@ struct ChatAIAssistantView: View {
     // MARK: - Actions
 
     private func handleCloseTap() {
-        if chatVM.isConversationEmpty {
-            // 未对话 → 删除孤儿 session，不触发 finalize
-            deleteOrphanSession()
-        } else if hasAlreadyExited {
-            // 已经做过退出决策（Convert to Image 或 Just Close）→ 直接退出，不再弹窗
+        // 从列表重入：无论有无新消息，直接关（session 已归档，不重复 finalize 或删除）
+        if isExistingSession {
             dismiss()
-        } else {
-            showExitSheet = true
+            return
         }
+        // 全新 session 且从未对话 → 孤儿，删除
+        if chatVM.isConversationEmpty {
+            deleteOrphanSession()
+            return
+        }
+        // 已经做过退出决策（convert/just-close）→ 不重复弹窗
+        if hasAlreadyExited {
+            dismiss()
+            return
+        }
+        // 配额耗尽 → 跳过弹窗，直接 just-close
+        if !SubscriptionManager.shared.canGenerateImage {
+            handleCloseWithFinalize()
+            return
+        }
+        // 正常：弹出选择弹窗
+        showExitSheet = true
     }
 
     private func handleCloseWithFinalize() {

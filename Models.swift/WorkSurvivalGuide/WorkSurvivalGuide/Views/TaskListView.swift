@@ -341,8 +341,10 @@ struct TaskCardRow: View {
     private let snapThreshold: CGFloat = 40
 
     /// 卡片处于处理中状态：录音上传中 / 分析中 / archived 但封面图尚未生成
+    /// chat session 不参与此逻辑（已退出的 chat 不显示 X 取消按钮）
     private var isProcessingCard: Bool {
-        task.status == .recording || task.status == .analyzing
+        guard task.sessionType != "chat" else { return false }
+        return task.status == .recording || task.status == .analyzing
             || (task.status == .archived && task.coverImageUrl == nil)
     }
 
@@ -407,8 +409,11 @@ struct TaskCardRow: View {
                                     if task.coverImageUrl != nil {
                                         // 有封面图 = 已转图 → detail 页
                                         navigateToDetail = true
+                                    } else if task.coverType == "generated" {
+                                        // coverType=="generated" 但图还没来 = 图片生成中 → 不响应
+                                        return
                                     } else {
-                                        // 无封面图 = 未转图 → 重入对话
+                                        // just close 或其他无封面 → 重入对话
                                         showChatSession = true
                                     }
                                 } else if task.isReadyToView {
@@ -474,7 +479,7 @@ struct TaskCardRow: View {
                 }
         )
         .fullScreenCover(isPresented: $showChatSession) {
-            ChatAIAssistantView(sessionId: task.id)
+            ChatAIAssistantView(sessionId: task.id, isExistingSession: true)
         }
     }
 

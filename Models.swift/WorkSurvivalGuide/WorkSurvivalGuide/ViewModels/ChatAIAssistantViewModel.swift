@@ -70,6 +70,8 @@ final class ChatAIAssistantViewModel: ObservableObject {
     @Published var showProLimitToast: Bool = false
     /// baseline_init SSE：当前阶段（"ask" / "save"），nil 表示无 baseline 流程
     @Published var baselinePhase: String? = nil
+    /// 重入时从服务端拉取历史中
+    @Published var isLoadingHistory: Bool = false
 
     // MARK: Immutable
 
@@ -97,6 +99,25 @@ final class ChatAIAssistantViewModel: ObservableObject {
 
     /// 对话是否为空（决定退出时是否展示 ActionSheet）
     var isConversationEmpty: Bool { messages.isEmpty }
+
+    /// 重入时从服务端拉取历史对话（若 UserDefaults 缓存已有则跳过）
+    func loadHistory() async {
+        guard messages.isEmpty else { return }  // 缓存命中，无需拉取
+        isLoadingHistory = true
+        defer { isLoadingHistory = false }
+        do {
+            let history = try await NetworkManager.shared.fetchChatHistory(sessionId: sessionId)
+            guard !history.isEmpty else { return }
+            let loaded: [AssistantMessage] = history.compactMap { dict in
+                guard let role = dict["role"], let content = dict["content"] else { return nil }
+                return AssistantMessage(role: role == "user" ? .user : .assistant, content: content)
+            }
+            messages = loaded
+            ChatSessionStore.save(messages, sessionId: sessionId)
+        } catch {
+            print("⚠️ [ChatAIAssistantViewModel] loadHistory failed: \(error.localizedDescription)")
+        }
+    }
 
     /// 构建服务端 close / generate-image 接口所需的 conversation 数组
     func conversationForServer() -> [[String: String]] {

@@ -1379,6 +1379,33 @@ class NetworkManager {
         }
     }
 
+    func getSkillsCatalogVersion() async throws -> String {
+        guard hasValidToken() else {
+            throw NSError(domain: "NetworkError", code: 401,
+                          userInfo: [NSLocalizedDescriptionKey: "请先登录"])
+        }
+        let url = "\(baseURLForRead)/skills/catalog/version"
+        let task = AF.request(url, method: .get,
+                              headers: ["Authorization": "Bearer \(getAuthToken())"],
+                              requestModifier: { $0.timeoutInterval = 10 })
+        let response = await task.serializingData().response
+        guard response.response?.statusCode == 200, let data = response.data else {
+            throw NSError(domain: "NetworkError", code: response.response?.statusCode ?? -1,
+                          userInfo: [NSLocalizedDescriptionKey: "版本请求失败"])
+        }
+        struct VersionResp: Decodable {
+            struct VersionData: Decodable { let version: String }
+            let code: Int
+            let data: VersionData?
+        }
+        let decoded = try JSONDecoder().decode(VersionResp.self, from: data)
+        guard let version = decoded.data?.version else {
+            throw NSError(domain: "NetworkError", code: -1,
+                          userInfo: [NSLocalizedDescriptionKey: "版本字段缺失"])
+        }
+        return version
+    }
+
     func getSkillPreferences() async throws -> SkillPreferencesData {
         guard hasValidToken() else {
             throw NSError(domain: "NetworkError", code: 401,
@@ -2736,6 +2763,28 @@ extension NetworkManager {
         return result
     }
 
+    /// 获取 chat session 历史对话（重入时加载，失败返回空数组）
+    func fetchChatHistory(sessionId: String) async throws -> [[String: String]] {
+        let token = getAuthToken()
+        guard !token.isEmpty else {
+            throw NSError(domain: "NetworkError", code: 401, userInfo: [NSLocalizedDescriptionKey: "请先登录"])
+        }
+        var request = URLRequest(url: URL(string: "\(baseURLForRead)/assistant/chat-history/\(sessionId)")!)
+        request.httpMethod = "GET"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.timeoutInterval = 15
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+            throw NSError(domain: "NetworkError", code: code, userInfo: [NSLocalizedDescriptionKey: "chat-history failed (\(code))"])
+        }
+        if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let conversation = json["conversation"] as? [[String: String]] {
+            return conversation
+        }
+        return []
+    }
+
     /// 记录声纹录入意愿（不做实际录入，仅标记 voiceprint_intent）
     func voiceprintIntent(sessionId: String, speakerLabel: String,
                           profileId: String, intent: Bool = true) async throws {
@@ -2757,6 +2806,16 @@ extension NetworkManager {
             throw NSError(domain: "NetworkError", code: code,
                           userInfo: [NSLocalizedDescriptionKey: "记录失败（\(code)）"])
         }
+    }
+
+    /// 获取 App 功能开关（无需登录）
+    func getAppConfig() async -> Bool {
+        guard let url = URL(string: "\(baseURLForWrite)/app-config") else { return false }
+        guard let (data, _) = try? await URLSession.shared.data(from: url),
+              let json = try? JSONDecoder().decode([String: Bool].self, from: data) else {
+            return false
+        }
+        return json["email_login_enabled"] ?? false
     }
 }
 
