@@ -381,7 +381,7 @@ class TaskListViewModel: ObservableObject {
         }
     }
     
-    // 合并任务列表，保留已有任务的 summary、progressDescription 字段
+    // 合并任务列表，保留已有任务的 summary、progressDescription、coverType 字段
     private func mergeTasks(apiTasks: [TaskItem]) -> [TaskItem] {
         let existingSummaries = Dictionary(uniqueKeysWithValues: tasks.compactMap { task in
             task.summary != nil ? (task.id, task.summary) : nil
@@ -389,11 +389,18 @@ class TaskListViewModel: ObservableObject {
         let existingProgress = Dictionary(uniqueKeysWithValues: tasks.compactMap { task in
             (task.progressDescription != nil && !(task.progressDescription?.isEmpty ?? true)) ? (task.id, task.progressDescription!) : nil
         })
-        
+        // coverType 是纯客户端状态（服务端不返回），必须从本地保留，否则 refreshTasks 会把
+        // 刚设置的 "generated" 覆盖成 nil，导致 resumePendingImagePolling 找不到目标
+        let existingCoverTypes = Dictionary(uniqueKeysWithValues: tasks.compactMap { task in
+            task.coverType != nil ? (task.id, task.coverType!) : nil
+        })
+
         return apiTasks.map { apiTask in
             let keepSummary = (apiTask.summary == nil || apiTask.summary?.isEmpty == true) && existingSummaries[apiTask.id] != nil
             let keepProgress = apiTask.status == .analyzing && existingProgress[apiTask.id] != nil
-            if keepSummary || keepProgress {
+            // 服务端不返回 cover_type，只要本地有就保留；若服务端已有 coverImageUrl 则不再需要 "generated"
+            let resolvedCoverType: String? = apiTask.coverType ?? (apiTask.coverImageUrl == nil ? existingCoverTypes[apiTask.id] : nil)
+            if keepSummary || keepProgress || resolvedCoverType != apiTask.coverType {
                 return TaskItem(
                     id: apiTask.id,
                     title: apiTask.title,
@@ -408,7 +415,7 @@ class TaskListViewModel: ObservableObject {
                     cardTitle: apiTask.cardTitle,
                     coverImageUrl: apiTask.coverImageUrl,
                     sessionType: apiTask.sessionType,
-                    coverType: apiTask.coverType,
+                    coverType: resolvedCoverType,
                     finalizeStatus: apiTask.finalizeStatus,
                     emotionMood: apiTask.emotionMood,
                     progressDescription: keepProgress ? existingProgress[apiTask.id] : nil
@@ -435,15 +442,16 @@ class TaskListViewModel: ObservableObject {
             guard let authToken = KeychainManager.shared.getToken(), !authToken.isEmpty else { return }
             for task in pending {
                 Task {
-                    let maxAttempts = 60  // 最多等 3 分钟（60 × 3s）
+                    let maxAttempts = 20  // 最多等 1 分钟（20 × 3s），超时降级为 just-close 可点击状态
                     for _ in 0..<maxAttempts {
                         try? await Task.sleep(nanoseconds: 3_000_000_000)
                         guard let imgStatus = try? await self.networkManager.getImageStatus(
                             sessionId: task.id, authToken: authToken
                         ) else { continue }
-                        // failed 直接跳出，避免无限等待
+                        // failed → 降级：清除 coverType，让卡片变回可点击（进入 AI chat 历史）
                         if imgStatus.status == "failed" {
-                            print("❌ [TaskListViewModel] 任务 \(task.id) 图片生成失败")
+                            print("❌ [TaskListViewModel] 任务 \(task.id) 图片生成失败，降级为无封面可点击状态")
+                            await self.degradeToChatReentry(taskId: task.id)
                             return
                         }
                         guard imgStatus.status == "completed", imgStatus.totalScenes > 0 else { continue }
@@ -455,7 +463,8 @@ class TaskListViewModel: ObservableObject {
                         }.first
 
                         guard let coverUrl else {
-                            print("⚠️ [TaskListViewModel] 任务 \(task.id) status=completed 但无有效图片 URL，放弃")
+                            print("⚠️ [TaskListViewModel] 任务 \(task.id) status=completed 但无有效图片 URL，降级为无封面可点击状态")
+                            await self.degradeToChatReentry(taskId: task.id)
                             return
                         }
 
@@ -476,10 +485,29 @@ class TaskListViewModel: ObservableObject {
                         }
                         return
                     }
-                    print("⏰ [TaskListViewModel] 任务 \(task.id) 图片等待超时，放弃轮询")
+                    // 超时（1分钟）→ 降级：清除 coverType，让卡片变回可点击（进入 AI chat 历史）
+                    print("⏰ [TaskListViewModel] 任务 \(task.id) 图片等待超时（1min），降级为无封面可点击状态")
+                    await self.degradeToChatReentry(taskId: task.id)
                 }
             }
         }
+    }
+
+    /// 图片生成失败或超时时，清除 coverType 使卡片恢复可点击（just-close / re-entry 状态）
+    @MainActor
+    private func degradeToChatReentry(taskId: String) {
+        guard let idx = tasks.firstIndex(where: { $0.id == taskId }) else { return }
+        let cur = tasks[idx]
+        tasks[idx] = TaskItem(
+            id: cur.id, title: cur.title, startTime: cur.startTime,
+            endTime: cur.endTime, duration: cur.duration, tags: cur.tags,
+            status: cur.status, emotionScore: cur.emotionScore,
+            speakerCount: cur.speakerCount, summary: cur.summary,
+            cardTitle: cur.cardTitle, coverImageUrl: nil,
+            sessionType: cur.sessionType, coverType: nil,
+            finalizeStatus: cur.finalizeStatus, emotionMood: cur.emotionMood
+        )
+        saveToCache()
     }
 
     /// 并发锁：防止多次 loadTasks() 触发多个并发 loadMissingSummaries 实例
