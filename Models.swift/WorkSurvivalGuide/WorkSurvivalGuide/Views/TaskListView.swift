@@ -156,18 +156,6 @@ struct TaskListView: View {
                 
                 Spacer()
 
-                // Live 录音按钮（电话图标）
-                Button(action: { showLiveSession = true }) {
-                    Image(systemName: "phone.fill")
-                        .font(.system(size: 16, weight: .medium))
-                        .foregroundColor(AppColors.headerText)
-                        .frame(width: 36, height: 36)
-                        .background(Color.white.opacity(0.15))
-                        .clipShape(Circle())
-                }
-                .buttonStyle(.plain)
-                .padding(.trailing, 8)
-
                 Button(action: {
                     showStylePicker = true
                     if TourManager.shared.currentStep == .styleButton {
@@ -416,14 +404,11 @@ struct TaskCardRow: View {
                                         dragOffset = 0
                                     }
                                 } else if task.sessionType == "chat" {
-                                    let exitAction = UserDefaults.standard.string(
-                                        forKey: "chat_exit_action_\(task.id)"
-                                    )
-                                    if exitAction == "convert" || (exitAction == nil && task.isReadyToView) {
-                                        // Convert to Image / 已有封面（向前兼容）→ detail 页
+                                    if task.coverImageUrl != nil {
+                                        // 有封面图 = 已转图 → detail 页
                                         navigateToDetail = true
                                     } else {
-                                        // Just Close / 未退出过 → 重入对话
+                                        // 无封面图 = 未转图 → 重入对话
                                         showChatSession = true
                                     }
                                 } else if task.isReadyToView {
