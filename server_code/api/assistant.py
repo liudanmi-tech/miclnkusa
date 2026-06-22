@@ -748,10 +748,41 @@ async def _match_skills_serial(
         else:
             transcript_stub = [{"speaker": "user", "text": message}]
 
+        # 从 kg_persons 查出对话中提到的人物及其关系，传给 match_skills_v2 做强制分类
+        # 当 kg_person 有关联档案时，用档案的 relationship_type（用户手动标注，更准确）
+        full_text = " ".join(item["text"] for item in transcript_stub)
+        chat_profiles: list[dict] = []
+        try:
+            from database.models import KgPerson, Profile as KgProfileModel
+            async with AsyncSessionLocal() as db_kg:
+                rows_r = await db_kg.execute(
+                    select(KgPerson, KgProfileModel.relationship_type)
+                    .outerjoin(KgProfileModel, KgPerson.profile_id == KgProfileModel.id)
+                    .where(KgPerson.user_id == uuid.UUID(user_id))
+                )
+                rows = rows_r.all()
+                mentioned = [(p, prof_rel) for p, prof_rel in rows if p.name and p.name in full_text]
+                chat_profiles = []
+                for p, prof_rel in mentioned:
+                    if (p.rel_type or "") in ("self", ""):
+                        continue
+                    # 档案关系优先（用户手动标注），KG推断次之
+                    effective_rel_type = (prof_rel or p.rel_type or "").lower().strip()
+                    chat_profiles.append({
+                        "relationship_type": prof_rel or p.rel_desc or "",
+                        "rel_type": effective_rel_type,
+                    })
+                if chat_profiles:
+                    logger.info(f"[CHAT:{id8}] kg_profiles matched | {[(p['rel_type'], p['relationship_type']) for p in chat_profiles]}")
+                else:
+                    logger.info(f"[CHAT:{id8}] kg_profiles: no person mentioned in transcript")
+        except Exception as _e:
+            logger.warning(f"[CHAT:{id8}] kg_profiles query failed: {_e}")
+
         async with AsyncSessionLocal() as db:
             stubs = await match_skills_v2(
                 transcript=transcript_stub,
-                profiles=None,
+                profiles=chat_profiles or None,
                 user_id=user_id,
                 db=db,
                 model=None,
@@ -1656,19 +1687,41 @@ async def close_chat_session(
     await db.commit()
     logger.info(f"[CHAT:{id8}] session archived | finalize_status=pending")
 
-    # 2. fire-and-forget：退出后处理
+    # 2. 保存对话历史到 strategy_analysis（UPSERT，供重入时加载）
     conversation_dicts = [{"role": h.role, "content": h.content} for h in req.conversation]
+    try:
+        from sqlalchemy import func as sa_func
+        stmt = pg_insert(StrategyAnalysis).values(
+            id=uuid.uuid4(),
+            session_id=uuid.UUID(req.session_id),
+            visual_data=[],
+            strategies=[],
+            applied_skills=[],
+            skill_cards=[],
+            scene_images=[],
+            conversation=conversation_dicts,
+        ).on_conflict_do_update(
+            index_elements=["session_id"],
+            set_={"conversation": conversation_dicts, "updated_at": sa_func.now()},
+        )
+        await db.execute(stmt)
+        await db.commit()
+        logger.info(f"[CHAT:{id8}] conversation saved to strategy_analysis | len={len(conversation_dicts)}")
+    except Exception as _e:
+        logger.warning(f"[CHAT:{id8}] save conversation failed (non-fatal) | error={_e}")
+
+    # 3. fire-and-forget：退出后处理
     asyncio.create_task(
         _async_session_finalize(req.session_id, conversation_dicts, user_id)
     )
 
-    # 3. fire-and-forget：更新 skill_notes.dynamic_kg_ids
+    # 4. fire-and-forget：更新 skill_notes.dynamic_kg_ids
     asyncio.create_task(
         _async_update_dynamic_kg(req.session_id, user_id)
     )
     logger.info(f"[CHAT:{id8}] dynamic_kg update triggered")
 
-    # 4. 立即返回 200
+    # 5. 立即返回 200
     return {"status": "ok", "session_id": req.session_id}
 
 
@@ -1739,6 +1792,8 @@ async def generate_image_from_chat(
     # 3b. Chat session 无 strategy_analysis，提前创建最小记录，
     #     让 generate_scene_images 能正常写入 scene_images（否则图片会因找不到记录而丢失）
     #     visual_data / strategies 为 NOT NULL，需传空 JSON 对象占位
+    #     同时保存 conversation 供重入时加载
+    _conv_dicts = [{"role": h.role, "content": h.content} for h in req.conversation]
     await db.execute(
         pg_insert(StrategyAnalysis)
         .values(
@@ -1747,11 +1802,15 @@ async def generate_image_from_chat(
             visual_data={},
             strategies={},
             skill_cards=[],
+            conversation=_conv_dicts,
         )
-        .on_conflict_do_nothing(index_elements=["session_id"])
+        .on_conflict_do_update(
+            index_elements=["session_id"],
+            set_={"conversation": _conv_dicts},
+        )
     )
     await db.commit()
-    logger.info(f"[CHAT:{id8}] strategy_analysis stub created for scene_image storage")
+    logger.info(f"[CHAT:{id8}] strategy_analysis stub created | conv_len={len(_conv_dicts)}")
 
     # 4. fire-and-forget：生图任务
     from scene_image_generator import generate_scene_images as _gen_scene_imgs
@@ -1788,3 +1847,27 @@ async def generate_image_from_chat(
 
     # 6. 立即返回 202
     return {"status": "generating", "session_id": req.session_id}
+
+
+# ─── 获取 chat session 历史对话 ────────────────────────────────────────────────
+
+@router.get("/assistant/chat-history/{session_id}")
+async def get_chat_history(
+    session_id: str,
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """返回 chat session 的完整对话历史，用于 iOS 重入时加载。"""
+    id8 = session_id[:8]
+    logger.info(f"[CHAT:{id8}] get_chat_history requested | user={user_id[:8]}")
+
+    row = (await db.execute(
+        select(StrategyAnalysis).where(StrategyAnalysis.session_id == uuid.UUID(session_id))
+    )).scalar_one_or_none()
+
+    if row is None or not row.conversation:
+        logger.info(f"[CHAT:{id8}] get_chat_history: no conversation found")
+        return {"session_id": session_id, "conversation": []}
+
+    logger.info(f"[CHAT:{id8}] get_chat_history: returning {len(row.conversation)} messages")
+    return {"session_id": session_id, "conversation": row.conversation}

@@ -129,6 +129,7 @@ class StrategyAnalysis(Base):
     scene_confidence = Column(Float)  # 场景识别置信度（与文档/迁移一致）
     skill_cards = Column(JSONB, default=[])  # 每技能一张卡片 [{skill_id, skill_name, content_type, content}, ...]
     scene_images = Column(JSONB, default=[])  # 场景图片列表 [{scene_description, image_url, index}, ...]
+    conversation = Column(JSONB, default=[])  # chat session 完整对话 [{role, content}, ...]，供重入时加载历史
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
