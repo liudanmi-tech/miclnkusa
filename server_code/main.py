@@ -4177,6 +4177,13 @@ async def get_emotion_trend(
         raise HTTPException(status_code=500, detail=f"获取心情趋势失败: {str(e)}")
 
 
+@app.get("/api/v1/app-config")
+async def get_app_config():
+    """返回 App 功能开关（无需 JWT）。EMAIL_LOGIN_ENABLED 环境变量控制邮箱登录。"""
+    email_login_enabled = os.getenv("EMAIL_LOGIN_ENABLED", "true").lower() == "true"
+    return {"email_login_enabled": email_login_enabled}
+
+
 @app.get("/api/v1/image-styles")
 async def get_image_styles():
     """返回所有图片风格列表（无需 JWT），数据来自 styles.json，支持热更新。"""
