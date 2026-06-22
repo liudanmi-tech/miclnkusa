@@ -278,8 +278,7 @@ private struct ProductCard: View {
                         Text(services)
                             .font(.system(size: 12))
                             .foregroundColor(.white.opacity(0.45))
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.8)
+                            .fixedSize(horizontal: false, vertical: true)
                             .padding(.top, 2)
                     }
                 }
