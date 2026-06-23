@@ -5207,6 +5207,8 @@ async def verify_subscription(
     product_id = body.get("product_id", "")
     jws_representation = body.get("jws_representation", "")
 
+    logger.info(f"[Subscription/verify] 收到请求 user={user_id} product_id={product_id!r} original_tx={original_transaction_id!r} jws={'有' if jws_representation else '无'}")
+
     if not original_transaction_id:
         raise HTTPException(status_code=400, detail="original_transaction_id is required")
 

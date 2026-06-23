@@ -2,11 +2,11 @@
 技能管理API接口
 包括获取技能列表、技能详情、重新加载技能等
 """
-import os, time
+import os, time, hashlib
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, delete
+from sqlalchemy import select, delete, text
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Tuple, Any
 
@@ -183,6 +183,25 @@ def _cover_filename(cover_image_val: str | None) -> str | None:
         from urllib.parse import urlparse
         return urlparse(cover_image_val).path.rstrip("/").rsplit("/", 1)[-1]
     return cover_image_val.rsplit("/", 1)[-1]
+
+
+@router.get("/catalog/version", summary="获取技能目录内容 hash（客户端热更新版本检测，无需鉴权）")
+async def get_skills_catalog_version(db: AsyncSession = Depends(get_db)):
+    """
+    对所有启用技能的核心字段（skill_id/name/category/description）做 MD5。
+    任何技能增删改都会导致 hash 变化，客户端用此做轻量版本探测。
+    """
+    try:
+        skills = await list_skills(enabled=True, db=db)
+        content = "|".join(
+            f"{s['skill_id']}:{s['name']}:{s['category']}:{s.get('description', '')}:{s.get('enabled', True)}"
+            for s in sorted(skills, key=lambda x: x["skill_id"])
+        )
+        version = hashlib.md5(content.encode()).hexdigest()[:12]
+        return {"code": 200, "data": {"version": version}}
+    except Exception as e:
+        logger.error(f"获取技能版本 hash 失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/catalog", summary="获取技能目录（分类+子技能展开）")
@@ -558,3 +577,86 @@ async def reload_skill_endpoint(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"重新加载技能失败: {str(e)}"
         )
+
+
+def _read_skill_md(skill_id: str, filename: str) -> str:
+    """读取技能目录下的 note.md 或 resource.md 模板文件"""
+    base_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "skills")
+    path = os.path.join(base_dir, skill_id, filename)
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return f.read()
+    except FileNotFoundError:
+        return ""
+    except Exception as e:
+        logger.warning(f"读取技能模板失败 {path}: {e}")
+        return ""
+
+
+@router.get("/{skill_id}/user-content", summary="获取用户的 note/resource（无则返回 md 模板）")
+async def get_skill_user_content(
+    skill_id: str,
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db)
+):
+    try:
+        result = await db.execute(
+            text("SELECT note_content, resource_content FROM skill_notes WHERE user_id = :uid AND skill_id = :sid"),
+            {"uid": user_id, "sid": skill_id}
+        )
+        row = result.fetchone()
+        note_is_default = not (row and bool(row.note_content))
+        resource_is_default = not (row and bool(row.resource_content))
+        note_content = (row.note_content if row and row.note_content
+                        else _read_skill_md(skill_id, "note.md"))
+        resource_content = (row.resource_content if row and row.resource_content
+                            else _read_skill_md(skill_id, "resource.md"))
+        return {
+            "code": 200,
+            "message": "success",
+            "data": {
+                "note_content": note_content,
+                "resource_content": resource_content,
+                "note_is_default": note_is_default,
+                "resource_is_default": resource_is_default,
+            }
+        }
+    except Exception as e:
+        logger.error(f"获取用户技能内容失败 skill={skill_id} user={user_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class SkillUserContentUpdate(BaseModel):
+    note_content: Optional[str] = None
+    resource_content: Optional[str] = None
+
+
+@router.put("/{skill_id}/user-content", summary="保存用户编辑的 note/resource")
+async def update_skill_user_content(
+    skill_id: str,
+    body: SkillUserContentUpdate,
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db)
+):
+    try:
+        await db.execute(
+            text("""
+                INSERT INTO skill_notes (user_id, skill_id, note_content, resource_content, last_updated)
+                VALUES (:uid, :sid, :note, :resource, now())
+                ON CONFLICT (user_id, skill_id) DO UPDATE SET
+                    note_content     = COALESCE(EXCLUDED.note_content, skill_notes.note_content),
+                    resource_content = COALESCE(EXCLUDED.resource_content, skill_notes.resource_content),
+                    last_updated     = now()
+            """),
+            {
+                "uid": user_id,
+                "sid": skill_id,
+                "note": body.note_content,
+                "resource": body.resource_content,
+            }
+        )
+        await db.commit()
+        return {"code": 200, "message": "success"}
+    except Exception as e:
+        logger.error(f"保存用户技能内容失败 skill={skill_id} user={user_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

@@ -10,6 +10,7 @@ import json
 import copy
 import logging
 import uuid as _uuid_module
+import asyncio
 from typing import List, Dict, Optional, Tuple
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -174,13 +175,31 @@ async def _get_user_selected_skills(user_id: str, db: AsyncSession) -> Tuple[boo
 # ────────────────────────────────────────────────────────
 # 辅助：档案关系强制覆盖 iOS 分类
 # ────────────────────────────────────────────────────────
+
+# KgPerson.rel_type 英文枚举 → iOS category（方案B：对话模式从 KG 取人物关系）
+_KG_REL_TYPE_MAP: dict[str, str] = {
+    "boss":      "work_life",
+    "colleague": "work_life",
+    "family":    "family",
+    "romantic":  "relationships",
+    "friend":    "relationships",
+    # "other" / "unknown" 不强制，交由 LLM 判断
+}
+
 def _forced_category_from_profiles(profiles: list[dict]) -> str | None:
     for p in profiles or []:
+        # 优先用中文 relationship_type（录音流程，精度更高）
         rel = (p.get("relationship_type") or "").strip()
         for cat, rel_set in _PROFILE_CATEGORY_MAP.items():
             if rel in rel_set:
-                logger.info(f"[档案强制] relationship_type={rel} → category={cat}")
+                logger.info(f"[档案强制] relationship_type={rel!r} → category={cat}")
                 return cat
+        # 其次用英文 rel_type（对话流程，来自 kg_persons）
+        rel_type = (p.get("rel_type") or "").strip().lower()
+        if rel_type in _KG_REL_TYPE_MAP:
+            cat = _KG_REL_TYPE_MAP[rel_type]
+            logger.info(f"[档案强制] kg rel_type={rel_type!r} → category={cat}")
+            return cat
     return None
 
 
@@ -398,6 +417,109 @@ Conversation transcript:
 
 
 # ────────────────────────────────────────────────────────
+# Groq 快速分类打分（~250ms，用于串行 chat 技能匹配）
+# ────────────────────────────────────────────────────────
+def classify_and_score_groq(
+    transcript: list,
+    selected_skill_ids: list[str],
+) -> dict:
+    """
+    使用 Groq llama-3.1-8b-instant 做分类+打分，复用相同 prompt 结构。
+    Groq 不可用或调用失败时自动 fallback 到 Gemini classify_and_score。
+    """
+    import time as _time
+    import re as _re
+
+    if not _GROQ_AVAILABLE or not GROQ_API_KEY:
+        logger.warning("[Groq] 不可用或无 API KEY，fallback 到 Gemini")
+        return classify_and_score(transcript, selected_skill_ids)
+
+    skill_desc_lines = []
+    for sid in selected_skill_ids:
+        cfg = get_skill_config(sid)
+        if cfg:
+            name = cfg["name"]
+            focus = cfg.get("exec_context", {}).get("focus", "")
+            skill_desc_lines.append(f'  "{sid}": "{name} — {focus}"')
+        else:
+            skill_desc_lines.append(f'  "{sid}": "{sid}"')
+    skill_desc_block = "\n".join(skill_desc_lines)
+
+    prompt = (
+        "You are an expert conversation analyst.\n"
+        "Analyze the transcript and return ONLY valid JSON.\n\n"
+        "## Step 1: Primary Category\n"
+        "Choose ONE category:\n"
+        '- "work_life": boss, coworker, client, HR, job interview, salary, performance, promotion\n'
+        '- "campus_life": professor, classmate, roommate, thesis, grades, internship\n'
+        '- "relationships": romantic partner, ex, close friend, dating, breakup\n'
+        '- "family": parent, spouse, child, sibling, extended family\n'
+        '- "personal_growth": internal reflection, anxiety, self-doubt, no clear other person\n'
+        '- "life_skills": landlord, doctor, bank, customer service, contracts\n\n'
+        "Rules: workplace authority → work_life; spouse/parent/child → family (not relationships)\n\n"
+        "## Step 2: Skill Relevance Scoring (0-100)\n"
+        "Score each skill for THIS conversation:\n"
+        + skill_desc_block + "\n\n"
+        "Scoring: 80-100=highly relevant, 50-79=somewhat relevant, 0-49=not helpful\n"
+        "Spread scores, avoid clustering at 50.\n\n"
+        "Return ONLY JSON:\n"
+        '{"primary_category": "<category>", "scene_description": "<1 sentence>", '
+        '"skill_scores": {"<skill_id>": <score>}}\n\n'
+        "Transcript:\n"
+        + json.dumps(transcript, ensure_ascii=False)
+    )
+
+    try:
+        t0 = _time.time()
+        client = _GroqClient(api_key=GROQ_API_KEY)
+        resp = client.chat.completions.create(
+            model=GROQ_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            response_format={"type": "json_object"},
+            temperature=0,
+            max_tokens=512,
+        )
+        raw = resp.choices[0].message.content.strip()
+        elapsed = _time.time() - t0
+        logger.info(f"[Groq] classify_and_score 完成 | elapsed={elapsed:.2f}s len={len(raw)}")
+
+        parsed = None
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError:
+            m = _re.search(r'\{.*\}', raw, _re.DOTALL)
+            if m:
+                try:
+                    parsed = json.loads(m.group(0))
+                except json.JSONDecodeError:
+                    pass
+
+        if not parsed:
+            raise ValueError(f"无法解析 Groq JSON: {raw[:200]}")
+
+        primary = parsed.get("primary_category", "work_life")
+        if primary not in _IOS_CATEGORIES:
+            primary = "work_life"
+
+        scores = parsed.get("skill_scores", {})
+        for sid in selected_skill_ids:
+            if sid not in scores:
+                scores[sid] = 50
+
+        logger.info(f"[Groq] primary_category={primary}")
+        return {
+            "primary_category": primary,
+            "scene_description": parsed.get("scene_description", ""),
+            "skill_scores": scores,
+            "other_person_type": "unknown",
+        }
+
+    except Exception as e:
+        logger.error(f"[Groq] classify_and_score_groq 失败: {e}，fallback 到 Gemini")
+        return classify_and_score(transcript, selected_skill_ids)
+
+
+# ────────────────────────────────────────────────────────
 # 核心：构建 skill_card 列表（不执行内容，只决定哪些技能上场）
 # ────────────────────────────────────────────────────────
 async def match_skills_v2(
@@ -406,6 +528,7 @@ async def match_skills_v2(
     user_id: str | None,
     db: AsyncSession,
     model=None,
+    use_groq: bool = False,
 ) -> list[dict]:
     """
     返回 skill_card stub 列表（content=None），供 main.py 决定执行顺序。
@@ -453,7 +576,10 @@ async def match_skills_v2(
         f"[技能匹配] 自动模式：场景分类 + 打分，selected={len(selected_ids)}，"
         f"forced_cat={forced_cat}（档案/关键词）"
     )
-    scene_result = classify_and_score(transcript, selected_ids, model=model)
+    if use_groq:
+        scene_result = await asyncio.to_thread(classify_and_score_groq, transcript, selected_ids)
+    else:
+        scene_result = await asyncio.to_thread(classify_and_score, transcript, selected_ids, model)
 
     primary_cat = forced_cat or scene_result["primary_category"]
     scores      = scene_result["skill_scores"]
