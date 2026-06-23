@@ -1448,7 +1448,7 @@ struct SceneRestoreImageView: View {
                 // 图片区域：严格限制在占位区内，填满且不超出
                 Group {
                 if let imageUrl = sceneImage.getAccessibleImageURL(baseURL: baseURL) {
-                    ImageLoaderView(imageUrl: imageUrl, imageBase64: sceneImage.imageBase64, placeholder: "加载中", contentMode: .fill)
+                    ImageLoaderView(imageUrl: imageUrl, imageBase64: sceneImage.imageBase64, contentMode: .fill)
                 } else if let b64 = sceneImage.imageBase64, !b64.isEmpty {
                     imageFromBase64Placeholder
                 } else {

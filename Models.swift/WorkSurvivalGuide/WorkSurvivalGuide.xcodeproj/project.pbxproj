@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		0CF3E6F205536C8108EB2B5B /* Pods_WorkSurvivalGuide.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 3D1A3AB1658369E0944FDB56 /* Pods_WorkSurvivalGuide.framework */; };
 		745E48C106A39754C34115AB /* DebugLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = 69E05692D1F0A81622061969 /* DebugLogger.swift */; };
 		C1B8D4272F0F7066002950F2 /* Alamofire in Frameworks */ = {isa = PBXBuildFile; productRef = C1B8D4262F0F7066002950F2 /* Alamofire */; };
 		E7F7D97F6A12A344D971816D /* DebugPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 177565569CD310BEFFFBE120 /* DebugPanelView.swift */; };
@@ -31,7 +32,10 @@
 
 /* Begin PBXFileReference section */
 		177565569CD310BEFFFBE120 /* DebugPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebugPanelView.swift; sourceTree = "<group>"; };
+		3D1A3AB1658369E0944FDB56 /* Pods_WorkSurvivalGuide.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_WorkSurvivalGuide.framework; sourceTree = BUILT_PRODUCTS_DIR; };
+		59ECAD000784CA11E7535C3F /* Pods-WorkSurvivalGuide.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-WorkSurvivalGuide.release.xcconfig"; path = "Target Support Files/Pods-WorkSurvivalGuide/Pods-WorkSurvivalGuide.release.xcconfig"; sourceTree = "<group>"; };
 		69E05692D1F0A81622061969 /* DebugLogger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebugLogger.swift; sourceTree = "<group>"; };
+		76B4FEC8EB7A1A415D47FC7B /* Pods-WorkSurvivalGuide.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-WorkSurvivalGuide.debug.xcconfig"; path = "Target Support Files/Pods-WorkSurvivalGuide/Pods-WorkSurvivalGuide.debug.xcconfig"; sourceTree = "<group>"; };
 		C1B8D3C52F0F6201002950F2 /* WorkSurvivalGuide.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = WorkSurvivalGuide.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		C1B8D3D22F0F6202002950F2 /* WorkSurvivalGuideTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = WorkSurvivalGuideTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		C1B8D3DC2F0F6202002950F2 /* WorkSurvivalGuideUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = WorkSurvivalGuideUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -74,6 +78,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				C1B8D4272F0F7066002950F2 /* Alamofire in Frameworks */,
+				0CF3E6F205536C8108EB2B5B /* Pods_WorkSurvivalGuide.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -94,6 +99,15 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		4EFE00B2C300E46BC99DB380 /* Pods */ = {
+			isa = PBXGroup;
+			children = (
+				76B4FEC8EB7A1A415D47FC7B /* Pods-WorkSurvivalGuide.debug.xcconfig */,
+				59ECAD000784CA11E7535C3F /* Pods-WorkSurvivalGuide.release.xcconfig */,
+			);
+			path = Pods;
+			sourceTree = "<group>";
+		};
 		6323C46A8F7693E56A2AD5F8 /* Services */ = {
 			isa = PBXGroup;
 			children = (
@@ -101,6 +115,14 @@
 			);
 			name = Services;
 			path = WorkSurvivalGuide/Services;
+			sourceTree = "<group>";
+		};
+		AD5D5881ECA2C18DA3394404 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				3D1A3AB1658369E0944FDB56 /* Pods_WorkSurvivalGuide.framework */,
+			);
+			name = Frameworks;
 			sourceTree = "<group>";
 		};
 		C1B8D3BC2F0F6201002950F2 = {
@@ -112,6 +134,8 @@
 				C1B8D3D52F0F6202002950F2 /* WorkSurvivalGuideTests */,
 				C1B8D3DF2F0F6202002950F2 /* WorkSurvivalGuideUITests */,
 				C1B8D3C62F0F6201002950F2 /* Products */,
+				4EFE00B2C300E46BC99DB380 /* Pods */,
+				AD5D5881ECA2C18DA3394404 /* Frameworks */,
 			);
 			sourceTree = "<group>";
 		};
@@ -141,9 +165,11 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = C1B8D3E62F0F6202002950F2 /* Build configuration list for PBXNativeTarget "WorkSurvivalGuide" */;
 			buildPhases = (
+				3346649E52D45D47B853963B /* [CP] Check Pods Manifest.lock */,
 				C1B8D3C12F0F6201002950F2 /* Sources */,
 				C1B8D3C22F0F6201002950F2 /* Frameworks */,
 				C1B8D3C32F0F6201002950F2 /* Resources */,
+				6B6D24FF247B03B679166EF3 /* [CP] Embed Pods Frameworks */,
 			);
 			buildRules = (
 			);
@@ -177,8 +203,6 @@
 				C1B8D3D52F0F6202002950F2 /* WorkSurvivalGuideTests */,
 			);
 			name = WorkSurvivalGuideTests;
-			packageProductDependencies = (
-			);
 			productName = WorkSurvivalGuideTests;
 			productReference = C1B8D3D22F0F6202002950F2 /* WorkSurvivalGuideTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
@@ -200,8 +224,6 @@
 				C1B8D3DF2F0F6202002950F2 /* WorkSurvivalGuideUITests */,
 			);
 			name = WorkSurvivalGuideUITests;
-			packageProductDependencies = (
-			);
 			productName = WorkSurvivalGuideUITests;
 			productReference = C1B8D3DC2F0F6202002950F2 /* WorkSurvivalGuideUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
@@ -276,6 +298,52 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		3346649E52D45D47B853963B /* [CP] Check Pods Manifest.lock */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"${PODS_PODFILE_DIR_PATH}/Podfile.lock",
+				"${PODS_ROOT}/Manifest.lock",
+			);
+			name = "[CP] Check Pods Manifest.lock";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(DERIVED_FILE_DIR)/Pods-WorkSurvivalGuide-checkManifestLockResult.txt",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "diff \"${PODS_PODFILE_DIR_PATH}/Podfile.lock\" \"${PODS_ROOT}/Manifest.lock\" > /dev/null\nif [ $? != 0 ] ; then\n    # print error to STDERR\n    echo \"error: The sandbox is not in sync with the Podfile.lock. Run 'pod install' or update your CocoaPods installation.\" >&2\n    exit 1\nfi\n# This output is used by Xcode 'outputs' to avoid re-running this script phase.\necho \"SUCCESS\" > \"${SCRIPT_OUTPUT_FILE_0}\"\n";
+			showEnvVarsInLog = 0;
+		};
+		6B6D24FF247B03B679166EF3 /* [CP] Embed Pods Frameworks */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+				"${PODS_ROOT}/Target Support Files/Pods-WorkSurvivalGuide/Pods-WorkSurvivalGuide-frameworks-${CONFIGURATION}-input-files.xcfilelist",
+			);
+			inputPaths = (
+			);
+			name = "[CP] Embed Pods Frameworks";
+			outputFileListPaths = (
+				"${PODS_ROOT}/Target Support Files/Pods-WorkSurvivalGuide/Pods-WorkSurvivalGuide-frameworks-${CONFIGURATION}-output-files.xcfilelist",
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-WorkSurvivalGuide/Pods-WorkSurvivalGuide-frameworks.sh\"\n";
+			showEnvVarsInLog = 0;
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		C1B8D3C12F0F6201002950F2 /* Sources */ = {
@@ -354,7 +422,7 @@
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
-				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GCC_C_LANGUAGE_STANDARD = gnu17;
 				GCC_DYNAMIC_NO_PIC = NO;
 				GCC_NO_COMMON_BLOCKS = YES;
@@ -417,7 +485,7 @@
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
-				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GCC_C_LANGUAGE_STANDARD = gnu17;
 				GCC_NO_COMMON_BLOCKS = YES;
 				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
@@ -438,12 +506,13 @@
 		};
 		C1B8D3E72F0F6202002950F2 /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 76B4FEC8EB7A1A415D47FC7B /* Pods-WorkSurvivalGuide.debug.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = WorkSurvivalGuide/WorkSurvivalGuide.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 1.1;
 				DEVELOPMENT_TEAM = CBFK93A25K;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -465,8 +534,26 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
-				"OTHER_SWIFT_FLAGS[arch=*]" = "-D LIVE_MODE_ENABLED";
+				MARKETING_VERSION = 1.1;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-framework",
+					"\"AdSupport\"",
+					"-framework",
+					"\"CoreGraphics\"",
+					"-framework",
+					"\"StoreKit\"",
+					"-framework",
+					"\"TikTokBusinessSDK\"",
+					"-framework",
+					"\"UIKit\"",
+					"-framework",
+					"\"WebKit\"",
+					"-weak_framework",
+					"\"AppTrackingTransparency\"",
+					"-lc++",
+					"-ObjC",
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.liudan.WorkSurvivalGuide;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -477,12 +564,13 @@
 		};
 		C1B8D3E82F0F6202002950F2 /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 59ECAD000784CA11E7535C3F /* Pods-WorkSurvivalGuide.release.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = WorkSurvivalGuide/WorkSurvivalGuide.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 1.1;
 				DEVELOPMENT_TEAM = CBFK93A25K;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -504,7 +592,26 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.1;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-framework",
+					"\"AdSupport\"",
+					"-framework",
+					"\"CoreGraphics\"",
+					"-framework",
+					"\"StoreKit\"",
+					"-framework",
+					"\"TikTokBusinessSDK\"",
+					"-framework",
+					"\"UIKit\"",
+					"-framework",
+					"\"WebKit\"",
+					"-weak_framework",
+					"\"AppTrackingTransparency\"",
+					"-lc++",
+					"-ObjC",
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.liudan.WorkSurvivalGuide;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;

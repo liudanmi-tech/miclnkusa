@@ -57,7 +57,7 @@ struct ProfileListView: View {
                 // 主内容区域
                 if viewModel.isLoading && viewModel.profiles.isEmpty {
                     Spacer()
-                    ProgressView("加载中...")
+                    ProgressView()
                         .tint(AppColors.headerText)
                     Spacer()
                 } else if viewModel.profiles.isEmpty {

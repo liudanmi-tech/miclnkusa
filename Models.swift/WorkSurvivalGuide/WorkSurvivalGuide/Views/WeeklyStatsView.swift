@@ -32,31 +32,9 @@ struct WeeklyStatsCarouselView: View {
 
     var body: some View {
         VStack(spacing: 8) {
-            TabView(selection: $activeCard) {
-                MoodCurveCard(stats: vm.stats, isLoading: vm.isLoading, emojiType: selfEmojiType)
-                    .tag(0)
-                    .onTapGesture { detailCard = .mood }
-
-                SkillsRadarCardView(
-                    startDate: radarStartDate,
-                    endDate: radarEndDate,
-                    periodLabel: vm.periodLabel
-                )
-                .tag(1)
-                .onTapGesture { detailCard = .radar }
-            }
-            .tabViewStyle(.page(indexDisplayMode: .never))
-            .frame(height: 290)
-
-            // Page dots
-            HStack(spacing: 6) {
-                ForEach(0..<2, id: \.self) { i in
-                    Circle()
-                        .fill(activeCard == i ? Color.white.opacity(0.8) : Color.white.opacity(0.25))
-                        .frame(width: activeCard == i ? 6 : 4, height: activeCard == i ? 6 : 4)
-                        .animation(.easeInOut(duration: 0.2), value: activeCard)
-                }
-            }
+            MoodCurveCard(stats: vm.stats, isLoading: vm.isLoading, emojiType: selfEmojiType)
+                .frame(height: 290)
+                .onTapGesture { detailCard = .mood }
         }
         .onAppear { vm.load() }
         .sheet(item: $detailCard) { card in
@@ -684,7 +662,7 @@ struct WeeklyStatsDetailSheet: View {
             }
             .fullScreenCover(item: $chatResumeTarget) { target in
                 let _ = print("[MoodTrend] fullScreenCover presented, sessionId=\(target.id.prefix(8))")
-                ChatAIAssistantView(sessionId: target.id)
+                ChatAIAssistantView(sessionId: target.id, isExistingSession: true)
             }
             .presentationDetents([.large])
             .task(id: radarStartDate + radarEndDate) {

@@ -8,6 +8,7 @@
 
 import StoreKit
 import Foundation
+import TikTokBusinessSDK
 
 @MainActor
 class SubscriptionManager: ObservableObject {
@@ -157,17 +158,21 @@ class SubscriptionManager: ObservableObject {
             loadingProductId = nil
         }
 
+        print("[SubscriptionManager] 🛒 开始购买 productId=\(product.id)")
+
         do {
             let result = try await product.purchase()
             switch result {
             case .success(let verification):
                 let transaction = try checkVerified(verification)
+                print("[SubscriptionManager] ✅ 购买成功 productId=\(transaction.productID) originalID=\(transaction.originalID) type=\(transaction.productType)")
                 await sendToBackend(originalTransactionId: String(transaction.originalID), productId: transaction.productID, jwsRepresentation: verification.jwsRepresentation)
                 await transaction.finish()
+                TikTokBusiness.trackEvent("Subscribe")
             case .userCancelled:
-                break
+                print("[SubscriptionManager] 用户取消购买 productId=\(product.id)")
             case .pending:
-                print("[SubscriptionManager] 购买待处理（Ask to Buy）")
+                print("[SubscriptionManager] 购买待处理（Ask to Buy）productId=\(product.id)")
             @unknown default:
                 break
             }
@@ -283,6 +288,7 @@ class SubscriptionManager: ObservableObject {
             for await result in Transaction.updates {
                 guard let self else { return }
                 if let transaction = try? self.checkVerified(result) {
+                    print("[SubscriptionManager] 🔔 Transaction.updates 触发 productId=\(transaction.productID) originalID=\(transaction.originalID) revocationDate=\(String(describing: transaction.revocationDate)) environment=\(transaction.environment.rawValue)")
                     await self.sendToBackend(originalTransactionId: String(transaction.originalID), productId: transaction.productID, jwsRepresentation: result.jwsRepresentation)
                     await transaction.finish()
                 }
@@ -298,6 +304,7 @@ class SubscriptionManager: ObservableObject {
     }
 
     private func sendToBackend(originalTransactionId: String, productId: String = "", jwsRepresentation: String = "") async {
+        print("[SubscriptionManager] 📤 发送后端验证 originalTxId=\(originalTransactionId) productId=\(productId) jwsLen=\(jwsRepresentation.count)")
         do {
             try await NetworkManager.shared.verifyAppleTransaction(
                 originalTransactionId: originalTransactionId,
@@ -305,9 +312,9 @@ class SubscriptionManager: ObservableObject {
                 jwsRepresentation: jwsRepresentation
             )
             await refreshFromBackend()
-            print("[SubscriptionManager] ✅ 后端验证成功 isPro=\(isPro)")
+            print("[SubscriptionManager] ✅ 后端验证成功 isPro=\(isPro) plan=\(plan) currentProductId=\(currentProductId ?? "nil")")
         } catch {
-            print("[SubscriptionManager] 后端验证失败: \(error)")
+            print("[SubscriptionManager] ❌ 后端验证失败: \(error)")
         }
     }
 

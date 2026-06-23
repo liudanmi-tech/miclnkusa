@@ -58,34 +58,35 @@ struct LoginView: View {
                                 .progressViewStyle(CircularProgressViewStyle(tint: .white))
                         }
 
-                        // ── Divider ──
-                        HStack(spacing: 8) {
-                            Rectangle()
-                                .fill(Color.white.opacity(0.15))
-                                .frame(height: 1)
-                            Text("or")
-                                .font(.system(size: 13))
-                                .foregroundColor(.white.opacity(0.35))
-                            Rectangle()
-                                .fill(Color.white.opacity(0.15))
-                                .frame(height: 1)
-                        }
+                        // Email Sign In（服务端开关控制，提审期间开启）
+                        if viewModel.emailLoginEnabled {
+                            HStack(spacing: 8) {
+                                Rectangle()
+                                    .fill(Color.white.opacity(0.15))
+                                    .frame(height: 1)
+                                Text("or")
+                                    .font(.system(size: 13))
+                                    .foregroundColor(.white.opacity(0.35))
+                                Rectangle()
+                                    .fill(Color.white.opacity(0.15))
+                                    .frame(height: 1)
+                            }
 
-                        // Email Sign In
-                        NavigationLink(destination: EmailSignInView()) {
-                            Text("Sign in with Email")
-                                .font(.system(size: 16, weight: .semibold))
-                                .frame(maxWidth: .infinity)
-                                .frame(height: 50)
-                                .background(Color.white.opacity(0.1))
-                                .foregroundColor(.white)
-                                .cornerRadius(10)
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 10)
-                                        .stroke(Color.white.opacity(0.2), lineWidth: 1)
-                                )
+                            NavigationLink(destination: EmailSignInView()) {
+                                Text("Sign in with Email")
+                                    .font(.system(size: 16, weight: .semibold))
+                                    .frame(maxWidth: .infinity)
+                                    .frame(height: 50)
+                                    .background(Color.white.opacity(0.1))
+                                    .foregroundColor(.white)
+                                    .cornerRadius(10)
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 10)
+                                            .stroke(Color.white.opacity(0.2), lineWidth: 1)
+                                    )
+                            }
+                            .disabled(viewModel.isLoading)
                         }
-                        .disabled(viewModel.isLoading)
                     }
                     .padding(.horizontal, 32)
 
@@ -96,6 +97,7 @@ struct LoginView: View {
                 }
             }
             .navigationBarHidden(true)
+            .onAppear { viewModel.loadAppConfig() }
             .alert("Error", isPresented: $viewModel.showError) {
                 Button("OK", role: .cancel) { }
             } message: {

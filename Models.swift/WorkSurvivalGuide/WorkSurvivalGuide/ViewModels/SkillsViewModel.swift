@@ -5,6 +5,7 @@
 
 import Foundation
 import Combine
+import SwiftUI
 
 class SkillsViewModel: ObservableObject {
     static let shared = SkillsViewModel()
@@ -23,6 +24,9 @@ class SkillsViewModel: ObservableObject {
             UserDefaults.standard.set(isManualMode, forKey: "skillManualMode")
         }
     }
+
+    /// 技能目录内容 hash，持久化存储，跨 session 有效
+    @AppStorage("skillsCatalogVersion") private var cachedVersion: String = ""
 
     private let networkManager = NetworkManager.shared
     private var hasLoaded = false
@@ -45,8 +49,9 @@ class SkillsViewModel: ObservableObject {
             do {
                 // 先加载 catalog（含 selected 状态）
                 let data = try await networkManager.getSkillsCatalog()
-                // 同时拉取模式设置
+                // 同时拉取模式设置 + 技能版本 hash
                 let prefs = try? await networkManager.getSkillPreferences()
+                let version = try? await networkManager.getSkillsCatalogVersion()
                 guard !Task.isCancelled else { return }
                 await MainActor.run {
                     self.categories = data.categories
@@ -55,10 +60,11 @@ class SkillsViewModel: ObservableObject {
                         self.isManualMode = mode
                         UserDefaults.standard.set(mode, forKey: "skillManualMode")
                     }
+                    if let v = version { self.cachedVersion = v }
                     self.isLoading = false
                     self.hasLoaded = true
                     self.errorMessage = nil
-                    print("✅ [SkillsVM] 加载成功: \(data.categories.count) 个分类, 共 \(data.categories.reduce(0) { $0 + $1.skills.count }) 个技能, 手动模式=\(self.isManualMode)")
+                    print("✅ [SkillsVM] 加载成功: \(data.categories.count) 个分类, 共 \(data.categories.reduce(0) { $0 + $1.skills.count }) 个技能, 版本=\(version ?? "unknown")")
                 }
             } catch {
                 guard !Task.isCancelled else { return }
@@ -73,6 +79,26 @@ class SkillsViewModel: ObservableObject {
 
     func refreshCatalog() {
         loadCatalog(forceRefresh: true)
+    }
+
+    /// 静默后台版本检测：有数据时调用，只有 hash 变了才重新拉全量
+    func checkVersionAndRefreshIfNeeded() {
+        Task {
+            guard let serverVersion = try? await networkManager.getSkillsCatalogVersion() else { return }
+            guard serverVersion != cachedVersion else { return }
+            print("🔄 [SkillsVM] 技能版本变化 \(cachedVersion) → \(serverVersion)，静默刷新目录")
+            do {
+                let data = try await networkManager.getSkillsCatalog()
+                await MainActor.run {
+                    self.categories = data.categories
+                    self.rebuildSelectedSkills()
+                    self.cachedVersion = serverVersion
+                    print("✅ [SkillsVM] 静默刷新完成，版本更新为 \(serverVersion)")
+                }
+            } catch {
+                print("❌ [SkillsVM] 静默刷新失败: \(error)")
+            }
+        }
     }
 
     // MARK: - Mode Toggle

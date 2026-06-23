@@ -1,0 +1,16 @@
+PODS:
+  - TikTokBusinessSDK (1.6.1)
+
+DEPENDENCIES:
+  - TikTokBusinessSDK
+
+SPEC REPOS:
+  trunk:
+    - TikTokBusinessSDK
+
+SPEC CHECKSUMS:
+  TikTokBusinessSDK: 349bb1dea1f90d01f9b39418ebe7c8eb981c04af
+
+PODFILE CHECKSUM: db5193b467ba3b123f0340f08304dd15667fe866
+
+COCOAPODS: 1.16.2

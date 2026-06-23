@@ -4,6 +4,12 @@
 <dict>
 	<key>CFBundleGetInfoString</key>
 	<string></string>
+	<key>TikTokAppID</key>
+	<string>6766467422</string>
+	<key>TikTokAppId</key>
+	<string>7653662064061202452</string>
+	<key>NSUserTrackingUsageDescription</key>
+	<string>We use this to measure ad performance and improve your experience.</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSExceptionDomains</key>

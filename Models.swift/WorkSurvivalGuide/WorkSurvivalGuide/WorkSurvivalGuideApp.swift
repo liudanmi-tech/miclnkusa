@@ -6,10 +6,23 @@
 //
 
 import SwiftUI
+import TikTokBusinessSDK
 
 @main
 struct WorkSurvivalGuideApp: App {
     init() {
+        // TikTok Business SDK initialization
+        if let tikTokConfig = TikTokConfig(
+            accessToken: "TTcCUI8nZ5aMr3uLCVKXRVDluc5nX4Rc",
+            appId: "6766467422",
+            tiktokAppId: "7653662064061202452"
+        ) {
+            #if DEBUG
+            tikTokConfig.debugModeEnabled = true
+            #endif
+            TikTokBusiness.initializeSdk(tikTokConfig)
+        }
+
         Task { await ImageStyleRepository.shared.fetchIfNeeded() }
     }
 

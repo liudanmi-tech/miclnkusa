@@ -57,7 +57,7 @@ class AppConfig {
 #if DEBUG
 return true  // ← 切测试服改 true，切生产改 false
         #else
-        return false  // Release 包硬编码，禁止修改此行
+        return true   // ⚠️ 内测包临时改为测试服，提审前必须改回 false
         #endif
     }
 

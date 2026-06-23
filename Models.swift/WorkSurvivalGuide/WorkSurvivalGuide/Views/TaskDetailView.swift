@@ -128,15 +128,7 @@ struct TaskDetailView: View {
                 if isLoading {
                     ZStack {
                         Color.black.opacity(0.3).ignoresSafeArea()
-                        VStack(spacing: 16) {
-                            ProgressView().scaleEffect(1.5).tint(AppColors.headerText)
-                            Text("Loading…")
-                                .font(.system(size: 16, design: .rounded))
-                                .foregroundColor(AppColors.headerText)
-                        }
-                        .padding(24)
-                        .background(Color.white)
-                        .cornerRadius(12)
+                        ProgressView().scaleEffect(1.5).tint(.white)
                     }
                 }
 
@@ -180,7 +172,7 @@ struct TaskDetailView: View {
                 }
             }
             .fullScreenCover(isPresented: $showChatView) {
-                ChatAIAssistantView(sessionId: task.id)
+                ChatAIAssistantView(sessionId: task.id, isExistingSession: true)
             }
             .sheet(isPresented: $showSummarySheet) {
                 SummarySheet(
@@ -420,6 +412,7 @@ private struct MomentInfoCard: View {
     let moodState: String?
     let startTime: Date
     let strategyIsLoading: Bool
+    @State private var emojiLoadFailed = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -476,10 +469,15 @@ private struct MomentInfoCard: View {
                 if let state = moodState {
                     HStack(spacing: 6) {
                         // 优先加载专属头像，降级 unicode emoji
-                        if let urlStr = moodEmojiUrl {
-                            ImageLoaderView(imageUrl: urlStr, imageBase64: nil, contentMode: .fill)
-                                .frame(width: 56, height: 56)
-                                .clipShape(Circle())
+                        if let urlStr = moodEmojiUrl, !emojiLoadFailed {
+                            ImageLoaderView(
+                                imageUrl: urlStr,
+                                imageBase64: nil,
+                                contentMode: .fill,
+                                onLoadFailed: { emojiLoadFailed = true }
+                            )
+                            .frame(width: 56, height: 56)
+                            .clipShape(Circle())
                         } else {
                             Text(moodEmoji ?? "😐").font(.system(size: 40))
                         }

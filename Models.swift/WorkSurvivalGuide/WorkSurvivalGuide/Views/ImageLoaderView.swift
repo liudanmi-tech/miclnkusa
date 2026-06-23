@@ -13,7 +13,7 @@ struct ImageLoaderView: View {
     @State private var isLoading = true
     @State private var loadError: Error?
     
-    init(imageUrl: String?, imageBase64: String?, placeholder: String = "加载中...", contentMode: ContentMode = .fit, onLoadFailed: (() -> Void)? = nil) {
+    init(imageUrl: String?, imageBase64: String?, placeholder: String = "", contentMode: ContentMode = .fit, onLoadFailed: (() -> Void)? = nil) {
         self.imageUrl = imageUrl
         self.imageBase64 = imageBase64
         self.placeholder = placeholder
@@ -140,10 +140,8 @@ struct ImageLoaderView: View {
                         print("❌ [ImageLoaderView] HTTP 错误: \(httpResponse.statusCode)")
                         self.loadError = error
                         self.isLoading = false
-                        // 404 等失败时通知父视图，便于切换为占位内容
-                        if httpResponse.statusCode == 404 || httpResponse.statusCode >= 500 {
-                            self.onLoadFailed?()
-                        }
+                        // 任何 non-200 都通知父视图降级（含 403 过期预签名 URL）
+                        self.onLoadFailed?()
                         return
                     }
                 }

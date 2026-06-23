@@ -153,7 +153,9 @@ struct SkillsView: View {
         }
         .onAppear {
             if viewModel.categories.isEmpty && !viewModel.isLoading {
-                viewModel.loadCatalog()
+                viewModel.loadCatalog()          // 首次：全量加载
+            } else {
+                viewModel.checkVersionAndRefreshIfNeeded()  // 已有数据：静默版本检测
             }
             // 首次进入 Skills 页触发 Add Skill 提示
             TourManager.shared.tryShowSkillTip()

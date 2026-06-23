@@ -95,7 +95,7 @@ struct VisualMomentCardView: View {
                     print("  转换后 URL: \(accessibleURL)")
                 }
             } else if let b64 = moment.imageBase64, !b64.isEmpty {
-                ImageLoaderView(imageUrl: nil, imageBase64: b64, placeholder: "加载中...")
+                ImageLoaderView(imageUrl: nil, imageBase64: b64)
                     .clipShape(RoundedRectangle(cornerRadius: 8))
             } else {
                 // 如果没有图片，显示提示信息和调试信息

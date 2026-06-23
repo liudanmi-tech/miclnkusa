@@ -7,6 +7,7 @@
 
 import Foundation
 import AuthenticationServices
+import TikTokBusinessSDK
 
 @MainActor
 class AuthViewModel: ObservableObject {
@@ -16,6 +17,11 @@ class AuthViewModel: ObservableObject {
     @Published var isLoading: Bool = false
     @Published var errorMessage: String?
     @Published var showError: Bool = false
+    @Published var emailLoginEnabled: Bool = true
+
+    func loadAppConfig() {
+        Task { emailLoginEnabled = await NetworkManager.shared.getAppConfig() }
+    }
 
     // MARK: - Email Sign In (login + auto-register)
 
@@ -39,6 +45,8 @@ class AuthViewModel: ObservableObject {
                 let userInfo = try await AuthService.shared.getCurrentUser()
                 isLoading = false
                 AuthManager.shared.loginSuccess(userInfo: userInfo)
+                TikTokBusiness.trackEvent("Login")
+                TikTokBusiness.identify(withExternalID: userInfo.user_id, externalUserName: nil, phoneNumber: nil, email: userInfo.email)
             } catch {
                 isLoading = false
                 showAuthError(error.localizedDescription)
@@ -72,6 +80,9 @@ class AuthViewModel: ObservableObject {
                 let userInfo = try await AuthService.shared.getCurrentUser()
                 isLoading = false
                 AuthManager.shared.loginSuccess(userInfo: userInfo)
+                TikTokBusiness.trackEvent("Registration")
+                TikTokBusiness.trackEvent("Login")
+                TikTokBusiness.identify(withExternalID: userInfo.user_id, externalUserName: nil, phoneNumber: nil, email: userInfo.email)
             } catch {
                 isLoading = false
                 showAuthError(error.localizedDescription)
@@ -112,6 +123,8 @@ class AuthViewModel: ObservableObject {
                     let userInfo = try await AuthService.shared.getCurrentUser()
                     isLoading = false
                     AuthManager.shared.loginSuccess(userInfo: userInfo)
+                    TikTokBusiness.trackEvent("Login")
+                    TikTokBusiness.identify(withExternalID: userInfo.user_id, externalUserName: nil, phoneNumber: nil, email: userInfo.email)
                 } catch {
                     isLoading = false
                     showAuthError(error.localizedDescription)
