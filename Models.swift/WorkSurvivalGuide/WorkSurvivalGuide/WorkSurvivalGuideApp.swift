@@ -7,11 +7,15 @@
 
 import SwiftUI
 import TikTokBusinessSDK
+import KochavaNetworking
+import KochavaMeasurement
+import KochavaTracking
 
 @main
 struct WorkSurvivalGuideApp: App {
     init() {
         // TikTok Business SDK initialization
+        // ATT 弹窗由 TikTokBusinessSDK 内部自动触发，项目代码不手动调用 ATT
         if let tikTokConfig = TikTokConfig(
             accessToken: "TTcCUI8nZ5aMr3uLCVKXRVDluc5nX4Rc",
             appId: "6766467422",
@@ -23,7 +27,13 @@ struct WorkSurvivalGuideApp: App {
             TikTokBusiness.initializeSdk(tikTokConfig)
         }
 
-        Task { await ImageStyleRepository.shared.fetchIfNeeded() }
+        // Kochava MMP initialization
+        // ATT 弹窗已由 TikTok SDK 负责，Kochava 不重复发起（enabledBool 保持默认 false）
+        // 等待 60 秒，让用户有足够时间响应 TikTok 触发的 ATT 弹窗后再读取授权状态
+        Measurement.shared.appTrackingTransparency.authorizationStatusWaitTimeInterval = 60.0
+        Measurement.shared.start(appGUIDString: "kochattoon-1ndn6cc95")
+
+        _Concurrency.Task { await ImageStyleRepository.shared.fetchIfNeeded() }
     }
 
     var body: some Scene {

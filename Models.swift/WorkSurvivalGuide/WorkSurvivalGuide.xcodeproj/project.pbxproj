@@ -9,6 +9,9 @@
 /* Begin PBXBuildFile section */
 		0CF3E6F205536C8108EB2B5B /* Pods_WorkSurvivalGuide.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 3D1A3AB1658369E0944FDB56 /* Pods_WorkSurvivalGuide.framework */; };
 		745E48C106A39754C34115AB /* DebugLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = 69E05692D1F0A81622061969 /* DebugLogger.swift */; };
+		C154F3312FEE8C430071EAED /* KochavaMeasurement in Frameworks */ = {isa = PBXBuildFile; productRef = C154F3302FEE8C430071EAED /* KochavaMeasurement */; };
+		C154F3342FEE8C660071EAED /* KochavaTracking in Frameworks */ = {isa = PBXBuildFile; productRef = C154F3332FEE8C660071EAED /* KochavaTracking */; };
+		C154F3362FEE8C800071EAED /* KochavaNetworking in Frameworks */ = {isa = PBXBuildFile; productRef = C154F3352FEE8C800071EAED /* KochavaNetworking */; };
 		C1B8D4272F0F7066002950F2 /* Alamofire in Frameworks */ = {isa = PBXBuildFile; productRef = C1B8D4262F0F7066002950F2 /* Alamofire */; };
 		E7F7D97F6A12A344D971816D /* DebugPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 177565569CD310BEFFFBE120 /* DebugPanelView.swift */; };
 /* End PBXBuildFile section */
@@ -78,7 +81,10 @@
 			buildActionMask = 2147483647;
 			files = (
 				C1B8D4272F0F7066002950F2 /* Alamofire in Frameworks */,
+				C154F3312FEE8C430071EAED /* KochavaMeasurement in Frameworks */,
 				0CF3E6F205536C8108EB2B5B /* Pods_WorkSurvivalGuide.framework in Frameworks */,
+				C154F3342FEE8C660071EAED /* KochavaTracking in Frameworks */,
+				C154F3362FEE8C800071EAED /* KochavaNetworking in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -181,6 +187,9 @@
 			name = WorkSurvivalGuide;
 			packageProductDependencies = (
 				C1B8D4262F0F7066002950F2 /* Alamofire */,
+				C154F3302FEE8C430071EAED /* KochavaMeasurement */,
+				C154F3332FEE8C660071EAED /* KochavaTracking */,
+				C154F3352FEE8C800071EAED /* KochavaNetworking */,
 			);
 			productName = WorkSurvivalGuide;
 			productReference = C1B8D3C52F0F6201002950F2 /* WorkSurvivalGuide.app */;
@@ -262,6 +271,9 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				C1B8D4252F0F7066002950F2 /* XCRemoteSwiftPackageReference "Alamofire" */,
+				C154F32E2FEE78800071EAED /* XCRemoteSwiftPackageReference "Apple-SwiftPackage-KochavaNetworking-XCFramework" */,
+				C154F32F2FEE8C430071EAED /* XCRemoteSwiftPackageReference "Apple-SwiftPackage-KochavaMeasurement-XCFramework" */,
+				C154F3322FEE8C660071EAED /* XCRemoteSwiftPackageReference "Apple-SwiftPackage-KochavaTracking-XCFramework" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = C1B8D3C62F0F6201002950F2 /* Products */;
@@ -730,6 +742,30 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
+		C154F32E2FEE78800071EAED /* XCRemoteSwiftPackageReference "Apple-SwiftPackage-KochavaNetworking-XCFramework" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/Kochava/Apple-SwiftPackage-KochavaNetworking-XCFramework";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 10.0.2;
+			};
+		};
+		C154F32F2FEE8C430071EAED /* XCRemoteSwiftPackageReference "Apple-SwiftPackage-KochavaMeasurement-XCFramework" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/Kochava/Apple-SwiftPackage-KochavaMeasurement-XCFramework";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 10.0.2;
+			};
+		};
+		C154F3322FEE8C660071EAED /* XCRemoteSwiftPackageReference "Apple-SwiftPackage-KochavaTracking-XCFramework" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/Kochava/Apple-SwiftPackage-KochavaTracking-XCFramework";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 10.0.2;
+			};
+		};
 		C1B8D4252F0F7066002950F2 /* XCRemoteSwiftPackageReference "Alamofire" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/Alamofire/Alamofire.git";
@@ -741,6 +777,21 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		C154F3302FEE8C430071EAED /* KochavaMeasurement */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = C154F32F2FEE8C430071EAED /* XCRemoteSwiftPackageReference "Apple-SwiftPackage-KochavaMeasurement-XCFramework" */;
+			productName = KochavaMeasurement;
+		};
+		C154F3332FEE8C660071EAED /* KochavaTracking */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = C154F3322FEE8C660071EAED /* XCRemoteSwiftPackageReference "Apple-SwiftPackage-KochavaTracking-XCFramework" */;
+			productName = KochavaTracking;
+		};
+		C154F3352FEE8C800071EAED /* KochavaNetworking */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = C154F32E2FEE78800071EAED /* XCRemoteSwiftPackageReference "Apple-SwiftPackage-KochavaNetworking-XCFramework" */;
+			productName = KochavaNetworking;
+		};
 		C1B8D4262F0F7066002950F2 /* Alamofire */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = C1B8D4252F0F7066002950F2 /* XCRemoteSwiftPackageReference "Alamofire" */;

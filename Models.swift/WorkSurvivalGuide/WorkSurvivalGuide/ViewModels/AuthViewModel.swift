@@ -8,6 +8,7 @@
 import Foundation
 import AuthenticationServices
 import TikTokBusinessSDK
+import KochavaMeasurement
 
 @MainActor
 class AuthViewModel: ObservableObject {
@@ -20,7 +21,7 @@ class AuthViewModel: ObservableObject {
     @Published var emailLoginEnabled: Bool = true
 
     func loadAppConfig() {
-        Task { emailLoginEnabled = await NetworkManager.shared.getAppConfig() }
+        _Concurrency.Task { emailLoginEnabled = await NetworkManager.shared.getAppConfig() }
     }
 
     // MARK: - Email Sign In (login + auto-register)
@@ -39,7 +40,7 @@ class AuthViewModel: ObservableObject {
         isLoading = true
         errorMessage = nil
 
-        Task {
+        _Concurrency.Task {
             do {
                 _ = try await AuthService.shared.emailLogin(email: trimmedEmail, password: password)
                 let userInfo = try await AuthService.shared.getCurrentUser()
@@ -47,6 +48,8 @@ class AuthViewModel: ObservableObject {
                 AuthManager.shared.loginSuccess(userInfo: userInfo)
                 TikTokBusiness.trackEvent("Login")
                 TikTokBusiness.identify(withExternalID: userInfo.user_id, externalUserName: nil, phoneNumber: nil, email: userInfo.email)
+                // Kochava IdentityLink：只传内部用户 ID，不传 PII
+                IdentityLink.register(name: "User ID", identifier: userInfo.user_id)
             } catch {
                 isLoading = false
                 showAuthError(error.localizedDescription)
@@ -74,7 +77,7 @@ class AuthViewModel: ObservableObject {
         isLoading = true
         errorMessage = nil
 
-        Task {
+        _Concurrency.Task {
             do {
                 _ = try await AuthService.shared.emailLogin(email: trimmedEmail, password: password)
                 let userInfo = try await AuthService.shared.getCurrentUser()
@@ -83,6 +86,7 @@ class AuthViewModel: ObservableObject {
                 TikTokBusiness.trackEvent("Registration")
                 TikTokBusiness.trackEvent("Login")
                 TikTokBusiness.identify(withExternalID: userInfo.user_id, externalUserName: nil, phoneNumber: nil, email: userInfo.email)
+                IdentityLink.register(name: "User ID", identifier: userInfo.user_id)
             } catch {
                 isLoading = false
                 showAuthError(error.localizedDescription)
@@ -113,7 +117,7 @@ class AuthViewModel: ObservableObject {
             isLoading = true
             errorMessage = nil
 
-            Task {
+            _Concurrency.Task {
                 do {
                     _ = try await AuthService.shared.appleLogin(
                         identityToken: identityToken,
@@ -125,6 +129,7 @@ class AuthViewModel: ObservableObject {
                     AuthManager.shared.loginSuccess(userInfo: userInfo)
                     TikTokBusiness.trackEvent("Login")
                     TikTokBusiness.identify(withExternalID: userInfo.user_id, externalUserName: nil, phoneNumber: nil, email: userInfo.email)
+                    IdentityLink.register(name: "User ID", identifier: userInfo.user_id)
                 } catch {
                     isLoading = false
                     showAuthError(error.localizedDescription)

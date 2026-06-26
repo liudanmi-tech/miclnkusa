@@ -1,5 +1,5 @@
 {
-  "originHash" : "e8f130fe30ac6cdc940ef06ee1e8535e9f46ffee6aeead1722b9525562f6ce08",
+  "originHash" : "01411ed37aa078b22ca3c0b10ac84e0e27f53e911c2cbe6acb41e84f36d43a6c",
   "pins" : [
     {
       "identity" : "alamofire",
@@ -8,6 +8,33 @@
       "state" : {
         "revision" : "7595cbcf59809f9977c5f6378500de2ad73b7ddb",
         "version" : "5.12.0"
+      }
+    },
+    {
+      "identity" : "apple-swiftpackage-kochavameasurement-xcframework",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/Kochava/Apple-SwiftPackage-KochavaMeasurement-XCFramework",
+      "state" : {
+        "revision" : "5240c6a4d72af169badad1e86debc7cb67590fbb",
+        "version" : "10.0.2"
+      }
+    },
+    {
+      "identity" : "apple-swiftpackage-kochavanetworking-xcframework",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/Kochava/Apple-SwiftPackage-KochavaNetworking-XCFramework",
+      "state" : {
+        "revision" : "d99a6ddefbde3c2e22227ce99f6ee89ebc00b8f2",
+        "version" : "10.0.2"
+      }
+    },
+    {
+      "identity" : "apple-swiftpackage-kochavatracking-xcframework",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/Kochava/Apple-SwiftPackage-KochavaTracking-XCFramework",
+      "state" : {
+        "revision" : "1dad37d989dc6fae5791adb3c4dcf18373338f26",
+        "version" : "10.0.2"
       }
     }
   ],
