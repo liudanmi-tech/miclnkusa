@@ -58,6 +58,8 @@ struct WorkSurvivalGuideApp: App {
 struct SplashCoordinator: View {
     @State private var showSplash = true
     @AppStorage("hasAcceptedTerms") private var hasAcceptedTerms = false
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var attRequested = false
 
     var body: some View {
         ZStack {
@@ -66,6 +68,14 @@ struct SplashCoordinator: View {
                 SplashScreenView(onFinish: { showSplash = false })
             } else if !hasAcceptedTerms {
                 TermsAgreementView(onAccept: { hasAcceptedTerms = true })
+            }
+        }
+        .onChange(of: scenePhase) { newPhase in
+            guard newPhase == .active, !attRequested else { return }
+            attRequested = true
+            print("[ATT-DEBUG] 🎯 scenePhase → .active，发起 ATT 请求")
+            ATTrackingManager.requestTrackingAuthorization { status in
+                print("[ATT-DEBUG] ✅ ATT 回调 result = \(status.rawValue) (0=notDetermined 1=restricted 2=denied 3=authorized)")
             }
         }
     }
@@ -94,18 +104,6 @@ struct SplashScreenView: View {
         }
         .ignoresSafeArea()
         .onAppear {
-            // [ATT-DEBUG] SplashScreenView 出现时 UIWindow 已就绪，此时检查并手动触发 ATT
-            let attStatusOnAppear = ATTrackingManager.trackingAuthorizationStatus
-            print("[ATT-DEBUG] 🪟 SplashScreenView.onAppear — ATT status = \(attStatusOnAppear.rawValue)")
-            if attStatusOnAppear == .notDetermined {
-                print("[ATT-DEBUG] ▶️ 手动调用 requestTrackingAuthorization（诊断用）")
-                ATTrackingManager.requestTrackingAuthorization { status in
-                    print("[ATT-DEBUG] 🔔 ATT 弹窗回调 result = \(status.rawValue) (0=notDetermined 1=restricted 2=denied 3=authorized)")
-                }
-            } else {
-                print("[ATT-DEBUG] ⏭ ATT 已有结果(\(attStatusOnAppear.rawValue))，跳过弹窗")
-            }
-
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
                 onFinish()  // 直接消失，无动画
             }
