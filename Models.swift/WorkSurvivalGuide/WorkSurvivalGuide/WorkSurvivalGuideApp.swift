@@ -29,8 +29,11 @@ struct WorkSurvivalGuideApp: App {
         }
 
         // Kochava MMP initialization
-        // ATT 弹窗由 SplashCoordinator 负责，Kochava 不重复发起（enabledBool 保持默认 false）
-        // 等待 60 秒，让用户有足够时间响应 ATT 弹窗后再读取授权状态
+        // enabledBool = true：让 Kochava 读取 ATT 授权状态（不自己弹窗）
+        // authorizationStatusWaitTimeInterval = 60s：等待 SplashCoordinator 弹完 ATT 弹窗后再读取结果
+        // 流程：SplashCoordinator 在 scenePhase=.active 时触发系统 ATT 弹窗
+        //       Kochava 等 60 秒，届时 ATT 已由用户决定，Kochava 读到 authorized 后带 IDFA 走正常端点
+        Measurement.shared.appTrackingTransparency.enabledBool = true
         Measurement.shared.appTrackingTransparency.authorizationStatusWaitTimeInterval = 60.0
         Measurement.shared.start(appGUIDString: "kochattoon-1ndn6cc95")
 
