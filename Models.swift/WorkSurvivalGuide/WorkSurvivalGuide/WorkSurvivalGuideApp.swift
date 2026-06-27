@@ -10,21 +10,30 @@ import TikTokBusinessSDK
 import KochavaNetworking
 import KochavaMeasurement
 import KochavaTracking
+import AppTrackingTransparency
 
 @main
 struct WorkSurvivalGuideApp: App {
     init() {
+        // ── [ATT-DEBUG] 初始化时刻的 ATT 状态 ──
+        let attStatusAtInit = ATTrackingManager.trackingAuthorizationStatus
+        print("[ATT-DEBUG] 🚀 App.init() — ATT status = \(attStatusAtInit.rawValue) (0=notDetermined 1=restricted 2=denied 3=authorized)")
+
         // TikTok Business SDK initialization
-        // ATT 弹窗由 TikTokBusinessSDK 内部自动触发，项目代码不手动调用 ATT
-        if let tikTokConfig = TikTokConfig(
+        let tikTokConfig = TikTokConfig(
             accessToken: "TTcCUI8nZ5aMr3uLCVKXRVDluc5nX4Rc",
             appId: "6766467422",
             tiktokAppId: "7653662064061202452"
-        ) {
+        )
+        if let cfg = tikTokConfig {
+            print("[ATT-DEBUG] ✅ TikTokConfig 创建成功，开始初始化 SDK")
             #if DEBUG
-            tikTokConfig.debugModeEnabled = true
+            cfg.debugModeEnabled = true
             #endif
-            TikTokBusiness.initializeSdk(tikTokConfig)
+            TikTokBusiness.initializeSdk(cfg)
+            print("[ATT-DEBUG] ✅ TikTokBusiness.initializeSdk() 已调用")
+        } else {
+            print("[ATT-DEBUG] ❌ TikTokConfig 返回 nil — SDK 未初始化，ATT 不会触发！")
         }
 
         // Kochava MMP initialization
@@ -32,6 +41,7 @@ struct WorkSurvivalGuideApp: App {
         // 等待 60 秒，让用户有足够时间响应 TikTok 触发的 ATT 弹窗后再读取授权状态
         Measurement.shared.appTrackingTransparency.authorizationStatusWaitTimeInterval = 60.0
         Measurement.shared.start(appGUIDString: "kochattoon-1ndn6cc95")
+        print("[ATT-DEBUG] ✅ Kochava Measurement.start() 已调用")
 
         _Concurrency.Task { await ImageStyleRepository.shared.fetchIfNeeded() }
     }
@@ -84,6 +94,18 @@ struct SplashScreenView: View {
         }
         .ignoresSafeArea()
         .onAppear {
+            // [ATT-DEBUG] SplashScreenView 出现时 UIWindow 已就绪，此时检查并手动触发 ATT
+            let attStatusOnAppear = ATTrackingManager.trackingAuthorizationStatus
+            print("[ATT-DEBUG] 🪟 SplashScreenView.onAppear — ATT status = \(attStatusOnAppear.rawValue)")
+            if attStatusOnAppear == .notDetermined {
+                print("[ATT-DEBUG] ▶️ 手动调用 requestTrackingAuthorization（诊断用）")
+                ATTrackingManager.requestTrackingAuthorization { status in
+                    print("[ATT-DEBUG] 🔔 ATT 弹窗回调 result = \(status.rawValue) (0=notDetermined 1=restricted 2=denied 3=authorized)")
+                }
+            } else {
+                print("[ATT-DEBUG] ⏭ ATT 已有结果(\(attStatusOnAppear.rawValue))，跳过弹窗")
+            }
+
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
                 onFinish()  // 直接消失，无动画
             }
