@@ -1,56 +1,56 @@
-# Resource：给予与接受反馈（Feedback）
+# Resource: Giving and Receiving Feedback
 
-> 注入时机：技能激活，随 baseline_text 一起进入 system prompt
-> Token 预算：≤400 tokens
-
----
-
-## 核心框架
-
-### SBI 模型（给反馈的黄金结构）
-- **Situation（情境）**：「在昨天的项目会议上」（具体时间地点）
-- **Behavior（行为）**：「你在我还没说完的时候打断了我」（描述行为，不评价人格）
-- **Impact（影响）**：「这让我没能把完整的方案讲清楚，也让我感到被忽视」（说明影响）
-
-不加评判，只描述事实和影响，让对方自己得出结论。
-
-### 激进坦诚矩阵（Radical Candor, Kim Scott）
-- **激进坦诚**：真心关心对方 + 直接挑战 → 最有效的反馈
-- **毁灭性共情**：关心对方但不敢直说 → 帮了倒忙，问题越拖越大
-- **令人不快的攻击**：直接说但没有关心 → 伤害关系
-- **操纵性虚伪**：既不关心也不直说 → 最差选择
-
-### 接收反馈的三种触发器（Thanks for the Feedback）
-- **事实触发**：觉得反馈不准确 → 先听完再核实，不要当场反驳
-- **关系触发**：因为是谁说的而抗拒 → 把内容和来源分开判断
-- **身份触发**：觉得反馈在否定整个自我 → 把「我是个失败的人」换成「这次这件事没做好」
+> Injected at: skill activation, alongside baseline_text in system prompt
+> Token budget: ≤400 tokens
 
 ---
 
-## 关键书目
+## Core Frameworks
 
-- **《激进坦诚》（Radical Candor）**— Kim Scott：反馈是礼物，但要在关系基础上给；「凡是不说的话，最终都会以更大的代价显现」
-- **《感谢反馈》（Thanks for the Feedback）**— Stone & Heen：接受反馈比给反馈更难，识别自己的防御反应是第一步
+### SBI Model (The gold-standard structure for giving feedback)
+- **Situation**: "In yesterday's project meeting..." (specific time and place)
+- **Behavior**: "You interrupted me before I'd finished speaking" (describe the behavior, don't judge the person)
+- **Impact**: "This meant I couldn't present the full plan, and it left me feeling dismissed" (state the effect)
+
+No judgment — just facts and impact. Let the other person draw their own conclusions.
+
+### Radical Candor Matrix (Kim Scott)
+- **Radical Candor**: Genuinely care about the person + challenge directly → Most effective feedback
+- **Ruinous Empathy**: Care but don't say the hard thing → Does more harm than good; problems compound
+- **Obnoxious Aggression**: Direct but no warmth → Damages the relationship
+- **Manipulative Insincerity**: Neither caring nor direct → Worst option
+
+### Three Feedback Triggers (Thanks for the Feedback)
+- **Truth trigger**: "This isn't accurate" → Listen fully first, verify later — don't contest in the moment
+- **Relationship trigger**: Resisting because of *who* said it → Separate the content from the source
+- **Identity trigger**: "This means I'm a failure" → Reframe: "This one thing didn't go well" ≠ "I am fundamentally flawed"
 
 ---
 
-## 实战原则
+## Key Books
 
-1. **私下反馈，公开表扬**：批评性反馈永远一对一，不当众让人难堪
-2. **越快越好**：事情发生后 24-48 小时内反馈效果最好，拖太久会失去情境
-3. **一次只说一件事**：不要把积累的问题一起倒出来
-4. **结尾留空间**：「我说的这些，你有什么想法吗？」让对方有机会回应
-5. **接收反馈时先感谢**：不论认不认同，先说「谢谢你告诉我」，给自己冷静的时间
+- **Radical Candor** — Kim Scott: Feedback is a gift, but it needs a relationship to land. "Everything left unsaid eventually shows up as a bigger problem."
+- **Thanks for the Feedback** — Stone & Heen: Receiving feedback is harder than giving it. Recognizing your own defensive reaction is step one.
 
 ---
 
-## 话术参考
+## Tactical Principles
 
-**用 SBI 给同级反馈：**
-> "我想和你聊一下昨天开会的事（S）。你在我讲方案到一半的时候打断了我（B），这让我没能完整表达我的思路，在大家面前也有点尴尬（I）。你觉得我们可以怎么调整一下？"
+1. **Criticize in private, praise in public**: Critical feedback is always 1-on-1 — never embarrass someone in front of others
+2. **Sooner is better**: Feedback works best within 24–48 hours of the event; too much time and you lose the context
+3. **One thing at a time**: Don't dump a backlog of issues all at once
+4. **Leave room for their response**: End with "How does this land for you?" — give them space to react
+5. **Say thank you when receiving**: Regardless of whether you agree, "Thanks for telling me this" buys you time to process before responding
 
-**向上级提反馈：**
-> "有件事我想说，我有些不确定怎么表达，但我觉得说出来对我们都好。在上周的会上，您当着客户的面指出了我报告的错误，我理解您的出发点，但这个方式让我很难在现场做出反应。以后类似的情况，能不能先私下告诉我？"
+---
 
-**接收了不认同的反馈：**
-> "谢谢你告诉我这个。我需要一些时间消化一下，等我想清楚了，我们再聊聊好吗？"
+## Sample Scripts
+
+**Giving peer feedback using SBI:**
+> "I want to bring up something from yesterday's meeting (S). You cut me off about halfway through my presentation (B), and it meant I couldn't get the full idea across — it was pretty awkward in front of the group (I). How do you think we could handle it differently next time?"
+
+**Giving feedback upward:**
+> "There's something I want to raise — I'm not totally sure how to say it, but I think it matters for both of us. Last week you pointed out an error in my report in front of the client. I understand why you flagged it, but the way it happened made it really hard for me to respond in the moment. Going forward, could you give me a heads up privately in situations like that?"
+
+**Receiving feedback you don't agree with:**
+> "Thank you for telling me this. I need a bit of time to sit with it — can we circle back after I've had a chance to think it through?"

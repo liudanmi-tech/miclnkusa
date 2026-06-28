@@ -1,52 +1,52 @@
-# Resource：应对难相处上级（Difficult Boss）
+# Resource: Managing a Difficult Boss
 
-> 注入时机：技能激活，随 baseline_text 一起进入 system prompt
-> Token 预算：≤400 tokens
-
----
-
-## 核心框架
-
-### 四类难相处上级（Managing Up, Mary Abbajay）
-- **微管理者**：不信任，需要掌控一切 → 主动汇报频率，减少他的不确定感
-- **工作狂**：以加班衡量投入度 → 展示产出质量而非时长，设定可见边界
-- **情绪炸弹**：心情决定工作氛围 → 不吸收情绪，只回应事实，等情绪过去再谈事
-- **无能者**：能力不足或信息不足 → 成为他的信息来源，帮他看起来成功
-
-### 向上管理三原则
-1. **让他觉得是他的想法**：提建议时包装成「我在想您之前说的 X，延伸了一下，是否可行？」
-2. **可见度 > 努力**：向上管理本质是信息管理，让上级知道你做了什么
-3. **不在情绪中沟通**：等对方情绪平稳后，选择一对一私下环境谈重要问题
+> Injected at: skill activation, alongside baseline_text in system prompt
+> Token budget: ≤400 tokens
 
 ---
 
-## 关键书目
+## Core Frameworks
 
-- **《Managing Up》**— Mary Abbajay
-  识别上司类型，针对性调整自己的沟通风格，而非试图改变对方。
+### Four Types of Difficult Bosses (Managing Up, Mary Abbajay)
+- **The Micromanager**: Doesn't trust anyone, needs total control → Proactively over-communicate; reduce their uncertainty
+- **The Workaholic**: Measures commitment by hours → Demonstrate output quality, not time logged; set visible boundaries
+- **The Volcano**: Mood dictates the work climate → Don't absorb their emotions; respond only to facts; wait for the storm to pass before discussing substance
+- **The Incompetent**: Lacks skills or information → Become their information source; help them look successful
 
-- **《工作中的情商》（Working with Emotional Intelligence）**— Daniel Goleman
-  情绪不是对方的问题，是你如何响应的问题；自我管理是应对难相处上级的核心能力。
-
----
-
-## 实战原则
-
-1. **记录一切**：重要指示用邮件确认，「如您所说，我们的方向是 X，我会按这个推进」
-2. **选择战场**：不在公开场合反驳，私下 1v1 才是真正沟通的地方
-3. **找盟友**：同组中有没有和上级关系好的人？侧面了解他的优先级和雷区
-4. **给选择题而非问答题**：「这件事 A 方案还是 B 方案？」比「这件事我该怎么做？」更容易得到清晰答复
-5. **知道何时离开**：如果已经影响心理健康且无改善可能，离开是理性选择而非失败
+### Three Principles of Managing Up
+1. **Make it feel like their idea**: Frame suggestions as "I was thinking about what you said about X, and I expanded on it — does this make sense?"
+2. **Visibility > effort**: Managing up is fundamentally information management — make sure your manager knows what you've done
+3. **Never communicate in the heat of the moment**: Wait for calm, choose a private 1-on-1 setting for anything important
 
 ---
 
-## 话术参考
+## Key Books
 
-**被当众批评后私下沟通：**
-> "我想私下和您聊一下，在会上您提到 X，我想更清楚地理解您的期望，这样我下次能做得更好。"
+- **Managing Up** — Mary Abbajay
+  Identify your boss's type, then adapt your style — don't try to change them.
 
-**微管理者汇报技巧：**
-> "我这边打算这样推进：[步骤]，有没有需要调整的地方？"（主动汇报，减少他来问）
+- **Working with Emotional Intelligence** — Daniel Goleman
+  Other people's emotions aren't the problem; how you respond is. Self-regulation is the core skill when dealing with difficult managers.
 
-**情绪化上级冷处理：**
-> （不立即回应，沉默等待）"我理解您对这个结果不满意，我们什么时候方便坐下来复盘一下？"
+---
+
+## Tactical Principles
+
+1. **Document everything**: Confirm important directives by email — "As we discussed, the direction is X, and I'll proceed accordingly"
+2. **Choose your battlefield**: Never push back publicly; a private 1-on-1 is where real conversations happen
+3. **Find allies**: Is there someone on the team who has a good relationship with your manager? Learn their priorities and tripwires through the side door
+4. **Give choices, not open questions**: "Should we go with Option A or B?" gets a cleaner answer than "What should I do here?"
+5. **Know when to leave**: If it's affecting your mental health with no sign of improvement, leaving is a rational decision — not a failure
+
+---
+
+## Sample Scripts
+
+**Following up privately after a public criticism:**
+> "I'd like to connect privately. You mentioned X in the meeting — I want to make sure I understand your expectations clearly so I can do better next time."
+
+**Proactive updates for a micromanager:**
+> "Here's how I'm planning to move forward: [steps]. Is there anything you'd like me to adjust?" (Volunteer the update before they ask.)
+
+**Defusing a volatile manager:**
+> *(Don't respond immediately. Let silence land.)* "I understand you're not happy with this outcome. When would be a good time to sit down and do a proper debrief?"

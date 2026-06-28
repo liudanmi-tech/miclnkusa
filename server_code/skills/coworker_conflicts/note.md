@@ -1,50 +1,50 @@
-# Note 模板：同事冲突（Coworker Conflicts）
+# Note: Coworker Conflicts
 
-## 技能说明
-适用场景：与同事发生摩擦、抢功劳、背刺、沟通失效、项目合作中产生矛盾。
-
----
-
-## 基础信息字段（baseline_fields）
-
-| 字段 | 标签 | 必填 | 说明 |
-|------|------|------|------|
-| `conflict_description` | 冲突描述 | ✅ | 核心矛盾是什么，发生了什么 |
-| `relationship_type` | 关系类型 | ✅ | 平级同事/协作方/竞争对手/前同事 |
-| `conflict_duration` | 持续时间 | ✅ | 是单次事件还是已经持续了一段时间 |
-| `desired_outcome` | 期望结果 | ❌ | 想修复关系、解决问题，还是保持距离 |
-| `escalation_considered` | 是否考虑升级 | ❌ | 是否考虑找上级或 HR 介入 |
+## About This Skill
+Use when: you have friction with a colleague, someone took credit for your work, there's a backstabbing dynamic, communication has broken down, or a project collaboration has created tension.
 
 ---
 
-## AI 初始化问卷话术
+## Baseline Fields
 
-**开场白：**
-> "职场关系很复杂，告诉我发生了什么，我们来想想怎么处理。"
-
-**问卷问题（只问缺口字段）：**
-1. `conflict_description` 缺失：「能具体说说发生了什么吗？」
-2. `relationship_type` 缺失：「这个人和你是什么关系？平级同事、需要合作的其他部门，还是有竞争关系？」
-3. `conflict_duration` 缺失：「这是一次性的事件，还是已经持续一段时间了？」
-4. `desired_outcome` 缺失：「你希望这件事最终怎么解决？是想和对方修复关系，还是只是想把眼前这件事处理掉？」
+| Field | Label | Required | Description |
+|-------|-------|----------|-------------|
+| `conflict_description` | Conflict Description | ✅ | What the core friction is and what happened |
+| `relationship_type` | Relationship Type | ✅ | Peer / collaborator from another team / rival / former colleague |
+| `conflict_duration` | Duration | ✅ | Single incident vs. ongoing pattern |
+| `desired_outcome` | Desired Outcome | ❌ | Repair relationship, solve the problem, or keep distance |
+| `escalation_considered` | Considering Escalation | ❌ | Whether you're thinking of involving a manager or HR |
 
 ---
 
-## baseline_text 示例
+## AI Onboarding Script
+
+**Opening:**
+> "Workplace relationships are complicated — tell me what happened, and let's figure out how to handle it."
+
+**Questions (only for missing fields):**
+1. `conflict_description` missing: "Can you walk me through specifically what happened?"
+2. `relationship_type` missing: "What's your relationship with this person? Direct peer, someone from another team you collaborate with, or is there some competition between you?"
+3. `conflict_duration` missing: "Was this a one-time thing, or has it been building for a while?"
+4. `desired_outcome` missing: "How do you want this to end up? Do you want to repair things with them, or just resolve the immediate issue and create some distance?"
+
+---
+
+## Sample baseline_text
 
 ```
-冲突描述：同事在汇报中把我做的方案说成是他的想法，上级还当场表扬了他
-关系类型：平级同事，同一个项目组
-持续时间：这是第二次了，上次是小事没说，这次忍不了了
-期望结果：让他知道这样不行，修复工作关系，不想升级成公开冲突
-是否升级：暂时不想，想先直接沟通
+Conflict: Colleague presented my proposal in the debrief as if it were their idea — manager praised them for it
+Relationship: Peer, same project team
+Duration: Second time it's happened — let the first one go, can't let this one slide
+Desired outcome: Let them know this isn't okay, repair the working relationship, avoid public confrontation
+Escalation: Not yet — want to try direct conversation first
 ```
 
 ---
 
-## 更新触发条件
+## Update Triggers
 
-- 提到冲突已解决或升级
-- 提到对方离职或换组
-- 提到开始新的合作关系
-- 提到同一对象发生了新的摩擦
+- Conflict resolved or escalated
+- Person leaves the team or company
+- New collaboration begins
+- Fresh friction with the same person

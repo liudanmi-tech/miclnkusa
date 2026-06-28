@@ -1,49 +1,49 @@
-# Note 模板：应对难相处上级（Difficult Boss）
+# Note: Managing a Difficult Boss
 
-## 技能说明
-适用场景：上级管理风格强硬、微管理、情绪不稳定、偏心、画大饼不兑现，或存在职场欺凌。
-
----
-
-## 基础信息字段（baseline_fields）
-
-| 字段 | 标签 | 必填 | 说明 |
-|------|------|------|------|
-| `boss_style` | 上级管理风格 | ✅ | 微管理/强势/情绪化/回避型/偏心等 |
-| `main_issue` | 主要问题 | ✅ | 当前最核心的一个矛盾点 |
-| `relationship_history` | 关系历史 | ❌ | 是否曾经有过好的阶段，何时变差 |
-| `job_dependency` | 职位依赖度 | ❌ | 能否换组/换公司，影响应对策略选择 |
-| `escalation_risk` | 升级风险 | ❌ | 是否已经影响到绩效或存在 PIP 风险 |
+## About This Skill
+Use when: your manager is controlling, volatile, plays favorites, over-promises and under-delivers, or creates a hostile work environment.
 
 ---
 
-## AI 初始化问卷话术
+## Baseline Fields
 
-**开场白：**
-> "要帮你应对这个局面，我需要先了解你上级的风格和你们之间的情况。我从你之前提到的信息整理了一些，请确认是否准确。"
-
-**问卷问题（只问缺口字段）：**
-1. `boss_style` 缺失：「你上级最突出的管理风格是什么？比如微管理、情绪化、偏心某人，或者干脆就是不靠谱？」
-2. `main_issue` 缺失：「目前最让你头疼的一个具体问题是什么？」
-3. `job_dependency` 缺失：「如果这个情况一直改善不了，你有换组或换公司的选项吗？」
-4. `escalation_risk` 缺失：「这个情况有没有影响到你的绩效评级或工作稳定性？」
+| Field | Label | Required | Description |
+|-------|-------|----------|-------------|
+| `boss_style` | Management Style | ✅ | Micromanager / domineering / volatile / avoidant / plays favorites |
+| `main_issue` | Core Problem | ✅ | The single most pressing source of conflict right now |
+| `relationship_history` | History | ❌ | Was it ever good? When did it turn? |
+| `job_dependency` | Job Mobility | ❌ | Can you transfer or leave? Shapes strategy options |
+| `escalation_risk` | Escalation Risk | ❌ | Is your performance rating or job security at risk? |
 
 ---
 
-## baseline_text 示例
+## AI Onboarding Script
+
+**Opening:**
+> "To help you navigate this, I need to understand your manager's style and the dynamics between you. I've pulled together a few things from what you've shared before — please confirm if they're accurate."
+
+**Questions (only for missing fields):**
+1. `boss_style` missing: "What's your manager's most notable style? Micromanages everything, blows up emotionally, plays favorites, or just generally unreliable?"
+2. `main_issue` missing: "What's the one specific thing that's bothering you most right now?"
+3. `job_dependency` missing: "If things don't improve, do you have the option to transfer or leave?"
+4. `escalation_risk` missing: "Has this situation started affecting your performance ratings or job security?"
+
+---
+
+## Sample baseline_text
 
 ```
-上级风格：微管理 + 情绪化，高压力时容易当众批评
-主要问题：每次汇报都被改方向，做了白做，消耗很大
-关系历史：入职前半年还可以，晋升之后关系变差
-职位依赖度：换组可能，但当前项目绑定，至少半年内不好动
-升级风险：上次绩效被评了 C，有后顾之忧
+Manager style: Micromanager + volatile, publicly criticizes people under pressure
+Core problem: Direction changes every debrief — work gets thrown out, very draining
+Relationship history: First six months were fine, things soured after my promotion
+Job mobility: Transfer is possible, but tied to current project — can't move for ~6 months
+Escalation risk: Last review was a C — feeling vulnerable
 ```
 
 ---
 
-## 更新触发条件
+## Update Triggers
 
-- 提到上级发生变化（离职、调岗、新来的上级）
-- 提到绩效结果更新（PIP、晋升、绩效改善）
-- 提到已经换组或离职
+- Manager changes (leaves, transfers, new manager arrives)
+- Performance outcome updates (PIP, promotion, rating improvement)
+- You transfer or leave the company

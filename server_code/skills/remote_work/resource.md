@@ -1,59 +1,60 @@
-# Resource：远程工作（Remote Work）
+# Resource: Remote Work
 
-> 注入时机：技能激活，随 baseline_text 一起进入 system prompt
-> Token 预算：≤400 tokens
-
----
-
-## 核心框架
-
-### 异步优先原则（Async-First）
-远程团队的核心挑战不是技术，而是沟通默契。
-- **同步（会议/实时消息）**：适合决策、头脑风暴、情感联结
-- **异步（文档/录屏/留言）**：适合信息传递、进展更新、任务协作
-健康的远程团队应该 70% 异步，30% 同步，而不是反过来。
-
-### 远程存在感三要素（Working Out Loud）
-远程工作中"看不见"是最大风险，主动让团队知道你在做什么：
-1. **可见性**：定期分享进展（每周同步、写工作日志）
-2. **贡献度**：明确说出"这是我做的"，不要假设别人知道
-3. **连接感**：不只谈工作，也需要非正式的社交（1v1、水冷器聊天）
+> Injected at: skill activation, alongside baseline_text in system prompt
+> Token budget: ≤400 tokens
 
 ---
 
-## 关键书目
+## Core Frameworks
 
-- **《Remote》**— Jason Fried & David Heinemeier Hansson（37signals 创始人）
-  远程工作的最大敌人是不信任，而非距离；减少会议，增加文档输出。
+### Async-First Principle
+The core challenge of remote teams isn't technology — it's communication norms.
+- **Synchronous (meetings / real-time messages)**: Best for decisions, brainstorming, relationship-building
+- **Asynchronous (docs / recordings / written updates)**: Best for information sharing, progress updates, task collaboration
 
-- **《深度工作》（Deep Work）**— Cal Newport
-  专注力是稀缺资源；时间块（Time Blocking）是远程工作者保护高价值工作的关键方法。
+Healthy remote teams are ~70% async and 30% sync — not the other way around.
 
-- **《高效能人士的七个习惯》中的"要事第一"**
-  远程工作中干扰更多，每天开始前明确 1-3 件最重要的事，其余都是噪音。
-
----
-
-## 实战原则
-
-1. **每周一发工作计划，每周五发工作总结**：让上级和团队知道你做了什么，消除"眼不见心不想"的风险
-2. **减少会议，增加写作**：能写成文档的就不开会，写好的文档是远程团队的资产
-3. **建立仪式感区分工作和生活**：固定上班时间、换工作服、出门散步作为"上下班"信号
-4. **主动 1v1**：不等对方约，主动和上级及关键同事保持定期 1v1，建立关系而不仅靠工作联系
-5. **摄像头和声音质量很重要**：好的音视频设备直接影响会议体验和他人对你的专业感知
+### Three Pillars of Remote Visibility (Working Out Loud)
+Invisibility is the biggest risk in remote work. Make sure your team knows what you're doing:
+1. **Visibility**: Share progress regularly (weekly syncs, work logs)
+2. **Attribution**: Say "here's what I built" — don't assume people will connect the dots
+3. **Connection**: Talk about more than work — informal touchpoints matter (1-on-1s, virtual water cooler)
 
 ---
 
-## 话术参考
+## Key Books
 
-**每周进展同步（飞书/Slack 消息）：**
-> "本周更新：① 完成 X 功能开发，已提 PR；② 参与 Y 需求评审，输出了设计文档（链接）；③ 下周计划推进 Z。"
+- **Remote** — Jason Fried & David Heinemeier Hansson (37signals founders)
+  The biggest enemy of remote work is distrust, not distance. Cut meetings; increase written output.
 
-**处理异步消息延迟的预期管理：**
-> "我今天下午 2-5 点有集中工作时间，消息会晚些回复，紧急的事可以打电话。"
+- **Deep Work** — Cal Newport
+  Focus is scarce. Time blocking — protecting long stretches of uninterrupted work — is how remote workers defend high-value output.
 
-**在会议中建立存在感：**
-> 每次会议开始时主动发言一次，哪怕只是「我这边没有新进展，但我有一个问题想确认一下...」
+- **The 7 Habits of Highly Effective People (Put First Things First)**
+  Remote brings more distractions. Start each day by naming 1–3 things that truly matter. Everything else is noise.
 
-**推动减少无效会议：**
-> "这个问题我觉得可以先在文档里对齐，不用单独开会，我先写个方案出来大家异步看，有疑问再约时间聊？"
+---
+
+## Tactical Principles
+
+1. **Monday plan, Friday wrap-up**: Let your manager and team know what you're working on and what you accomplished — eliminate "out of sight, out of mind"
+2. **Write more, meet less**: If it can be a document, don't make it a meeting. Good documentation is a remote team's most durable asset
+3. **Build rituals to separate work and life**: Fixed start time, get dressed, take a walk as your "commute" — signal to yourself when work begins and ends
+4. **Schedule 1-on-1s proactively**: Don't wait to be invited. Regular 1-on-1s with your manager and key colleagues builds the relationship beyond task-level contact
+5. **Invest in good audio/video**: Your mic and camera quality directly affects how people perceive your professionalism in meetings
+
+---
+
+## Sample Scripts
+
+**Weekly progress update (Slack / Teams):**
+> "Weekly update: ① Completed X feature, PR submitted; ② Joined Y requirements review, output design doc (link); ③ Next week: pushing forward on Z."
+
+**Setting async response expectations:**
+> "I have a focused work block from 2–5pm today, so I'll be slower on messages. For anything urgent, feel free to call."
+
+**Building visibility in meetings:**
+> Open every meeting with at least one contribution — even if it's just: "Nothing new on my end, but I have a quick question I wanted to confirm..."
+
+**Pushing to reduce unnecessary meetings:**
+> "I think we can align on this asynchronously — let me draft a quick doc and everyone can comment. If there are still open questions after that, we can set up a call."

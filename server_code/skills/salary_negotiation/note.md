@@ -1,56 +1,56 @@
-# Note 模板：薪资谈判（Salary Negotiation）
+# Note: Salary Negotiation
 
-## 技能说明
-适用场景：与当前雇主谈涨薪、接受新 offer 前谈判、绩效后争取晋升薪资。
-
----
-
-## 基础信息字段（baseline_fields）
-
-| 字段 | 标签 | 必填 | 说明 |
-|------|------|------|------|
-| `work_years` | 工作年限 | ✅ | 总工作年限 + 当前领域年限 |
-| `current_salary` | 当前薪资 | ✅ | 月薪/年薪，含结构（base + bonus） |
-| `target_salary` | 期望薪资 | ✅ | 目标区间 + 心理底线 |
-| `competing_offer` | 竞争筹码 | ❌ | 其他 offer 金额或面试进展 |
-| `company_type` | 公司类型 | ❌ | 大厂/中型/创业，薪资弹性参考 |
-| `risk_tolerance` | 跳槽意愿 | ❌ | 能否接受跳槽，影响谈判底气 |
+## About This Skill
+Use when: negotiating a raise with your current employer, discussing compensation before accepting a new offer, or pushing for a promotion after a performance review.
 
 ---
 
-## AI 初始化问卷话术
+## Baseline Fields
 
-首次激活时从 KG 检索草稿，推给用户确认，再补充缺口字段：
-
-**开场白：**
-> "在帮你制定谈薪策略之前，我需要了解你的基本情况。我从你之前的对话整理了一些，请确认是否准确，再补充几个我还不知道的信息。"
-
-**问卷问题（只问缺口字段）：**
-1. `work_years` 缺失：「你目前工作几年了？主要做什么方向？」
-2. `current_salary` 缺失：「当前薪资大概是多少区间？月薪还是年薪？有 bonus 吗？」
-3. `target_salary` 缺失：「这次想谈到多少？有心理底线吗？」
-4. `competing_offer` 缺失：「手上有其他 offer 或在面试中吗？（没有也没关系）」
-5. `risk_tolerance` 缺失：「如果这次谈不成，你愿意考虑换公司吗？」
+| Field | Label | Required | Description |
+|-------|-------|----------|-------------|
+| `work_years` | Years of Experience | ✅ | Total years worked + years in current field |
+| `current_salary` | Current Salary | ✅ | Monthly/annual, including structure (base + bonus) |
+| `target_salary` | Target Salary | ✅ | Desired range + your walk-away number |
+| `competing_offer` | Competing Offers | ❌ | Other offer amounts or interview progress |
+| `company_type` | Company Type | ❌ | Large corp/mid-size/startup — affects salary flexibility |
+| `risk_tolerance` | Willingness to Leave | ❌ | Whether you'd leave if negotiation fails — affects leverage |
 
 ---
 
-## baseline_text 示例
+## AI Onboarding Script
+
+On first activation, retrieve a draft from KG, present it to the user for confirmation, then fill in missing fields:
+
+**Opening:**
+> "Before I help you build a negotiation strategy, I need to understand your situation. I've pulled together some details from our previous conversations — please confirm whether they're accurate, and fill in anything I'm missing."
+
+**Questions (only for missing fields):**
+1. `work_years` missing: "How many years have you been working? What's your main area?"
+2. `current_salary` missing: "What's your current salary range — monthly or annual? Do you have a bonus?"
+3. `target_salary` missing: "What number are you aiming for? Do you have a walk-away number?"
+4. `competing_offer` missing: "Do you have any other offers or active interviews? (No worries if not.)"
+5. `risk_tolerance` missing: "If this negotiation doesn't go well, would you consider leaving?"
+
+---
+
+## Sample baseline_text
 
 ```
-工作年限：5年（后端工程师，主攻支付系统）
-当前薪资：25k/月（纯 base，无 bonus）
-期望薪资：33-35k，底线 28k
-竞争筹码：字节 offer 32k（待签）
-公司类型：中型互联网，薪资弹性一般
-跳槽意愿：有，但优先留下
+Years of experience: 5 years (backend engineer, payments focus)
+Current salary: $120K/year (base only, no bonus)
+Target salary: $155–165K, walk-away at $140K
+Competing offer: Offer from Company X at $150K (pending signing)
+Company type: Mid-size tech, moderate salary flexibility
+Willingness to leave: Yes, but prefer to stay
 ```
 
 ---
 
-## 更新触发条件（退出时检测 state_change 节点）
+## Update Triggers (detect state_change on exit)
 
-对话中出现以下情况 → 退出时提示用户确认更新 baseline：
-- 提到已完成涨薪谈判，薪资已变
-- 提到换工作 / 入职新公司
-- 提到拿到 / 放弃某个 offer
-- 提到薪资目标发生调整
+Prompt user to confirm a baseline update if the conversation includes:
+- Completed salary negotiation, salary has changed
+- Changed jobs / joined a new company
+- Received or rejected an offer
+- Revised salary target

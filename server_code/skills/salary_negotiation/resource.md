@@ -1,54 +1,54 @@
-# Resource：薪资谈判（Salary Negotiation）
+# Resource: Salary Negotiation
 
-> 注入时机：技能激活，随 baseline_text 一起进入 system prompt
-> Token 预算：≤400 tokens（中文约 800 字）
-
----
-
-## 核心框架
-
-### BATNA（最佳替代方案）
-谈判前必须明确：谈不成时你的最优选择是什么？BATNA 越强，底气越足。无竞争 offer 时可用市场行情数据替代。
-
-### 锚定效应（Anchoring）
-先报价的一方设定心理锚点。主动出价时给出比目标值高 15-20% 的锚定值；对方先出价后，不急于接受，用「我需要重新考虑一下」争取时间。
-
-### ZOPA（可协议区间）
-双方都能接受的薪资区间。谈判本质是找到让双方都有获得感的 ZOPA，而非零和博弈。
+> Injected at: skill activation, alongside baseline_text in system prompt
+> Token budget: ≤400 tokens
 
 ---
 
-## 关键书目
+## Core Frameworks
 
-- **《绝不妥协》（Never Split the Difference）**— Chris Voss（前 FBI 人质谈判专家）
-  出价后保持沉默，让对方先打破沉默；战术性同理心让对方感到被理解后更愿让步。
+### BATNA (Best Alternative to a Negotiated Agreement)
+Before any negotiation, know your best option if talks fail. The stronger your BATNA, the more leverage you have. If you don't have competing offers, use market data as your alternative.
 
-- **《谈判力》（Getting to Yes）**— Fisher & Ury
-  聚焦利益而非立场；寻找共赢方案；对事不对人。
+### Anchoring Effect
+Whoever makes the first offer sets the psychological anchor. When you go first, anchor 15–20% above your target. When they go first, don't rush to accept — use "I need to think about this" to buy time.
 
----
-
-## 实战原则
-
-1. **出价后沉默**：说完期望薪资，等对方开口，不要自己填满沉默
-2. **给区间不给精确值**：「28-33k」比「30k」给对方更多空间，也显得更专业
-3. **先谈数字再谈其他**：base 确定后，再谈 bonus / 期权 / 假期
-4. **表达热情但不暴露急迫**：「我对这个机会很感兴趣，但薪资方面还有些差距」
-5. **推进而非施压**：「我们能找到一个让双方都满意的方案吗？」优于「必须达到这个数字」
-6. **书面确认**：口头协议完成后立即要求邮件确认
+### ZOPA (Zone of Possible Agreement)
+The salary range both parties can accept. Negotiation is about finding a ZOPA where both sides feel they gained something — not a zero-sum game.
 
 ---
 
-## 话术参考
+## Key Books
 
-**对方问「你期望薪资多少？」**
-> "根据我的经验和市场行情，我期望在 X 到 X 的区间，具体看整体 package 的结构。"
+- **Never Split the Difference** — Chris Voss (former FBI hostage negotiator)
+  After making your ask, stay silent — let the other side break the silence. Tactical empathy makes people more willing to give ground.
 
-**对方出价低于预期**
-> "我很感谢这个 offer，对公司也很有兴趣。但这个数字和我的预期有些差距，有没有调整空间？"
+- **Getting to Yes** — Fisher & Ury
+  Focus on interests, not positions. Look for win-win solutions. Separate the people from the problem.
 
-**用竞争 offer 作筹码**
-> "手上有另一个 offer 是 X，但我更倾向于加入你们，如果薪资能到 X，我可以很快做决定。"
+---
 
-**谈判遇到「没有预算」**
-> "我理解预算有限制。除了 base，有没有可能在 bonus 目标或期权上有一些调整？"
+## Tactical Principles
+
+1. **Go silent after your ask**: Say your number, then wait — don't fill the silence yourself
+2. **Give a range, not a precise number**: "140–160K" is more professional and gives the other side room
+3. **Settle base first, then extras**: Lock in base salary before discussing bonus, equity, or vacation
+4. **Show enthusiasm without showing desperation**: "I'm very interested in this opportunity, but there's still a gap on compensation"
+5. **Advance, don't pressure**: "Can we find something that works for both of us?" beats "I need this number"
+6. **Get it in writing**: After any verbal agreement, ask for email confirmation immediately
+
+---
+
+## Sample Scripts
+
+**When asked "What are your salary expectations?"**
+> "Based on my experience and market rates, I'm looking in the range of X to X — the exact number depends on the full package structure."
+
+**When the offer comes in lower than expected:**
+> "I appreciate the offer and I'm genuinely excited about the company. But there's a gap between this and my expectations — is there room to adjust?"
+
+**Using a competing offer as leverage:**
+> "I do have another offer at X, but I'd prefer to join your team. If you can get to X, I can move quickly."
+
+**When they say "there's no budget":**
+> "I understand budget is constrained. Beyond base, is there any flexibility on the bonus target or equity?"

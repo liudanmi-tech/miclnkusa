@@ -1,50 +1,50 @@
-# Note 模板：远程工作（Remote Work）
+# Note: Remote Work
 
-## 技能说明
-适用场景：全远程/混合远程工作的沟通效率、团队协作、存在感建立、孤独感和边界管理。
-
----
-
-## 基础信息字段（baseline_fields）
-
-| 字段 | 标签 | 必填 | 说明 |
-|------|------|------|------|
-| `remote_type` | 远程类型 | ✅ | 全远程 / 混合（几天在家几天到公司） |
-| `main_challenge` | 主要挑战 | ✅ | 沟通效率/存在感/专注度/孤独/边界混淆 |
-| `team_timezone` | 时区分布 | ✅ | 团队成员主要在哪个时区，有无时差 |
-| `communication_tools` | 沟通工具 | ❌ | Slack/飞书/钉钉/Zoom + 异步/同步偏好 |
-| `home_setup` | 工作环境 | ❌ | 家里有无独立工作空间，影响专注度建议 |
+## About This Skill
+Use when: dealing with communication efficiency, team collaboration, visibility, loneliness, or boundary management in a fully remote or hybrid setup.
 
 ---
 
-## AI 初始化问卷话术
+## Baseline Fields
 
-**开场白：**
-> "远程工作的挑战因人因团队差异很大，告诉我你的情况，我来帮你找到最适合你的方式。"
-
-**问卷问题（只问缺口字段）：**
-1. `remote_type` 缺失：「你是完全在家工作，还是混合办公？」
-2. `main_challenge` 缺失：「目前最让你头疼的是什么？比如和同事沟通费劲、感觉自己被忽略、工作和生活分不清，或者专注不下去？」
-3. `team_timezone` 缺失：「你的团队主要在哪里？有没有跨时区合作的情况？」
-4. `communication_tools` 缺失：「你们团队主要用什么工具沟通？更偏向实时沟通还是异步？」
+| Field | Label | Required | Description |
+|-------|-------|----------|-------------|
+| `remote_type` | Remote Setup | ✅ | Fully remote / hybrid (how many days home vs. office) |
+| `main_challenge` | Main Challenge | ✅ | Communication / visibility / focus / loneliness / work-life blur |
+| `team_timezone` | Team Timezones | ✅ | Where teammates are located, any time differences |
+| `communication_tools` | Communication Tools | ❌ | Slack / Teams / Zoom + async vs. sync preferences |
+| `home_setup` | Work Environment | ❌ | Dedicated home office or not — affects focus recommendations |
 
 ---
 
-## baseline_text 示例
+## AI Onboarding Script
+
+**Opening:**
+> "Remote work challenges vary a lot depending on your setup and your team — tell me about your situation and I'll help you find what works best for you."
+
+**Questions (only for missing fields):**
+1. `remote_type` missing: "Are you fully remote, or do you have a hybrid schedule?"
+2. `main_challenge` missing: "What's the main thing frustrating you right now? Communication issues, feeling invisible, work bleeding into personal time, or something else?"
+3. `team_timezone` missing: "Where is your team mostly located? Are you dealing with any time zone gaps?"
+4. `communication_tools` missing: "What tools does your team use? Are you more of a real-time or async culture?"
+
+---
+
+## Sample baseline_text
 
 ```
-远程类型：全远程（已 2 年）
-主要挑战：存在感建立难，感觉被忽略；工作和生活边界模糊
-时区分布：团队在北京，我在成都（同时区，无时差）
-沟通工具：飞书，偏实时同步；开会多，异步习惯弱
-工作环境：家里有独立书房，但猫会进来打扰
+Remote setup: Fully remote (2 years)
+Main challenge: Hard to stay visible, often feel overlooked; work-life boundaries are blurry
+Team: All based in same city, no time zone difference
+Tools: Slack — sync-heavy culture, lots of meetings, weak async habits
+Home setup: Dedicated home office but easily distracted
 ```
 
 ---
 
-## 更新触发条件
+## Update Triggers
 
-- 提到远程政策变化（改为到岗/新增弹性）
-- 提到换了新工作，新公司远程文化不同
-- 提到搬到了新城市或新时区
-- 提到团队结构发生变化
+- Remote policy changes (return to office, new flexibility options)
+- New job with a different remote culture
+- Relocate to a new city or time zone
+- Team structure changes

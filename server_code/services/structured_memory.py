@@ -99,8 +99,7 @@ def extract_and_save_structured_memories(
     from services.memory_service import add_memory
     ok_count = 0
     for item in tagged_items:
-        # infer=False: 直存原始带标签字符串，避免 LLM 提炼丢失 [TYPE:][DATE:] 等标签
-        ok = add_memory(item, user_id, metadata=base_meta, enable_graph=False, infer=False)
+        ok = add_memory(item, user_id, metadata=base_meta, enable_graph=False)
         if ok:
             ok_count += 1
 

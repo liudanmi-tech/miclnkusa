@@ -1,57 +1,57 @@
-# Resource：绩效评估（Performance Reviews）
+# Resource: Performance Reviews
 
-> 注入时机：技能激活，随 baseline_text 一起进入 system prompt
-> Token 预算：≤400 tokens
-
----
-
-## 核心框架
-
-### STAR 方法（描述成就的通用结构）
-- **Situation**（背景）：当时的情况是什么？
-- **Task**（任务）：你负责的具体任务是什么？
-- **Action**（行动）：你具体做了什么？（重点：你的贡献，不是"我们"）
-- **Result**（结果）：产生了什么可量化的结果？
-
-### 晋升材料（Brag Document）
-绩效季前 1 个月开始整理：记录所有成就、数据、正向反馈邮件。
-评估时 HR 和上级看的是你的"账单"，不是他们的记忆。
-
-### 绩效谈话四步法
-1. **主动开局**：不要等上级定调，先表达你对本周期的总结
-2. **用数字说话**：「优化了流程」不如「将处理时间从 5 天降至 2 天」
-3. **连接公司目标**：说明你的成就如何支持了团队或公司目标
-4. **明确下一步**：主动提出下个周期的目标和晋升路径讨论
+> Injected at: skill activation, alongside baseline_text in system prompt
+> Token budget: ≤400 tokens
 
 ---
 
-## 关键书目
+## Core Frameworks
 
-- **《激进坦诚》（Radical Candor）**— Kim Scott
-  绩效反馈应该坦诚但不残忍；收到低评时，先听完再回应，不要防御性争辩。
+### STAR Method (Universal structure for describing achievements)
+- **Situation**: What was the context?
+- **Task**: What specific task were you responsible for?
+- **Action**: What did you actually do? (Key: emphasize *your* contribution, not "we")
+- **Result**: What measurable outcome did it produce?
 
-- **《感谢反馈》（Thanks for the Feedback）**— Douglas Stone & Sheila Heen
-  低评常触发三种防御反应：觉得不准确（事实触发）、觉得不公平（关系触发）、觉得在否定自我（身份触发）。识别自己的反应类型，再冷静回应。
+### The Brag Document
+Start building this 1 month before review season: log every achievement, data point, and positive feedback email.
+During the review, HR and your manager are reading your "receipts" — not relying on their memory.
+
+### Four-Step Review Conversation
+1. **Open proactively**: Don't wait for your manager to set the tone — lead with your own summary of the cycle
+2. **Lead with numbers**: "Improved the process" < "Cut processing time from 5 days to 2 days"
+3. **Connect to company goals**: Show how your achievements supported team or company objectives
+4. **Name the next step**: Proactively propose goals for next cycle and open the promotion path discussion
 
 ---
 
-## 实战原则
+## Key Books
 
-1. **不等绩效季才让上级知道你的成果**：每周/每月主动分享进展
-2. **数字优先**：每个成就尽量量化，哪怕是「减少了约 30% 的沟通成本」也比「改善了沟通」有力
-3. **360 反馈要提前管理**：在评估前一个月，主动向关键同事确认关系
-4. **评级低时先理解再争辩**：「能帮我更具体地说明，在哪些方面我还有差距吗？」
-5. **把晋升对话和绩效对话分开**：绩效谈本期表现，晋升谈未来计划，不要混在一起
+- **Radical Candor** — Kim Scott
+  Feedback should be honest, not brutal. When you receive a low rating, listen fully before responding — don't get defensive.
+
+- **Thanks for the Feedback** — Douglas Stone & Sheila Heen
+  Low ratings trigger three defensive reactions: "That's not accurate" (truth trigger), "That's unfair given who you are" (relationship trigger), "You're saying I'm a failure" (identity trigger). Know which one you're feeling before you respond.
 
 ---
 
-## 话术参考
+## Tactical Principles
 
-**绩效谈话开场（主动定调）：**
-> "这个周期我最满意的是 X，它带来了 Y 的结果。同时我也意识到在 Z 方面还有提升空间，下半年我打算这样改进..."
+1. **Don't wait for review season to let your manager know what you've done**: Share wins weekly or monthly
+2. **Numbers first**: Quantify every achievement, even approximately — "reduced coordination overhead by ~30%" lands harder than "improved communication"
+3. **Manage 360 feedback proactively**: Reach out to key colleagues to check in on the relationship a month before reviews
+4. **Understand before you contest**: When a rating is low, first ask "Can you help me understand specifically where the gaps are?" — then respond
+5. **Keep the promotion conversation separate from the performance conversation**: Performance = this cycle; promotion = future plans. Don't conflate them.
 
-**收到低评后的回应：**
-> "谢谢您的反馈。我想更好地理解一下，具体是哪些方面的表现和预期有差距？我想确认我理解正确，这样才能有针对性地改进。"
+---
 
-**争取晋升机会：**
-> "我觉得我在 X 和 Y 上已经在做 L+1 的事情了，您觉得我还需要在哪方面补齐，才能进入晋升通道？"
+## Sample Scripts
+
+**Opening the review conversation (set the tone):**
+> "The thing I'm most proud of this cycle is X, which produced Y results. I also see room for growth in Z — here's how I'm planning to address that next half..."
+
+**Responding to a low rating:**
+> "Thank you for the feedback. I'd like to understand better — can you be more specific about where the gaps were between my performance and expectations? I want to make sure I'm hearing this correctly so I can improve."
+
+**Making a case for promotion:**
+> "I feel like I've been doing L+1 work on X and Y — what do you see as the remaining gaps before I could be in the promotion pipeline?"

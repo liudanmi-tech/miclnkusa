@@ -1,51 +1,51 @@
-# Note 模板：职场边界（Work Boundaries）
+# Note: Work Boundaries
 
-## 技能说明
-适用场景：工作侵占私人时间、被额外压活、无法拒绝不合理要求、情绪劳动过载。
-
----
-
-## 基础信息字段（baseline_fields）
-
-| 字段 | 标签 | 必填 | 说明 |
-|------|------|------|------|
-| `main_boundary_issue` | 主要边界问题 | ✅ | 当前最突出的越界场景 |
-| `current_work_hours` | 实际工时 | ✅ | 平均每天/每周工作时长 |
-| `company_culture` | 公司加班文化 | ✅ | 强制加班/隐性加班/相对自由 |
-| `desired_boundary` | 期望设立的边界 | ❌ | 最希望改变的一件事 |
-| `fear_of_consequence` | 顾虑 | ❌ | 担心设立边界会带来什么后果 |
+## About This Skill
+Use when: work is bleeding into personal time, you're being piled with extra tasks, you can't say no to unreasonable requests, or you're running on emotional empty.
 
 ---
 
-## AI 初始化问卷话术
+## Baseline Fields
 
-**开场白：**
-> "在帮你设立边界之前，我想先了解你当前的实际情况和主要压力来源。"
-
-**问卷问题（只问缺口字段）：**
-1. `main_boundary_issue` 缺失：「目前最让你觉得"越线了"的是什么场景？比如非工作时间被消息轰炸、总被塞额外任务，还是别的？」
-2. `current_work_hours` 缺失：「你现在平均每天工作多少小时？有固定下班时间吗？」
-3. `company_culture` 缺失：「公司的文化是真的要求加班，还是有些人只是自愿卷？」
-4. `desired_boundary` 缺失：「如果只能改变一件事，你最希望先解决什么？」
-5. `fear_of_consequence` 缺失：「你在设立边界时最担心的是什么？比如影响晋升，或者被人觉得不够努力？」
+| Field | Label | Required | Description |
+|-------|-------|----------|-------------|
+| `main_boundary_issue` | Main Boundary Problem | ✅ | The most obvious boundary violation you're experiencing |
+| `current_work_hours` | Actual Hours Worked | ✅ | Average daily/weekly hours |
+| `company_culture` | Overtime Culture | ✅ | Mandated overtime / unspoken pressure / relatively flexible |
+| `desired_boundary` | Boundary You Want | ❌ | The one thing you most want to change |
+| `fear_of_consequence` | Concerns | ❌ | What you're afraid will happen if you set limits |
 
 ---
 
-## baseline_text 示例
+## AI Onboarding Script
+
+**Opening:**
+> "Before we work on setting boundaries, I want to understand your current situation and the main pressure points."
+
+**Questions (only for missing fields):**
+1. `main_boundary_issue` missing: "What's the most boundary-crossing thing happening right now? After-hours messages, getting buried under extra tasks, or something else?"
+2. `current_work_hours` missing: "How many hours are you typically working per day? Do you have a regular end time?"
+3. `company_culture` missing: "Is the overtime culture an actual requirement at your company, or are some people just choosing to grind harder?"
+4. `desired_boundary` missing: "If you could change just one thing, what would it be?"
+5. `fear_of_consequence` missing: "What's your biggest fear about setting a boundary? Hurting your promotion chances, or people seeing you as not committed?"
+
+---
+
+## Sample baseline_text
 
 ```
-主要问题：下班后微信消息频繁，周末被拉进紧急需求
-实际工时：平均12小时/天，周末基本都有工作
-公司文化：表面上不强制，但不加班的人晋升很慢
-期望边界：下班后2小时内不看工作消息，周末完全断开
-顾虑：担心被认为态度不好，影响年终绩效
+Main problem: Frequent messages after hours, pulled into urgent requests on weekends
+Actual hours: Average 12 hours/day, basically always working on weekends
+Company culture: No official requirement to stay late, but people who don't get passed over for promotions
+Desired boundary: No work messages in the 2 hours after work, fully off on weekends
+Concerns: Worried about being seen as having a bad attitude, affecting year-end review
 ```
 
 ---
 
-## 更新触发条件
+## Update Triggers
 
-- 提到工作时长发生变化（更多/更少）
-- 提到换了岗位或换了部门
-- 提到已经成功设立某个边界或失败了
-- 提到职业目标发生变化（晋升欲望降低/提高）
+- Working hours change significantly (more or less)
+- Role or department change
+- Successfully set (or failed to set) a boundary
+- Career goals shift (desire for promotion increases or decreases)

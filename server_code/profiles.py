@@ -5,21 +5,219 @@ import os
 import time
 from typing import List, Optional, Dict, Tuple, Any
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, func
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 import logging
 import traceback
 import asyncio
 
 from database.connection import get_db
-from database.models import Profile, Session, AnalysisResult
+from database.models import Profile, Session, AnalysisResult, User
 from auth.jwt_handler import get_current_user_id
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 声纹注册后台任务
+# ──────────────────────────────────────────────────────────────────────────────
+
+async def _enroll_voiceprint_task(profile_id: str, audio_url: str) -> None:
+    """
+    下载档案音频、计算 Resemblyzer embedding、写回 profiles.voice_embedding。
+    fire-and-forget，不影响接口响应。
+    """
+    from services.voiceprint_service import compute_embedding_from_url
+    from database.connection import AsyncSessionLocal
+
+    logger.info(f"[声纹注册] 开始 profile_id={profile_id[:8]} url={audio_url[:60]}")
+    embedding = await asyncio.to_thread(compute_embedding_from_url, audio_url)
+    if not embedding:
+        logger.warning(f"[声纹注册] embedding 计算失败 profile_id={profile_id[:8]}")
+        return
+
+    try:
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(
+                select(Profile).where(Profile.id == uuid.UUID(profile_id))
+            )
+            profile = result.scalar_one_or_none()
+            if profile:
+                profile.voice_embedding = embedding
+                profile.voice_embedding_updated_at = datetime.now(timezone.utc)
+                await db.commit()
+                logger.info(f"[声纹注册] ✅ 完成 profile_id={profile_id[:8]}")
+    except Exception as e:
+        logger.exception(f"[声纹注册] 写 DB 失败 profile_id={profile_id[:8]}: {e}")
+
+
+def _trigger_voiceprint_enrollment(profile_id: str, audio_url: Optional[str]) -> None:
+    """若档案有音频，触发后台声纹注册任务"""
+    if not audio_url:
+        return
+    asyncio.create_task(
+        _enroll_voiceprint_task(profile_id, audio_url),
+        name=f"vp_enroll_{profile_id[:8]}",
+    )
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 情绪头像生成（千人千面）
+# 触发时机：upload_profile_photo 成功后 fire-and-forget
+# 存储路径：emotion_avatars/{user_id}/{emotion}.png  (happy/excited/sad/calm)
+# 服务端口：GET /api/v1/profiles/emotion-avatar/{emotion}
+# ──────────────────────────────────────────────────────────────────────────────
+
+EMOTION_SLOTS = ["very_happy", "happy", "neutral", "slightly_sad", "sad"]
+
+# 情绪槽 → R2文件名映射（与 emoji style 名称对齐）
+EMOTION_SLOT_FALLBACK = {
+    "very_happy":   "excited",
+    "happy":        "happy",
+    "neutral":      "calm",
+    "slightly_sad": "slight",
+    "sad":          "sad",
+}
+
+def _mood_state_to_emotion(mood_state: str) -> str:
+    """将 LLM 返回的 mood_state 映射到 5 个情绪槽之一。
+    对齐 emoji style 名称：excited / happy / calm / slight / sad
+    """
+    m = (mood_state or "").lower()
+    if any(k in m for k in ["excit", "energ", "elat", "ecstat", "亢奋", "兴奋", "激动"]):
+        return "very_happy"
+    if any(k in m for k in ["happy", "joy", "glad", "高兴", "开心", "快乐", "愉快"]):
+        return "happy"
+    if any(k in m for k in ["slight", "anxious", "worry", "nervou", "stress", "焦虑", "担心", "紧张"]):
+        return "slightly_sad"
+    if any(k in m for k in ["sad", "depress", "griev", "distress", "upset",
+                              "悲", "难过", "痛苦", "沮丧"]):
+        return "sad"
+    return "neutral"  # calm
+
+
+async def _generate_emotion_avatars_task(user_id: str, photo_bytes: bytes, photo_mime: str):
+    """
+    后台任务：用 Gemini 生成 2×2 情绪宫格图，PIL 裁成 4 张独立 PNG，存 R2。
+    fire-and-forget，不阻塞档案保存响应。
+    """
+    import io
+    try:
+        import google.generativeai as genai
+        from PIL import Image as _PIL
+        from main import USE_OSS, s3_client, OSS_BUCKET_NAME
+    except ImportError as e:
+        logger.error(f"[情绪头像] 依赖导入失败: {e}")
+        return
+
+    _safety = [
+        {"category": "HARM_CATEGORY_HARASSMENT",        "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
+        {"category": "HARM_CATEGORY_HATE_SPEECH",       "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
+        {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_LOW_AND_ABOVE"},
+        {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
+    ]
+
+    IMAGE_GEN_MODEL = "gemini-3.1-flash-image-preview"
+
+    logger.info(f"[情绪头像] 开始生成 user_id={user_id} photo_size={len(photo_bytes)}")
+
+    grid_prompt = (
+        "Generate a WIDE HORIZONTAL STRIP image (5:1 aspect ratio, much wider than tall), "
+        "showing the same person in 5 emotional states side by side.\n\n"
+        "STRICT RULES:\n"
+        "- Image MUST be 5:1 wide landscape (width = 5x height)\n"
+        "- Divided into EXACTLY 5 equal vertical panels by thin white separator lines\n"
+        "- Panel 1 (leftmost):  VERY HAPPY  – huge joyful laugh, sparkling eyes, big open smile\n"
+        "- Panel 2:             HAPPY       – warm genuine smile, positive bright expression\n"
+        "- Panel 3:             NEUTRAL     – calm, peaceful, relaxed gentle expression\n"
+        "- Panel 4:             SLIGHTLY SAD – mild disappointment, slightly droopy expression\n"
+        "- Panel 5 (rightmost): SAD         – downcast, melancholy, clearly sad expression\n"
+        "- Each panel is exactly 20% of total image width\n"
+        "- Same character appearance in all 5 panels (consistent hair, clothing, features)\n"
+        "- Portrait headshot, upper body only, simple clean background per panel\n"
+        "- Studio Ghibli illustration style"
+    )
+
+    image_bytes = None
+    try:
+        model = genai.GenerativeModel(IMAGE_GEN_MODEL, safety_settings=_safety)
+        contents = [{"mime_type": photo_mime, "data": photo_bytes}, grid_prompt]
+
+        for attempt in range(2):
+            try:
+                response = await asyncio.to_thread(model.generate_content, contents)
+                for part in response.parts:
+                    if part.inline_data is not None:
+                        image_bytes = part.inline_data.data
+                        break
+                if image_bytes:
+                    logger.info(f"[情绪头像] Gemini 生成成功 attempt={attempt+1} "
+                                f"size={len(image_bytes)}")
+                    break
+            except Exception as e:
+                logger.warning(f"[情绪头像] attempt={attempt+1} 生成失败: {e}")
+                if attempt == 0:
+                    await asyncio.sleep(3)
+    except Exception as e:
+        logger.error(f"[情绪头像] Gemini 调用异常: {e}", exc_info=True)
+        return
+
+    if not image_bytes:
+        logger.error("[情绪头像] ❌ 生成失败，无图片数据")
+        return
+
+    # ── PIL 加载 + 裁剪 5 竖条（横向 1×5 排列）──
+    try:
+        img = _PIL.open(io.BytesIO(image_bytes))
+        w, h = img.size
+        logger.info(f"[情绪头像] 生成尺寸 {w}×{h}")
+
+        # ── 裁剪 5 竖条 ──
+        panels = {
+            "very_happy":   img.crop((0,          0, w // 5,     h)),
+            "happy":        img.crop((w // 5,     0, 2 * w // 5, h)),
+            "neutral":      img.crop((2 * w // 5, 0, 3 * w // 5, h)),
+            "slightly_sad": img.crop((3 * w // 5, 0, 4 * w // 5, h)),
+            "sad":          img.crop((4 * w // 5, 0, w,          h)),
+        }
+
+        for emotion, panel in panels.items():
+            pw, ph = panel.size
+            if pw < 30 or ph < 30:
+                logger.error(f"[情绪头像] ❌ 裁剪异常 {emotion} {pw}×{ph}，放弃")
+                return
+
+        # ── 上传到 R2 ──
+        if not USE_OSS or s3_client is None:
+            logger.warning("[情绪头像] R2 未启用，跳过上传")
+            return
+
+        for emotion, panel in panels.items():
+            buf = io.BytesIO()
+            panel.convert("RGBA").save(buf, format="PNG")
+            png_bytes = buf.getvalue()
+            oss_key = f"emotion_avatars/{user_id}/{emotion}.png"
+            try:
+                await asyncio.to_thread(
+                    s3_client.put_object,
+                    Bucket=OSS_BUCKET_NAME,
+                    Key=oss_key,
+                    Body=png_bytes,
+                    ContentType="image/png",
+                )
+                logger.info(f"[情绪头像] ✅ {emotion} → {oss_key}")
+            except Exception as e:
+                logger.error(f"[情绪头像] ❌ 上传 {emotion} 失败: {e}")
+
+        logger.info(f"[情绪头像] ✅ 全部完成 user_id={user_id}")
+
+    except Exception as e:
+        logger.error(f"[情绪头像] PIL/上传异常: {e}", exc_info=True)
+
 
 # 档案列表短期缓存，TTL 60 秒；创建/更新/删除时按 user_id 失效
 _PROFILES_CACHE_TTL = 60
@@ -46,6 +244,7 @@ class ProfileCreate(BaseModel):
     audio_start_time: Optional[float] = None
     audio_end_time: Optional[float] = None
     audio_url: Optional[str] = None
+    emoji_type: Optional[str] = "self"
 
 
 class ProfileUpdate(BaseModel):
@@ -58,6 +257,7 @@ class ProfileUpdate(BaseModel):
     audio_start_time: Optional[float] = None
     audio_end_time: Optional[float] = None
     audio_url: Optional[str] = None
+    emoji_type: Optional[str] = None
 
 
 class ProfileResponse(BaseModel):
@@ -71,6 +271,7 @@ class ProfileResponse(BaseModel):
     audio_start_time: Optional[float] = None
     audio_end_time: Optional[float] = None
     audio_url: Optional[str] = None
+    emoji_type: str = "self"
     created_at: str
     updated_at: str
 
@@ -90,6 +291,7 @@ def _profile_to_response(p: Profile) -> ProfileResponse:
         audio_start_time=float(p.audio_start_time) if p.audio_start_time else None,
         audio_end_time=float(p.audio_end_time) if p.audio_end_time else None,
         audio_url=p.audio_url,
+        emoji_type=getattr(p, "emoji_type", None) or "self",
         created_at=p.created_at.isoformat(),
         updated_at=p.updated_at.isoformat(),
     )
@@ -109,7 +311,7 @@ async def get_profiles(
                 return [ProfileResponse(**d) for d in cached]
 
         result = await db.execute(
-            select(Profile).where(Profile.user_id == uuid.UUID(user_id))
+            select(Profile).where(Profile.user_id == uuid.UUID(user_id)).order_by(Profile.created_at)
         )
         profiles = result.scalars().all()
         out = [_profile_to_response(p) for p in profiles]
@@ -128,6 +330,25 @@ async def create_profile(
     db: AsyncSession = Depends(get_db)
 ):
     """创建新档案"""
+    # ── 档案数量限制 ──────────────────────────────────────────────────────────
+    _PROFILE_LIMITS = {"free": 2, "pro": 15}
+    _user_result = await db.execute(select(User).where(User.id == uuid.UUID(user_id)))
+    _user = _user_result.scalar_one_or_none()
+    if _user:
+        _tier = getattr(_user, "subscription_tier", None) or "free"
+        _expires = getattr(_user, "subscription_expires_at", None)
+        if _tier == "pro" and _expires:
+            _exp = _expires if _expires.tzinfo else _expires.replace(tzinfo=timezone.utc)
+            if _exp < datetime.now(timezone.utc):
+                _tier = "free"
+        _max = _PROFILE_LIMITS.get(_tier, _PROFILE_LIMITS["free"])
+        _cnt_result = await db.execute(
+            select(func.count(Profile.id)).where(Profile.user_id == uuid.UUID(user_id))
+        )
+        _profile_count = _cnt_result.scalar() or 0
+        if _profile_count >= _max:
+            raise HTTPException(status_code=403, detail=f"Profile limit reached ({_max})")
+    # ─────────────────────────────────────────────────────────────────────────
     audio_session_id = None
     if profile_data.audio_session_id and str(profile_data.audio_session_id).strip():
         try:
@@ -145,14 +366,15 @@ async def create_profile(
         audio_segment_id=profile_data.audio_segment_id,
         audio_start_time=int(profile_data.audio_start_time) if profile_data.audio_start_time else None,
         audio_end_time=int(profile_data.audio_end_time) if profile_data.audio_end_time else None,
-        audio_url=profile_data.audio_url
+        audio_url=profile_data.audio_url,
+        emoji_type=profile_data.emoji_type or "self",
     )
     
     db.add(profile)
     await db.commit()
     _invalidate_profiles_cache(user_id)
-    # 移除不必要的refresh，created_at和updated_at由数据库自动生成，但对象中已有值
-    # await db.refresh(profile)  # 已移除，减少一次数据库查询
+    # 声纹注册（有 audio_url 时后台异步触发）
+    _trigger_voiceprint_enrollment(str(profile.id), profile.audio_url)
 
     return ProfileResponse(
         id=str(profile.id),
@@ -165,6 +387,7 @@ async def create_profile(
         audio_start_time=float(profile.audio_start_time) if profile.audio_start_time else None,
         audio_end_time=float(profile.audio_end_time) if profile.audio_end_time else None,
         audio_url=profile.audio_url,
+        emoji_type=getattr(profile, "emoji_type", None) or "self",
         created_at=profile.created_at.isoformat(),
         updated_at=profile.updated_at.isoformat()
     )
@@ -208,11 +431,20 @@ async def update_profile(
         profile.audio_start_time = int(profile_data.audio_start_time)
     if profile_data.audio_end_time is not None:
         profile.audio_end_time = int(profile_data.audio_end_time)
+    audio_url_changed = profile_data.audio_url is not None and profile_data.audio_url != profile.audio_url
     if profile_data.audio_url is not None:
         profile.audio_url = profile_data.audio_url
-    
+    if profile_data.emoji_type is not None:
+        profile.emoji_type = profile_data.emoji_type
+
+    # 强制更新 updated_at，确保 iOS 端 cacheBuster URL 变化、图片缓存失效
+    profile.updated_at = datetime.now(timezone.utc)
+
     await db.commit()
     _invalidate_profiles_cache(user_id)
+    # 声纹重新注册（audio_url 有变动时触发）
+    if audio_url_changed:
+        _trigger_voiceprint_enrollment(str(profile.id), profile.audio_url)
     logger.info(f"[档案更新] ✅ 成功 profile_id={profile_id} photo_url={profile.photo_url}")
     # 刷新对象以获取最新的updated_at（由数据库自动更新）
     await db.refresh(profile)
@@ -228,9 +460,223 @@ async def update_profile(
         audio_start_time=float(profile.audio_start_time) if profile.audio_start_time else None,
         audio_end_time=float(profile.audio_end_time) if profile.audio_end_time else None,
         audio_url=profile.audio_url,
+        emoji_type=getattr(profile, "emoji_type", None) or "self",
         created_at=profile.created_at.isoformat(),
         updated_at=profile.updated_at.isoformat()
     )
+
+
+@router.get("/{profile_id}/audio", summary="返回档案音频 OSS 预签名 URL（302 重定向）")
+async def get_profile_audio(
+    profile_id: str,
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    验证 JWT 后，生成 60 秒有效的 OSS 预签名 URL，以 302 重定向返回。
+    AVPlayer 自动跟随重定向，直接从 OSS 流式播放，支持 Range 请求和 seek。
+    """
+    from fastapi.responses import RedirectResponse
+    from urllib.parse import urlparse
+
+    result = await db.execute(
+        select(Profile).where(
+            Profile.id == uuid.UUID(profile_id),
+            Profile.user_id == uuid.UUID(user_id)
+        )
+    )
+    profile = result.scalar_one_or_none()
+    if not profile or not profile.audio_url:
+        raise HTTPException(status_code=404, detail="音频不存在")
+
+    try:
+        import oss2
+        ak          = os.getenv("OSS_ACCESS_KEY_ID")
+        sk          = os.getenv("OSS_ACCESS_KEY_SECRET")
+        ep          = os.getenv("OSS_ENDPOINT", "oss-cn-beijing.aliyuncs.com")
+        bucket_name = os.getenv("OSS_BUCKET_NAME")
+
+        if not all([ak, sk, ep, bucket_name]):
+            raise HTTPException(status_code=503, detail="OSS 配置不完整")
+
+        parsed  = urlparse(profile.audio_url)
+        oss_key = parsed.path.lstrip("/")
+
+        auth   = oss2.Auth(ak, sk)
+        bucket = oss2.Bucket(auth, ep, bucket_name)
+
+        # 生成 60 秒有效预签名 URL，AVPlayer 跟随 302 后直接流式播放
+        signed_url = await asyncio.to_thread(
+            bucket.sign_url, "GET", oss_key, 60, slash_safe=True
+        )
+        logger.info(f"[档案音频] 302 → OSS signed_url (60s) profile_id={profile_id}")
+        return RedirectResponse(url=signed_url, status_code=302)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[档案音频] 生成预签名 URL 失败 profile_id={profile_id}: {e}")
+        raise HTTPException(status_code=502, detail=f"无法获取音频: {str(e)[:120]}")
+
+
+class EnrollVoiceprintRequest(BaseModel):
+    audio_urls: List[str]
+
+
+@router.post("/{profile_id}/enroll-voiceprint", summary="多音频合并声纹注册")
+async def enroll_voiceprint_multi(
+    profile_id: str,
+    request: EnrollVoiceprintRequest,
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    接受多个音频 URL，计算每段的 Resemblyzer embedding 后取平均值，
+    更新 profiles.voice_embedding。
+    用于 iOS「多片段合并声纹录入」场景。
+    """
+    if not request.audio_urls:
+        raise HTTPException(status_code=400, detail="audio_urls 不能为空")
+
+    result = await db.execute(
+        select(Profile).where(
+            Profile.id == uuid.UUID(profile_id),
+            Profile.user_id == uuid.UUID(user_id),
+        )
+    )
+    profile = result.scalar_one_or_none()
+    if not profile:
+        raise HTTPException(status_code=404, detail="档案不存在")
+
+    from services.voiceprint_service import compute_embedding_from_url
+    import numpy as np
+
+    embeddings = []
+    for url in request.audio_urls:
+        emb = await asyncio.to_thread(compute_embedding_from_url, url)
+        if emb:
+            embeddings.append(emb)
+        else:
+            logger.warning(f"[声纹注册] 跳过无效 URL profile_id={profile_id[:8]} url={url[:60]}")
+
+    if not embeddings:
+        raise HTTPException(status_code=422, detail="所有音频均无法计算声纹，请确认 resemblyzer 已安装且音频有效")
+
+    avg_embedding = np.mean(np.array(embeddings, dtype=np.float32), axis=0).tolist()
+
+    profile.voice_embedding = avg_embedding
+    profile.voice_embedding_updated_at = datetime.now(timezone.utc)
+    await db.commit()
+
+    logger.info(
+        f"[声纹注册] ✅ 多 URL 合并完成 profile_id={profile_id[:8]} "
+        f"count={len(embeddings)}/{len(request.audio_urls)}"
+    )
+    return {"status": "ok", "count": len(embeddings)}
+
+
+@router.post("/{profile_id}/enroll-voiceprint-pcm", summary="用实时 PCM 直接注册声纹")
+async def enroll_voiceprint_from_pcm(
+    profile_id: str,
+    request: Request,
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    接受 Content-Type: application/octet-stream 的原始 PCM 二进制数据。
+    格式：16kHz 16-bit mono signed little-endian（与 live session WebSocket 相同）。
+    用于从 iOS 实时麦克风录音注册声纹，解决 M4A 录音与实时 PCM 音频域不同的问题。
+    """
+    pcm_bytes = await request.body()
+    if not pcm_bytes:
+        raise HTTPException(status_code=400, detail="PCM 数据不能为空")
+
+    pcm_secs = len(pcm_bytes) / 32000
+    if pcm_secs < 1.0:
+        raise HTTPException(status_code=400, detail=f"PCM 太短 ({pcm_secs:.2f}s < 1.0s)，请录制至少 1 秒")
+
+    result = await db.execute(
+        select(Profile).where(
+            Profile.id == uuid.UUID(profile_id),
+            Profile.user_id == uuid.UUID(user_id),
+        )
+    )
+    profile = result.scalar_one_or_none()
+    if not profile:
+        raise HTTPException(status_code=404, detail="档案不存在")
+
+    from services.voiceprint_service import compute_enrollment_embedding
+    import numpy as np
+
+    embedding = await asyncio.to_thread(compute_enrollment_embedding, pcm_bytes)
+    if not embedding:
+        raise HTTPException(status_code=422, detail="无法从 PCM 计算声纹，请确认 ECAPA-TDNN 已安装且音频有效")
+
+    profile.voice_embedding = embedding
+    profile.voice_embedding_updated_at = datetime.now(timezone.utc)
+    await db.commit()
+
+    nonzero = sum(1 for v in embedding if v != 0)
+    logger.info(
+        f"[声纹注册-PCM] ✅ 完成 profile_id={profile_id[:8]} "
+        f"pcm={pcm_secs:.2f}s dim={len(embedding)} nonzero={nonzero}"
+    )
+    return {"status": "ok", "dim": len(embedding), "nonzero": nonzero, "duration_sec": round(pcm_secs, 2)}
+
+
+def _parse_memory(raw: str) -> dict:
+    import re
+    type_m   = re.search(r'\[TYPE:(\w+)\]', raw)
+    date_m   = re.search(r'\[DATE:([\d-]+)\]', raw)
+    status_m = re.search(r'\[STATUS:(\w+)\]', raw)
+    is_goal  = bool(re.search(r'\[GOAL\]', raw))
+    content  = re.sub(r'\[[^\]]+\]', '', raw).strip(' :：-')
+    mem_type = "goal" if is_goal else (type_m.group(1) if type_m else "other")
+    return {"content": content, "type": mem_type,
+            "date": date_m.group(1) if date_m else None,
+            "status": status_m.group(1) if status_m else None}
+
+
+@router.get("/{profile_id}/memories", summary="获取档案关联记忆")
+async def get_profile_memories(
+    profile_id: str,
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    获取与指定档案关联的记忆，按类型分组返回。
+    数据来源：PostgreSQL KG（人物/事件/目标/技能），精准 SQL JOIN，零语义漂移。
+    """
+    from services.knowledge_graph import get_profile_memories_kg, get_self_memories_kg
+
+    # 1. 验证档案属于当前用户
+    result = await db.execute(
+        select(Profile).where(
+            Profile.id == uuid.UUID(profile_id),
+            Profile.user_id == uuid.UUID(user_id)
+        )
+    )
+    profile = result.scalar_one_or_none()
+    if not profile:
+        raise HTTPException(status_code=404, detail="档案不存在")
+
+    # 2. Self 档案走专用路径（goals + skills），其余走 KG person 查询
+    _rel = (getattr(profile, "relationship_type", "") or "").lower()
+    if _rel in ("自己", "self"):
+        memories = await get_self_memories_kg(profile.name, user_id, db)
+    else:
+        memories = await get_profile_memories_kg(profile.name, user_id, db, profile_id=profile_id)
+
+    return {
+        "profile_id": profile_id,
+        "profile_name": memories["profile_name"],
+        "relationship": memories["relationship"],
+        "events": memories["events"],
+        "goals": memories["goals"],
+        "skills": memories["skills"],
+        "other": memories["other"],
+        "total": memories["total"],
+    }
 
 
 @router.delete("/{profile_id}", status_code=204)
@@ -328,27 +774,49 @@ async def upload_profile_photo(
             logger.error(f"[档案照片] ❌ OSS上传返回None，可能OSS未启用或上传失败")
             raise HTTPException(status_code=500, detail="图片上传失败：OSS未启用或上传失败")
         
-        logger.info(f"[档案照片] ✅ OSS上传成功")
+        logger.info(f"[档案照片] ✅ R2上传成功")
+
+        # 直接返回 R2 公开 URL（无需代理，公开可访问）
+        r2_public = os.getenv("R2_PUBLIC_URL", "").rstrip("/")
+        if r2_public:
+            photo_url = f"{r2_public}/images/{user_id}/{session_id}/0.png"
+        else:
+            api_base = os.getenv("API_PUBLIC_URL", "http://47.79.254.213")
+            photo_url = f"{api_base.rstrip('/')}/api/v1/images/{session_id}/0"
         
-        # 返回完整 API URL（OSS 为私有，需经后端 /api/v1/images/{session_id}/{index} 代理）
-        api_base = os.getenv("API_PUBLIC_URL", "http://47.79.254.213")
-        photo_url = f"{api_base.rstrip('/')}/api/v1/images/{session_id}/0"
-        
-        # 有 profile_id 时同步更新 Profile.photo_url，确保策略图片生成能获取参考图
+        # 有 profile_id 时同步更新 Profile.photo_url；在 commit 前读取 relationship_type
+        # （commit 后 SQLAlchemy async session 会 expire 对象，再次访问属性会触发 MissingGreenlet）
+        _is_self_profile = False
         if profile_id and profile_id.strip() and session_id.startswith("profile_"):
             try:
                 r = await db.execute(select(Profile).where(Profile.id == uuid.UUID(profile_id), Profile.user_id == uuid.UUID(user_id)))
                 prof = r.scalar_one_or_none()
                 if prof:
+                    # ★ commit 前读取 relationship_type，避免 session expire 导致属性访问异常
+                    _rel = prof.relationship_type  # 此时对象未 expire，安全读取
+                    _is_self_profile = (_rel == "Self")
+                    logger.info(f"[档案照片] 档案关系={_rel}，is_self={_is_self_profile}")
                     prof.photo_url = photo_url
                     await db.commit()
                     logger.info(f"[档案照片] 已更新 Profile.photo_url: profile_id={profile_id}")
+                else:
+                    logger.warning(f"[档案照片] 未找到档案 profile_id={profile_id}")
             except Exception as e:
                 logger.warning(f"[档案照片] 更新 Profile.photo_url 失败: {e}")
                 await db.rollback()
-        
+
         response_data = {"photo_url": photo_url}
         logger.info(f"[档案照片] 返回 photo_url={photo_url}")
+
+        if _is_self_profile:
+            try:
+                asyncio.create_task(
+                    _generate_emotion_avatars_task(user_id, file_content, file.content_type or "image/jpeg")
+                )
+                logger.info(f"[档案照片] ✅ 已触发情绪头像异步生成 user_id={user_id}")
+            except Exception as _e:
+                logger.warning(f"[档案照片] 触发情绪头像生成失败（非致命）: {_e}")
+
         return response_data
     except HTTPException:
         # 重新抛出HTTP异常
@@ -358,3 +826,95 @@ async def upload_profile_photo(
         logger.error(f"错误类型: {type(e).__name__}")
         logger.error(f"错误详情: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"上传图片失败: {str(e)}")
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 情绪头像服务端点
+# ──────────────────────────────────────────────────────────────────────────────
+
+@router.get("/emotion-avatar/{emotion}", summary="获取当前用户情绪头像")
+async def get_emotion_avatar(
+    emotion: str,
+    user_id: str = Depends(get_current_user_id),
+):
+    """
+    返回当前用户对应情绪的头像 PNG（由档案照片生成，存于 R2）。
+    emotion: very_happy | happy | neutral | slightly_sad | sad
+    若新槽文件不存在，自动回退到旧槽文件名（backward compat）。
+    """
+    from fastapi.responses import Response
+    try:
+        from main import USE_OSS, s3_client, OSS_BUCKET_NAME
+    except ImportError as e:
+        raise HTTPException(status_code=503, detail=f"Storage unavailable: {e}")
+
+    if emotion not in EMOTION_SLOTS:
+        raise HTTPException(status_code=400, detail=f"Invalid emotion '{emotion}'. Must be one of: {EMOTION_SLOTS}")
+
+    if not USE_OSS or s3_client is None:
+        raise HTTPException(status_code=503, detail="Storage service unavailable")
+
+    # 优先尝试新槽文件，失败则回退到旧文件名（向下兼容旧档案）
+    keys_to_try = [f"emotion_avatars/{user_id}/{emotion}.png"]
+    fallback = EMOTION_SLOT_FALLBACK.get(emotion)
+    if fallback and fallback != emotion:
+        keys_to_try.append(f"emotion_avatars/{user_id}/{fallback}.png")
+
+    for oss_key in keys_to_try:
+        try:
+            obj = await asyncio.to_thread(
+                s3_client.get_object, Bucket=OSS_BUCKET_NAME, Key=oss_key
+            )
+            image_data = obj["Body"].read()
+            return Response(content=image_data, media_type="image/png",
+                            headers={"Cache-Control": "public, max-age=86400"})
+        except Exception:
+            continue
+
+    raise HTTPException(status_code=404, detail="Emotion avatar not generated yet")
+
+
+@router.get("/emotion-avatars/urls", summary="获取当前用户全部情绪头像预签名 URL")
+async def get_emotion_avatar_urls(
+    user_id: str = Depends(get_current_user_id),
+):
+    """
+    返回 5 个情绪头像的 R2 预签名 URL（有效期 1 小时），iOS 端可直接用 AsyncImage 加载。
+    格式: { "very_happy": "...", "happy": "...", "neutral": "...", "slightly_sad": "...", "sad": "..." }
+    若文件不存在则对应值为 null。
+    """
+    try:
+        from main import USE_OSS, s3_client, OSS_BUCKET_NAME
+    except ImportError as e:
+        raise HTTPException(status_code=503, detail=f"Storage unavailable: {e}")
+
+    if not USE_OSS or s3_client is None:
+        raise HTTPException(status_code=503, detail="Storage service unavailable")
+
+    result = {}
+    for emotion in EMOTION_SLOTS:
+        # 优先新槽，回退旧槽
+        keys_to_try = [f"emotion_avatars/{user_id}/{emotion}.png"]
+        fallback = EMOTION_SLOT_FALLBACK.get(emotion)
+        if fallback and fallback != emotion:
+            keys_to_try.append(f"emotion_avatars/{user_id}/{fallback}.png")
+
+        url = None
+        for oss_key in keys_to_try:
+            try:
+                # 先确认文件存在（generate_presigned_url 不检查存在性）
+                await asyncio.to_thread(
+                    s3_client.head_object, Bucket=OSS_BUCKET_NAME, Key=oss_key
+                )
+                url = await asyncio.to_thread(
+                    s3_client.generate_presigned_url,
+                    "get_object",
+                    Params={"Bucket": OSS_BUCKET_NAME, "Key": oss_key},
+                    ExpiresIn=3600,
+                )
+                break
+            except Exception:
+                continue
+        result[emotion] = url
+
+    return result

@@ -1,57 +1,57 @@
-# Resource：同事冲突（Coworker Conflicts）
+# Resource: Coworker Conflicts
 
-> 注入时机：技能激活，随 baseline_text 一起进入 system prompt
-> Token 预算：≤400 tokens
-
----
-
-## 核心框架
-
-### Thomas-Kilmann 冲突模型（5 种应对策略）
-- **竞争（Competing）**：高主张，低合作 → 适合紧急情况，代价是关系损耗
-- **回避（Avoiding）**：低主张，低合作 → 短期缓解压力，问题越拖越大
-- **妥协（Compromising）**：中间立场 → 双方各退一步，但都不完全满意
-- **顺从（Accommodating）**：低主张，高合作 → 维护关系但容易积怨
-- **协作（Collaborating）**：高主张，高合作 → 最优解，需要时间和信任
-
-核心建议：大部分职场冲突应该从「回避」移向「协作」，而非「竞争」。
-
-### 利益 vs 立场（Getting to Yes, Fisher & Ury）
-立场是你说的「我要 X」，利益是你真正在意的「为什么要 X」。
-冲突中双方的立场往往对立，但利益可能兼容。先找到共同利益，再设计方案。
-
-### NVC 非暴力沟通（Marshall Rosenberg）
-- **观察**：描述事实（不加评判）「昨天开会时，你在我说话时打断了我」
-- **感受**：说感受（不说对方的错）「我感到有些沮丧」
-- **需求**：说你的需求「我需要在表达完整想法后再听反馈」
-- **请求**：提具体可执行的请求「下次你能等我说完吗？」
+> Injected at: skill activation, alongside baseline_text in system prompt
+> Token budget: ≤400 tokens
 
 ---
 
-## 关键书目
+## Core Frameworks
 
-- **《谈判力》（Getting to Yes）**— Fisher & Ury：聚焦利益而非立场；把人和问题分开；创造互利方案
-- **《非暴力沟通》（Nonviolent Communication）**— Marshall Rosenberg：职场冲突多源于未被表达的需求；说感受不说评判
+### Thomas-Kilmann Conflict Model (5 strategies)
+- **Competing**: High assertiveness, low cooperation → Good for emergencies, costs the relationship
+- **Avoiding**: Low assertiveness, low cooperation → Short-term pressure relief, problems compound
+- **Compromising**: Middle ground → Both sides give a little, but neither is fully satisfied
+- **Accommodating**: Low assertiveness, high cooperation → Preserves relationship but breeds resentment
+- **Collaborating**: High assertiveness, high cooperation → Best outcome; requires time and trust
+
+Core advice: Most workplace conflicts should move from "avoiding" toward "collaborating," not toward "competing."
+
+### Interests vs. Positions (Getting to Yes, Fisher & Ury)
+Your position is what you say you want ("I want X"). Your interest is *why* you want it.
+Opposing positions can actually share compatible interests. Find the shared interest first, then design the solution.
+
+### NVC — Nonviolent Communication (Marshall Rosenberg)
+- **Observation**: State the facts (no judgment) — "Yesterday in the meeting, you interrupted me"
+- **Feeling**: Express your feeling (not their wrongdoing) — "I felt frustrated"
+- **Need**: Name your need — "I need to finish my thought before hearing feedback"
+- **Request**: Make a specific, actionable ask — "Next time, could you let me finish?"
 
 ---
 
-## 实战原则
+## Key Books
 
-1. **先私下沟通，不要拉群**：把对方拖进公开场合会激活防御，私下 1v1 更容易解决
-2. **描述行为，不评价人格**：「你在会上打断了我」而非「你总是不尊重别人」
-3. **给对方台阶下**：让对方有机会承认问题而不丢面子，关系才能继续
-4. **找第三方利益**：「这件事如果我们处理不好，对项目的影响是 X，我们都不想看到这个」
-5. **记录关键事件**：涉及权益（抢功劳/甩锅）的事情，保存邮件和聊天记录备用
+- **Getting to Yes** — Fisher & Ury: Focus on interests, not positions; separate the people from the problem; create mutual-gain options
+- **Nonviolent Communication** — Marshall Rosenberg: Most workplace conflict stems from unexpressed needs; speak feelings, not accusations
 
 ---
 
-## 话术参考
+## Tactical Principles
 
-**处理抢功劳（私下沟通）：**
-> "我想私下和你聊一下。在今天的汇报里，X 方案是我起草的，但听起来好像变成了你的想法。我理解可能是表达时没说清楚，但这对我来说很重要，以后能不能在汇报时注明一下谁负责了哪部分？"
+1. **Go private, not public**: Pulling someone into a group setting activates their defenses — 1-on-1 is always more productive
+2. **Describe the behavior, don't judge the person**: "You interrupted me in the meeting" vs. "You never respect anyone"
+3. **Give them a face-saving exit**: If they can acknowledge the issue without losing face, the relationship can survive it
+4. **Find a shared third interest**: "If we can't work this out, the project suffers — and neither of us wants that"
+5. **Document what matters**: For anything involving credit or blame — save emails and chat logs
 
-**降低冲突温度（对方情绪激动时）：**
-> "我听到你了，你对这件事有很强烈的感受。我们能先暂停一下，等大家都冷静一点，再来找解决方案吗？"
+---
 
-**寻求协作解决（聚焦共同利益）：**
-> "我们两个对这件事的想法不一样，但最终我们都希望项目顺利交付。有没有一种方式，既能推进项目，又能解决我们之间的分歧？"
+## Sample Scripts
+
+**Addressing credit-stealing (private conversation):**
+> "I wanted to talk privately about something. In today's debrief, the X proposal — that's something I drafted — but it came across as your idea. I understand it might not have been intentional, but it matters to me. Going forward, could we make sure to note who's driving each piece when we present?"
+
+**De-escalating a heated moment:**
+> "I hear you — this is clearly something you feel strongly about. Can we take a step back, give everyone a moment to breathe, and come back to finding a solution when things are calmer?"
+
+**Looking for collaborative resolution:**
+> "We clearly see this differently, but we both want the project to land well. Is there a way we can move things forward that also resolves what's between us?"

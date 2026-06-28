@@ -312,6 +312,7 @@ async def generate_scene_images(
 - 场景描述必须用英文（English only），场景数量1-3个，选最有代表性的
 - 场景中第三方人物的名称使用匹配后的档案名，无匹配时保留口述中的原称呼
 - 重要：口述中的"我"代指用户本人，禁止将"我"映射到档案列表中的任何人名；若档案列表为空或场景仅涉及用户自身，场景中用"I"代指口述者，不要使用任何具体人名
+- ⚠️ name_mapping 的 key 必须是口述文本中**逐字出现**的词，禁止将档案列表里的名字直接用作 key；若口述中未提及任何第三方人物，必须返回 "name_mapping": {{}}
 
 只返回JSON（不要解释）：{{"name_mapping": {{"口述中的名字": "档案名或null"}}, "scenes": ["scene 1 in English", "scene 2 in English"]}}"""
 
@@ -328,8 +329,12 @@ async def generate_scene_images(
                 scenes = combined_data.get("scenes", [])[:max_images]
 
                 # 从合并结果构建 _name_mapping 和 _matched_profiles
+                # 条件：profile 存在 AND transcript_name 必须真实出现在口述文本里
+                # 防止 Gemini 把档案列表的名字直接用作 key（即使口述中从未提及）
                 for transcript_name, profile_name in combined_data.get("name_mapping", {}).items():
-                    if profile_name and profile_name in _profile_name_map:
+                    if (profile_name
+                            and profile_name in _profile_name_map
+                            and transcript_name in _narration_text):
                         _name_mapping[transcript_name] = profile_name
                         _matched_profiles[transcript_name] = _profile_name_map[profile_name]
 

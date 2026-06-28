@@ -27,3 +27,21 @@ server_code/response.json
 server_code/"# 1.*"
 *.m4a
 Untitled.png
+
+# iOS 依赖（不入库）
+Models.swift/WorkSurvivalGuide/Pods/
+
+# 视频文件（体积大）
+doc/video/
+
+# 服务器备份文件
+server_code/*.bak*
+server_code/**/*.bak*
+server_code/*.bak_*
+server_code/**/*.bak_*
+server_code/ngrok
+server_code/ngrok-v3-stable-linux-amd64.tgz
+server_code/pretrained_models/
+server_code/style_references/
+server_code/systemd/
+server_code/*.pub

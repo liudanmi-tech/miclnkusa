@@ -1,57 +1,57 @@
-# Resource：求职面试（Job Interviews）
+# Resource: Job Interviews
 
-> 注入时机：技能激活，随 baseline_text 一起进入 system prompt
-> Token 预算：≤400 tokens
-
----
-
-## 核心框架
-
-### STAR 方法（行为面试标准答题结构）
-- **Situation**：背景是什么？（1-2 句）
-- **Task**：你负责什么？（1 句）
-- **Action**：你具体做了什么？（重点，3-4 句，强调「我」而非「我们」）
-- **Result**：产生了什么可量化的结果？（必须有数字）
-
-### 自我介绍黄金公式（Present-Past-Future）
-- **现在**：我目前在做什么（1 句）
-- **过去**：我的核心经历和亮点（2-3 句）
-- **未来**：为什么是这个职位/公司（1-2 句）
-
-### 面试前研究框架
-- **公司层面**：最近的战略、产品、融资或上市信息
-- **职位层面**：JD 里高频词 = 面试官最在意的能力
-- **面试官层面**：LinkedIn 背景，找到共同点或感兴趣的话题
+> Injected at: skill activation, alongside baseline_text in system prompt
+> Token budget: ≤400 tokens
 
 ---
 
-## 关键书目
+## Core Frameworks
 
-- **《Cracking the Coding Interview》**— Gayle McDowell：技术面试标准参考书；行为题和技术题的系统化准备方法
-- **《绝不妥协》（薪资谈判部分）**— Chris Voss：offer 阶段不要第一个报价；沉默是谈判工具
+### STAR Method (Standard structure for behavioral interview answers)
+- **Situation**: What was the context? (1–2 sentences)
+- **Task**: What were you responsible for? (1 sentence)
+- **Action**: What did you specifically do? (The core — 3–4 sentences, emphasize *I* not *we*)
+- **Result**: What measurable outcome came from it? (Must include a number)
+
+### Self-Introduction Formula (Present–Past–Future)
+- **Present**: What I'm doing now (1 sentence)
+- **Past**: My core experience and highlights (2–3 sentences)
+- **Future**: Why this role/company (1–2 sentences)
+
+### Pre-Interview Research Framework
+- **Company level**: Recent strategy, product launches, funding, or IPO news
+- **Role level**: High-frequency terms in the JD = what the interviewer cares most about
+- **Interviewer level**: LinkedIn background — find a common thread or interesting talking point
 
 ---
 
-## 实战原则
+## Key Books
 
-1. **用 STAR 答所有行为题**：「讲一个你遇到冲突的例子」「告诉我你最大的失败」都用这个结构
-2. **准备 5 个核心故事**：每个故事可以回答多个问题（领导力/失败/冲突/成就/学习）
-3. **反问是加分项**：「这个团队目前最大的挑战是什么？」比「没有问题了」好得多
-4. **薪资讨论拖到最后**：「我对这个机会很感兴趣，等到有 offer 的时候我们再详细谈薪资」
-5. **面试后 24 小时内发感谢信**：简短即可，加深印象并补充遗漏的点
+- **Cracking the Coding Interview** — Gayle McDowell: The standard reference for technical interviews; systematic prep for both behavioral and technical questions
+- **Never Split the Difference (salary section)** — Chris Voss: Don't be the first to give a number at the offer stage; silence is a negotiating tool
 
 ---
 
-## 话术参考
+## Tactical Principles
 
-**自我介绍（30 秒版）：**
-> "我目前在 X 公司做后端工程师，主要负责支付系统，有 5 年经验。过去我主导了 X 系统重构，把 QPS 提升了 3 倍。我这次面试是因为很看好贵公司在 [方向] 上的布局，希望在更大的平台上做这方面的事情。"
+1. **Use STAR for all behavioral questions**: "Tell me about a conflict" / "Describe your biggest failure" — same structure every time
+2. **Prepare 5 core stories**: Each story should be able to answer multiple questions (leadership, failure, conflict, achievement, learning)
+3. **Asking questions is a green flag**: "What's the team's biggest challenge right now?" lands much better than "No questions"
+4. **Push salary discussion to the end**: "I'm excited about this opportunity — let's talk salary once there's a formal offer on the table"
+5. **Send a thank-you within 24 hours**: Keep it short — it reinforces your interest and lets you add anything you forgot to say
 
-**被问到薪资期望：**
-> "我还在了解整个 package 的结构，等到有正式 offer 的时候我们再详细聊。您能先跟我说说这个职位的薪资区间吗？"
+---
 
-**被问到最大弱点：**
-> "我算法基础不算最强，但我的应对方式是 [具体措施]，最近通过 [行动] 在提升这方面。"
+## Sample Scripts
 
-**反问面试官：**
-> "这个团队目前最需要解决的一个技术挑战是什么？" / "您觉得在这个职位上最成功的人有什么特质？"
+**Self-introduction (30-second version):**
+> "I'm currently a backend engineer at Company X working on payments systems — five years of experience in total. I led a system refactor that increased QPS by 3x. I'm interested in this role because I'm bullish on what your company is doing in [area] and want to work on it at a bigger scale."
+
+**When asked about salary expectations:**
+> "I'm still learning about the full package structure — I'd love to get to a formal offer and dig into that together. Can you share the salary band for this role?"
+
+**When asked about your biggest weakness:**
+> "My algorithms aren't the strongest — but the way I've handled it is [specific action]. I've been [concrete recent effort] to close the gap."
+
+**Asking questions at the end:**
+> "What's the biggest technical challenge the team is dealing with right now?" / "What do the most successful people in this role tend to have in common?"

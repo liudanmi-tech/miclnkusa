@@ -1,56 +1,56 @@
-# Resource：职场边界（Work Boundaries）
+# Resource: Work Boundaries
 
-> 注入时机：技能激活，随 baseline_text 一起进入 system prompt
-> Token 预算：≤400 tokens
-
----
-
-## 核心框架
-
-### 边界的三个层次（Set Boundaries Find Peace, Nedra Tawwab）
-- **物理边界**：时间和空间的控制（下班时间、工作设备）
-- **精神边界**：不被他人的情绪和问题淹没
-- **数字边界**：消息响应时间、不在私人设备上安装工作软件
-
-### 极简主义决策框架（Essentialism, Greg McKeown）
-"如果不是地道的'是'，那就是'不'。"
-面对新任务：先问「这件事是否值得我的时间？」再问「如何说不。」
+> Injected at: skill activation, alongside baseline_text in system prompt
+> Token budget: ≤400 tokens
 
 ---
 
-## 关键书目
+## Core Frameworks
 
-- **《设立边界，找到平静》（Set Boundaries, Find Peace）**— Nedra Tawwab（执业治疗师）
-  边界不是拒绝他人，而是定义自己能接受什么；设立边界是自我尊重的行为，不需要道歉。
+### Three Layers of Boundaries (Set Boundaries Find Peace, Nedra Tawwab)
+- **Physical boundaries**: Control over time and space (work hours, work devices)
+- **Emotional boundaries**: Not being flooded by other people's emotions and problems
+- **Digital boundaries**: Response time norms, not installing work apps on personal devices
 
-- **《精要主义》（Essentialism）**— Greg McKeown
-  "如果你不为自己的优先级做决定，别人就会替你做。" 少做，但做对的事。
-
-- **《深度工作》（Deep Work）**— Cal Newport
-  保护高价值工作时间的能力是一种竞争优势，而不是懒惰。
-
----
-
-## 实战原则
-
-1. **边界要明确，不能靠对方猜**：「我下班后一般不看消息，紧急的事情可以打电话」比什么都不说有效
-2. **给方案，不只是拒绝**：「我现在手上有 A 和 B，你希望我先放哪个？」而不是「我没时间」
-3. **第一次是最难的**：第一次设立边界时对方可能会推，坚持住，之后会变得容易
-4. **不需要解释太多**：解释越多越像在道歉，简单说明原因一次就够，不要反复辩解
-5. **区分紧急和重要**：大部分「紧急」消息实际上可以等 30 分钟，训练对方的预期
+### Minimalist Decision Framework (Essentialism, Greg McKeown)
+"If it's not a clear yes, it's a no."
+When a new task lands: first ask "Is this worth my time?" — then figure out how to say no.
 
 ---
 
-## 话术参考
+## Key Books
 
-**拒绝额外任务：**
-> "我现在手上有 X 和 Y 两个任务，如果加这个进来，哪个可以先缓一缓？帮我确认一下优先级。"
+- **Set Boundaries, Find Peace** — Nedra Tawwab (licensed therapist)
+  Boundaries aren't about rejecting others — they're about defining what you can accept. Setting a boundary is an act of self-respect, not something to apologize for.
 
-**设定消息响应预期：**
-> "我一般在工作时间处理消息，晚上如果遇到真正紧急的事，可以直接打电话给我。"
+- **Essentialism** — Greg McKeown
+  "If you don't prioritize your life, someone else will." Do less, but do what matters.
 
-**被反复拉进非职责范围的事：**
-> "这个事情我可以帮你看一下方向，但具体执行可能需要找 [更合适的人]，我这边时间有点紧张。"
+- **Deep Work** — Cal Newport
+  The ability to protect high-value work time is a competitive advantage, not laziness.
 
-**感觉说不会影响关系：**
-> "我真的很想帮你，但现在承接这个会让我做不好，我不想给你一个半成品的结果。"
+---
+
+## Tactical Principles
+
+1. **Be explicit — don't make people guess**: "I generally don't check messages after work. For anything urgent, call me." beats saying nothing at all
+2. **Offer alternatives, not just no**: "I have A and B on my plate — which one do you want me to deprioritize?" instead of "I don't have time"
+3. **The first time is the hardest**: When you set a boundary for the first time, people may push back — hold the line, it gets easier after that
+4. **Don't over-explain**: The more you explain, the more it sounds like an apology. State your reason once, clearly, and don't keep defending it
+5. **Most "urgent" things can wait**: Train people's expectations — most "urgent" messages can wait 30 minutes
+
+---
+
+## Sample Scripts
+
+**Declining an extra task:**
+> "I'm currently working on X and Y. If I add this, one of them will need to slip — can you help me figure out which should take priority?"
+
+**Setting message response expectations:**
+> "I handle messages during work hours. For anything that's truly urgent in the evenings, feel free to call me directly."
+
+**Being pulled into things outside your role:**
+> "I can help you think through the direction on this, but for actual execution you might need someone from [more appropriate team] — I'm stretched pretty thin right now."
+
+**When you're worried saying no will damage the relationship:**
+> "I genuinely want to help, but taking this on right now would mean I can't do it well — and I'd rather not give you something half-baked."
