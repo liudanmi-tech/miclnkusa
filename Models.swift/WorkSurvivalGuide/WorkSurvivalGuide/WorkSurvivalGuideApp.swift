@@ -34,7 +34,11 @@ struct WorkSurvivalGuideApp: App {
         // 流程：SplashCoordinator 在 scenePhase=.active 时触发系统 ATT 弹窗
         //       Kochava 等 60 秒，届时 ATT 已由用户决定，Kochava 读到 authorized 后带 IDFA 走正常端点
         Measurement.shared.appTrackingTransparency.enabledBool = true
+        #if DEBUG
+        Measurement.shared.appTrackingTransparency.authorizationStatusWaitTimeInterval = 5.0  // 调试用，正式改回 60
+        #else
         Measurement.shared.appTrackingTransparency.authorizationStatusWaitTimeInterval = 60.0
+        #endif
         Measurement.shared.start(appGUIDString: "kochattoon-1ndn6cc95")
 
         _Concurrency.Task { await ImageStyleRepository.shared.fetchIfNeeded() }
