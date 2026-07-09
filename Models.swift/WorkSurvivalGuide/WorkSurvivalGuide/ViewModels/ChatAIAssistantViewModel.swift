@@ -33,7 +33,9 @@ private enum ChatSessionStore {
 
     static func save(_ messages: [AssistantMessage], sessionId: String) {
         guard !messages.isEmpty else { return }
-        let trimmed = Array(messages.suffix(maxMessages))
+        // 存储前清除 "loading" 状态，防止重启后骨架屏残留
+        let cleaned = messages.map { $0.isGeneratingSceneImage ? $0.withSceneImage(nil) : $0 }
+        let trimmed = Array(cleaned.suffix(maxMessages))
         let h = ChatHistoryPersistence(savedAt: Date(), messages: trimmed)
         if let data = try? JSONEncoder().encode(h) {
             UserDefaults.standard.set(data, forKey: key(sessionId))
@@ -458,34 +460,49 @@ final class ChatAIAssistantViewModel: ObservableObject {
 
     // MARK: - Auto Image Generation
 
-    /// 每次 AI 回复完成后自动触发生图（fire-and-forget）。
-    /// 防并发：isImageGenerating 标志确保同一时间只有一个请求在飞。
-    /// 配额耗尽时显示订阅墙；重入模式不触发。
+    /// 每次 AI 回复完成后自动触发生图，图片嵌入在 AI 消息气泡内部。
+    /// 流程：立即在最后一条 AI 消息显示骨架屏 → 触发生图 API → 轮询 cover_image_url → 回填真实图片。
+    /// 防并发：isImageGenerating 确保同一时间只有一个请求在飞。
+    /// 配额耗尽：骨架屏回滚 + 立即弹订阅墙。
     private func triggerAutoImageGeneration() {
         guard !isExistingSession else { return }
-        guard SubscriptionManager.shared.canGenerateImage else { return }
         guard !isImageGenerating else { return }
+
+        // ── 配额检查 ──────────────────────────────────────────────────────────
+        guard SubscriptionManager.shared.canGenerateImage else {
+            showPaywall = true
+            return
+        }
+
+        // ── 定位目标 AI 消息（记录 UUID，不用下标，防数组变化） ──────────────
+        guard let targetId = messages.last(where: { $0.role == .assistant && !$0.isMeme })?.id else {
+            return
+        }
+
+        // ── 立即显示骨架屏 ────────────────────────────────────────────────────
         isImageGenerating = true
+        if let idx = messages.firstIndex(where: { $0.id == targetId }) {
+            messages[idx] = messages[idx].withSceneImage("loading")
+        }
+
         let conv = conversationForServer()
-        let sid = sessionId
+        let sid  = sessionId
         let styleKey = UserDefaults.standard.string(forKey: "image_style") ?? "spider_verse"
+
         Task {
+            // ── 发起生图请求 ──────────────────────────────────────────────────
             do {
                 _ = try await NetworkManager.shared.generateImageFromChat(
                     sessionId: sid,
                     conversation: conv,
                     styleKey: styleKey
                 )
-                await MainActor.run {
-                    NotificationCenter.default.post(
-                        name: NSNotification.Name("ChatSessionGeneratingImage"),
-                        object: sid
-                    )
-                }
-                await SubscriptionManager.shared.refreshFromBackend()
             } catch let err as NSError {
+                // 403 image_limit_reached → 回滚骨架屏 + 弹订阅墙
                 await MainActor.run { [weak self] in
                     guard let self else { return }
+                    self._rollbackSceneImage(targetId: targetId)
+                    self.isImageGenerating = false
                     if err.localizedDescription.contains("image_limit_reached") {
                         if SubscriptionManager.shared.isPro {
                             self.showProLimitToast = true
@@ -494,8 +511,52 @@ final class ChatAIAssistantViewModel: ObservableObject {
                         }
                     }
                 }
+                return
             }
-            await MainActor.run { [weak self] in self?.isImageGenerating = false }
+
+            // 202 接受：通知 Moment 列表开始轮询卡片封面
+            await MainActor.run {
+                NotificationCenter.default.post(
+                    name: NSNotification.Name("ChatSessionGeneratingImage"),
+                    object: sid
+                )
+            }
+
+            // ── 轮询 cover_image_url（每 3s，最多 20 次 = 60s）─────────────────
+            for _ in 0..<20 {
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                do {
+                    let detail = try await NetworkManager.shared.getTaskDetail(sessionId: sid)
+                    if let url = detail.coverImageUrl, !url.isEmpty {
+                        // 图片就绪 → 回填到气泡
+                        await MainActor.run { [weak self] in
+                            guard let self else { return }
+                            if let idx = self.messages.firstIndex(where: { $0.id == targetId }) {
+                                self.messages[idx] = self.messages[idx].withSceneImage(url)
+                            }
+                            self.isImageGenerating = false
+                        }
+                        await SubscriptionManager.shared.refreshFromBackend()
+                        return
+                    }
+                } catch {
+                    // 轮询失败继续重试，不中断
+                }
+            }
+
+            // ── 超时：静默回滚骨架屏 ─────────────────────────────────────────
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                self._rollbackSceneImage(targetId: targetId)
+                self.isImageGenerating = false
+            }
+        }
+    }
+
+    /// 回滚指定消息的骨架屏状态（sceneImageURL → nil）
+    private func _rollbackSceneImage(targetId: UUID) {
+        if let idx = messages.firstIndex(where: { $0.id == targetId }) {
+            messages[idx] = messages[idx].withSceneImage(nil)
         }
     }
 }

@@ -546,10 +546,13 @@ private struct ChatBubble: View {
     let message: AssistantMessage
 
     var isUser: Bool { message.role == .user }
+    /// AI 消息且有图片区（骨架屏或真实图片）
+    var showImageSection: Bool {
+        !isUser && (message.isGeneratingSceneImage || message.hasSceneImage)
+    }
 
     var body: some View {
-        // 语音消息：transcript 未到达时（占位符）显示波形气泡；
-        // transcript 到达后 content 已更新为真实文字，走普通文字气泡
+        // 语音消息：transcript 未到达时（占位符）显示波形气泡
         if message.isVoice, let path = message.audioFileURL,
            message.content == "[Voice message]" {
             VoiceMessageBubble(fileURLPath: path)
@@ -557,28 +560,120 @@ private struct ChatBubble: View {
             HStack(alignment: .bottom, spacing: 0) {
                 if isUser { Spacer(minLength: 60) }
 
-                HStack(spacing: 6) {
-                    // 若该条消息原为语音输入，加小麦克风图标提示
-                    if message.isVoice {
-                        Image(systemName: "mic.fill")
-                            .font(.system(size: 11))
-                            .foregroundColor(.white.opacity(0.6))
+                VStack(alignment: isUser ? .trailing : .leading, spacing: 0) {
+                    // ── 文字内容 ──────────────────────────────────────────
+                    if !message.content.isEmpty {
+                        HStack(spacing: 6) {
+                            if message.isVoice {
+                                Image(systemName: "mic.fill")
+                                    .font(.system(size: 11))
+                                    .foregroundColor(.white.opacity(0.6))
+                            }
+                            Text(message.content)
+                                .font(.system(size: 15, design: .rounded))
+                                .foregroundColor(.white)
+                                .multilineTextAlignment(isUser ? .trailing : .leading)
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.top, 10)
+                        .padding(.bottom, showImageSection ? 8 : 10)
                     }
-                    Text(message.content)
-                        .font(.system(size: 15, design: .rounded))
-                        .foregroundColor(.white)
-                        .multilineTextAlignment(isUser ? .trailing : .leading)
+
+                    // ── 场景图片区（仅 AI 消息）──────────────────────────
+                    if showImageSection {
+                        if message.isGeneratingSceneImage {
+                            SceneImageSkeletonView()
+                                .padding(.horizontal, 8)
+                                .padding(.bottom, 8)
+                        } else if message.hasSceneImage, let url = message.sceneImageURL {
+                            SceneImageView(url: url)
+                                .padding(.horizontal, 8)
+                                .padding(.bottom, 8)
+                                .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                        }
+                    }
                 }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
                 .background(
                     RoundedRectangle(cornerRadius: 16)
                         .fill(isUser
                             ? Color(hex: "#2D4A5E")
                             : Color.white.opacity(0.1))
                 )
+                .animation(.easeInOut(duration: 0.3), value: message.hasSceneImage)
 
                 if !isUser { Spacer(minLength: 60) }
+            }
+        }
+    }
+}
+
+// MARK: - Scene Image Skeleton (生成中骨架屏)
+
+private struct SceneImageSkeletonView: View {
+    @State private var shimmerOffset: CGFloat = -1.0
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: 12)
+            .fill(Color.white.opacity(0.07))
+            .frame(width: 220, height: 220)
+            .overlay(
+                GeometryReader { geo in
+                    LinearGradient(
+                        colors: [.clear, Color.white.opacity(0.13), .clear],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                    .frame(width: geo.size.width * 0.6)
+                    .offset(x: shimmerOffset * geo.size.width)
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+            )
+            .overlay(
+                VStack(spacing: 6) {
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 22))
+                        .foregroundColor(.white.opacity(0.25))
+                    Text("Generating scene...")
+                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                        .foregroundColor(.white.opacity(0.25))
+                }
+            )
+            .onAppear {
+                withAnimation(.linear(duration: 1.4).repeatForever(autoreverses: false)) {
+                    shimmerOffset = 1.6
+                }
+            }
+    }
+}
+
+// MARK: - Scene Image View (图片就绪)
+
+private struct SceneImageView: View {
+    let url: String
+
+    var body: some View {
+        AsyncImage(url: URL(string: url)) { phase in
+            switch phase {
+            case .success(let image):
+                image
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .frame(width: 220, height: 220)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+            case .failure:
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(Color.white.opacity(0.07))
+                    .frame(width: 220, height: 220)
+                    .overlay(
+                        Image(systemName: "photo")
+                            .font(.system(size: 22))
+                            .foregroundColor(.white.opacity(0.25))
+                    )
+            default:
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(Color.white.opacity(0.07))
+                    .frame(width: 220, height: 220)
+                    .overlay(ProgressView().tint(Color.white.opacity(0.4)))
             }
         }
     }
