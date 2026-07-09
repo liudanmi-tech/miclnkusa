@@ -1816,6 +1816,7 @@ class TaskDetailResponse(BaseModel):
     conversation_summary: Optional[str] = None  # 「谁和谁对话」总结
     audio_url: Optional[str] = None  # 原始录音播放 URL（OSS 直链 或 /audio-file 代理）
     card_title: Optional[str] = None         # 来自 AnalysisResult.card_title
+    cover_image_url: Optional[str] = None    # 生成图片 URL，iOS 轮询此字段判断图片是否就绪
     finalize_status: Optional[str] = None    # pending | completed | failed
     mood_state: Optional[str] = None         # sessions.mood_state
     emotion_type: Optional[str] = None       # sessions.emotion_type
