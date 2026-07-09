@@ -491,30 +491,34 @@ final class ChatAIAssistantViewModel: ObservableObject {
 
         Task {
             // ── 发起生图请求 ──────────────────────────────────────────────────
+            // 服务端返回裸 dict（非 APIResponse 包装），JSON 解码可能抛 DecodingError。
+            // 只有 HTTP 403 image_limit_reached 才回滚骨架屏；其他错误继续走轮询
+            // （HTTP 202 表示服务端已接受，骨架屏应保留直到轮询拿到真实 URL）。
             do {
                 _ = try await NetworkManager.shared.generateImageFromChat(
                     sessionId: sid,
                     conversation: conv,
                     styleKey: styleKey
                 )
-            } catch let err as NSError {
-                // 403 image_limit_reached → 回滚骨架屏 + 弹订阅墙
+            } catch let err as NSError where err.localizedDescription.contains("image_limit_reached") {
+                // 真正的 403 配额耗尽 → 回滚骨架屏 + 弹订阅墙
                 await MainActor.run { [weak self] in
                     guard let self else { return }
                     self._rollbackSceneImage(targetId: targetId)
                     self.isImageGenerating = false
-                    if err.localizedDescription.contains("image_limit_reached") {
-                        if SubscriptionManager.shared.isPro {
-                            self.showProLimitToast = true
-                        } else {
-                            self.showPaywall = true
-                        }
+                    if SubscriptionManager.shared.isPro {
+                        self.showProLimitToast = true
+                    } else {
+                        self.showPaywall = true
                     }
                 }
                 return
+            } catch {
+                // JSON 解码失败等非致命错误：服务端大概率已接受（HTTP 202），继续轮询
+                print("⚠️ [triggerAutoImageGeneration] generateImageFromChat non-fatal: \(error)")
             }
 
-            // 202 接受：通知 Moment 列表开始轮询卡片封面
+            // 服务端已接受请求：通知 Moment 列表开始轮询卡片封面
             await MainActor.run {
                 NotificationCenter.default.post(
                     name: NSNotification.Name("ChatSessionGeneratingImage"),
