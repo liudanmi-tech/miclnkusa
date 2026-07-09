@@ -2769,6 +2769,7 @@ async def get_task_detail(
             conversation_summary=conversation_summary,
             audio_url=_audio_url,
             card_title=analysis_result.card_title if analysis_result else None,
+            cover_image_url=getattr(db_session, "cover_image_url", None),
             finalize_status=getattr(db_session, "finalize_status", None),
             mood_state=getattr(db_session, "mood_state", None),
             emotion_type=getattr(db_session, "emotion_type", None),
