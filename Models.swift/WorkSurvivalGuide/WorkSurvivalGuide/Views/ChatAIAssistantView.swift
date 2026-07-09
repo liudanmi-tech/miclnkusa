@@ -22,13 +22,10 @@ struct ChatAIAssistantView: View {
     @StateObject private var chatVM: ChatAIAssistantViewModel
     @Environment(\.dismiss) private var dismiss
 
-    @AppStorage("image_style") private var selectedImageStyle: String = "spider_verse"
-
     @State private var inputText = ""
     @FocusState private var isInputFocused: Bool
     @State private var showExitSheet = false
     @State private var isClosingSession = false
-    @State private var isGeneratingImage = false
     @State private var errorToast: String? = nil
 
     // ── scroll proxy for auto-scroll to bottom ──
@@ -42,7 +39,7 @@ struct ChatAIAssistantView: View {
     init(sessionId: String, isExistingSession: Bool = false) {
         self.sessionId = sessionId
         self.isExistingSession = isExistingSession
-        _chatVM = StateObject(wrappedValue: ChatAIAssistantViewModel(sessionId: sessionId))
+        _chatVM = StateObject(wrappedValue: ChatAIAssistantViewModel(sessionId: sessionId, isExistingSession: isExistingSession))
     }
 
     // MARK: - Body
@@ -98,10 +95,10 @@ struct ChatAIAssistantView: View {
                     .zIndex(99)
                 }
 
-                // Loading overlay for history / close / generate
-                if chatVM.isLoadingHistory || isClosingSession || isGeneratingImage {
+                // Loading overlay for history / close
+                if chatVM.isLoadingHistory || isClosingSession {
                     Color.black.opacity(0.5).ignoresSafeArea()
-                    ProgressView(chatVM.isLoadingHistory ? "Loading history..." : isGeneratingImage ? "Starting image generation..." : "Saving...")
+                    ProgressView(chatVM.isLoadingHistory ? "Loading history..." : "Saving...")
                         .foregroundColor(.white)
                         .tint(.white)
                 }
@@ -119,24 +116,20 @@ struct ChatAIAssistantView: View {
                             .font(.system(size: 14, weight: .semibold))
                             .foregroundColor(.white.opacity(0.85))
                     }
-                    .disabled(isClosingSession || isGeneratingImage)
+                    .disabled(isClosingSession)
                 }
             }
         }
         .navigationViewStyle(.stack)
         .confirmationDialog(
-            "What would you like to do?",
+            "Leave this chat?",
             isPresented: $showExitSheet,
             titleVisibility: .visible
         ) {
-            // image quota 耗尽时隐藏 "Convert to image"，直接只留 Just close
-            if SubscriptionManager.shared.canGenerateImage {
-                Button("Convert to image") { handleGenerateImage() }
-            }
-            Button("Just close") { handleCloseWithFinalize() }
+            Button("Leave") { handleCloseWithFinalize() }
             Button("Keep chatting", role: .cancel) {}
         } message: {
-            Text("Your conversation will be saved either way.")
+            Text("Your conversation will be saved.")
         }
         .alert(chatVM.errorMessage ?? "Error", isPresented: Binding(
             get: { chatVM.errorMessage != nil },
@@ -498,17 +491,12 @@ struct ChatAIAssistantView: View {
             deleteOrphanSession()
             return
         }
-        // 已经做过退出决策（convert/just-close）→ 不重复弹窗
+        // 已经做过退出决策 → 不重复弹窗
         if hasAlreadyExited {
             dismiss()
             return
         }
-        // 配额耗尽 → 跳过弹窗，直接 just-close
-        if !SubscriptionManager.shared.canGenerateImage {
-            handleCloseWithFinalize()
-            return
-        }
-        // 正常：弹出选择弹窗
+        // 弹出选择弹窗
         showExitSheet = true
     }
 
@@ -532,31 +520,6 @@ struct ChatAIAssistantView: View {
                     name: NSNotification.Name("ChatSessionClosed"),
                     object: sessionId,
                     userInfo: ["mood": chatVM.lastMoodState ?? "neutral"]
-                )
-                dismiss()
-            }
-        }
-    }
-
-    private func handleGenerateImage() {
-        markSessionExit(action: "convert")
-        isGeneratingImage = true
-        let conversation = chatVM.conversationForServer()
-        Task {
-            do {
-                _ = try await NetworkManager.shared.generateImageFromChat(
-                    sessionId: sessionId,
-                    conversation: conversation,
-                    styleKey: selectedImageStyle
-                )
-            } catch {
-                print("⚠️ [ChatAIAssistantView] generateImageFromChat failed: \(error)")
-            }
-            await MainActor.run {
-                isGeneratingImage = false
-                NotificationCenter.default.post(
-                    name: NSNotification.Name("ChatSessionGeneratingImage"),
-                    object: sessionId
                 )
                 dismiss()
             }

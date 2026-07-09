@@ -72,10 +72,13 @@ final class ChatAIAssistantViewModel: ObservableObject {
     @Published var baselinePhase: String? = nil
     /// 重入时从服务端拉取历史中
     @Published var isLoadingHistory: Bool = false
+    /// true = 正在后台触发生图请求（防并发）
+    @Published var isImageGenerating: Bool = false
 
     // MARK: Immutable
 
     let sessionId: String
+    let isExistingSession: Bool
 
     // MARK: Private
 
@@ -87,8 +90,9 @@ final class ChatAIAssistantViewModel: ObservableObject {
 
     // MARK: Init
 
-    init(sessionId: String) {
+    init(sessionId: String, isExistingSession: Bool = false) {
         self.sessionId = sessionId
+        self.isExistingSession = isExistingSession
         let saved = ChatSessionStore.load(sessionId)
         if !saved.isEmpty {
             self.messages = saved
@@ -280,6 +284,9 @@ final class ChatAIAssistantViewModel: ObservableObject {
                     if !self.hasReceivedSkillTags && self.messages.count <= 2 {
                         self.startSkillTagsCompensation()
                     }
+
+                    // 每次 AI 回复后自动触发生图
+                    self.triggerAutoImageGeneration()
                 }
             },
             onError: { [weak self] err in
@@ -366,6 +373,9 @@ final class ChatAIAssistantViewModel: ObservableObject {
                     self.isStreaming = false
                     self.isMatchingSkills = false
                     self.persistMessages()
+
+                    // 每次 AI 回复后自动触发生图
+                    self.triggerAutoImageGeneration()
                 }
             },
             onError: { [weak self] err in
@@ -443,6 +453,49 @@ final class ChatAIAssistantViewModel: ObservableObject {
             } else {
                 isMatchingSkills = false
             }
+        }
+    }
+
+    // MARK: - Auto Image Generation
+
+    /// 每次 AI 回复完成后自动触发生图（fire-and-forget）。
+    /// 防并发：isImageGenerating 标志确保同一时间只有一个请求在飞。
+    /// 配额耗尽时显示订阅墙；重入模式不触发。
+    private func triggerAutoImageGeneration() {
+        guard !isExistingSession else { return }
+        guard SubscriptionManager.shared.canGenerateImage else { return }
+        guard !isImageGenerating else { return }
+        isImageGenerating = true
+        let conv = conversationForServer()
+        let sid = sessionId
+        let styleKey = UserDefaults.standard.string(forKey: "image_style") ?? "spider_verse"
+        Task {
+            do {
+                _ = try await NetworkManager.shared.generateImageFromChat(
+                    sessionId: sid,
+                    conversation: conv,
+                    styleKey: styleKey
+                )
+                await MainActor.run {
+                    NotificationCenter.default.post(
+                        name: NSNotification.Name("ChatSessionGeneratingImage"),
+                        object: sid
+                    )
+                }
+                await SubscriptionManager.shared.refreshFromBackend()
+            } catch let err as NSError {
+                await MainActor.run { [weak self] in
+                    guard let self else { return }
+                    if err.localizedDescription.contains("image_limit_reached") {
+                        if SubscriptionManager.shared.isPro {
+                            self.showProLimitToast = true
+                        } else {
+                            self.showPaywall = true
+                        }
+                    }
+                }
+            }
+            await MainActor.run { [weak self] in self?.isImageGenerating = false }
         }
     }
 }
