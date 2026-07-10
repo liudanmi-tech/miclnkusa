@@ -7,6 +7,7 @@
 
 import Foundation
 import Combine
+import SwiftUI
 
 // MARK: - Chat Persistence
 
@@ -157,6 +158,8 @@ final class ChatAIAssistantViewModel: ObservableObject {
 
         messages.append(AssistantMessage(role: .user, content: trimmed))
         streamRequest(message: trimmed)
+        // 用户发送后立即并行触发生图，无需等待 AI 文字回复（服务端只用最后一条用户消息）
+        triggerAutoImageGeneration()
     }
 
     /// 发送语音消息。fileURL 用于消息气泡本地回放；audioData 用于上传服务器。
@@ -286,9 +289,6 @@ final class ChatAIAssistantViewModel: ObservableObject {
                     if !self.hasReceivedSkillTags && self.messages.count <= 2 {
                         self.startSkillTagsCompensation()
                     }
-
-                    // 每次 AI 回复后自动触发生图
-                    self.triggerAutoImageGeneration()
                 }
             },
             onError: { [weak self] err in
@@ -346,6 +346,8 @@ final class ChatAIAssistantViewModel: ObservableObject {
                     if let idx = self.messages.lastIndex(where: { $0.isVoice }) {
                         self.messages[idx] = self.messages[idx].withTranscript(text)
                     }
+                    // 转写到手后立即并行触发生图（服务端只用最后一条用户消息，无需等 AI 回复）
+                    self.triggerAutoImageGeneration()
                 }
             },
             onToken: { [weak self] token in
@@ -375,9 +377,6 @@ final class ChatAIAssistantViewModel: ObservableObject {
                     self.isStreaming = false
                     self.isMatchingSkills = false
                     self.persistMessages()
-
-                    // 每次 AI 回复后自动触发生图
-                    self.triggerAutoImageGeneration()
                 }
             },
             onError: { [weak self] err in
@@ -522,12 +521,20 @@ final class ChatAIAssistantViewModel: ObservableObject {
             }
 
             // ── 轮询 cover_image_url（每 3s，最多 20 次 = 60s）─────────────────
+            // 记录本轮轮询前已展示的图片 URL，防止误用上一轮已有的 URL 提前终止轮询
+            let previousImageURL: String? = await MainActor.run { [weak self] in
+                self?.messages
+                    .filter { $0.isSceneImage && !$0.isGeneratingSceneImage && $0.id != imageMessageId }
+                    .last?
+                    .sceneImageURL
+            }
             for _ in 0..<20 {
                 try? await Task.sleep(nanoseconds: 3_000_000_000)
                 do {
                     let detail = try await NetworkManager.shared.getTaskDetail(sessionId: sid)
-                    if let url = detail.coverImageUrl, !url.isEmpty {
-                        // 图片就绪 → 更新骨架屏消息为真实图片
+                    if let url = detail.coverImageUrl, !url.isEmpty, url != previousImageURL {
+                        // 图片就绪：先预下载进本地缓存，再更新消息，首次渲染直接命中缓存不显示转圈
+                        await ImageLoaderView.prefetch(urlString: url)
                         await MainActor.run { [weak self] in
                             guard let self else { return }
                             if let idx = self.messages.firstIndex(where: { $0.id == imageMessageId }) {

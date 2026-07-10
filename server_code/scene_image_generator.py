@@ -541,7 +541,7 @@ async def generate_scene_images(
                 if isinstance(img, Exception) or img is None:
                     logger.error(f"[场景生图] 图{i}失败: {img}")
                     scene_images.append({
-                        "index": 1000 + i,
+                        "index": int(time.time()) + i,
                         "scene_description": scene,
                         "image_url": None,
                         "image_base64": None,
@@ -549,7 +549,7 @@ async def generate_scene_images(
                 else:
                     is_url = img.startswith("http")
                     scene_images.append({
-                        "index": 1000 + i,
+                        "index": int(time.time()) + i,
                         "scene_description": scene,
                         "image_url": img if is_url else None,
                         "image_base64": img if not is_url else None,
@@ -562,9 +562,12 @@ async def generate_scene_images(
             )
             sa = sa_q.scalar_one_or_none()
             if sa:
-                sa.scene_images = scene_images
+                # 追加而非覆盖：保留历史轮次图片，供 Detail 页轮播展示
+                existing_imgs = list(sa.scene_images or [])
+                existing_imgs.extend(scene_images)
+                sa.scene_images = existing_imgs
                 await db.commit()
-                logger.info(f"[场景生图] 已更新 scene_images session={session_id} 总耗时={time.time()-t_start:.2f}s")
+                logger.info(f"[场景生图] 已追加 scene_images session={session_id} 总数={len(existing_imgs)} 总耗时={time.time()-t_start:.2f}s")
                 # 同步写 cover_image_url，供 Moment 列表封面展示
                 first_url = next((s["image_url"] for s in scene_images if s.get("image_url")), None)
                 if first_url:
@@ -591,9 +594,11 @@ async def generate_scene_images(
                     )
                     sa_retry = sa_retry_q.scalar_one_or_none()
                     if sa_retry:
-                        sa_retry.scene_images = scene_images
+                        existing_retry = list(sa_retry.scene_images or [])
+                        existing_retry.extend(scene_images)
+                        sa_retry.scene_images = existing_retry
                         await db.commit()
-                        logger.info(f"[场景生图] 兜底重试成功，scene_images 已写入, session={session_id}")
+                        logger.info(f"[场景生图] 兜底重试成功，scene_images 已追加 总数={len(existing_retry)}, session={session_id}")
                         first_url = next((s["image_url"] for s in scene_images if s.get("image_url")), None)
                         if first_url:
                             sess_cover = await db.get(Session, _uuid.UUID(session_id))

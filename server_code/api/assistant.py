@@ -32,9 +32,9 @@ logger = logging.getLogger(__name__)
 # ─── Quota Config ─────────────────────────────────────────────────────────────
 
 _PLAN_QUOTA = {
-    "com.miclnk.pro.weekly":  {"plan": "weekly",  "chat_limit": 30,   "image_limit": 7,   "period_days": 7},
-    "com.miclnk.pro.monthly": {"plan": "monthly", "chat_limit": 100,  "image_limit": 30,  "period_days": 30},
-    "com.miclnk.pro.yearly":  {"plan": "yearly",  "chat_limit": None, "image_limit": 365, "period_days": 365},
+    "com.miclnk.pro.weekly":  {"plan": "weekly",  "chat_limit": 30,   "image_limit": 20,   "period_days": 7},
+    "com.miclnk.pro.monthly": {"plan": "monthly", "chat_limit": 100,  "image_limit": 90,   "period_days": 30},
+    "com.miclnk.pro.yearly":  {"plan": "yearly",  "chat_limit": None, "image_limit": 1100, "period_days": 365},
 }
 
 
@@ -1757,15 +1757,17 @@ async def generate_image_from_chat(
         raise HTTPException(status_code=403, detail="image_limit_reached")
     # ────────────────────────────────────────────────────────────────────────
 
-    # 1. 构造 synthetic_transcript（仅 role=="user" 消息，AI 回复跳过）
-    #    单说话人 → generate_scene_images 自动进入场景2（旁白模式）
+    # 1. 构造 synthetic_transcript（仅最后一条 role=="user" 消息）
+    #    只取最新一轮用户输入，防止历史轮次内容主导场景提取，确保每轮生图反映当前输入
+    _all_user_msgs = [h for h in req.conversation if h.role == "user"]
+    _last_user = _all_user_msgs[-1:] if _all_user_msgs else []
     synthetic_transcript = [
         {"text": h.content, "is_me": True, "speaker": "Speaker_0"}
-        for h in req.conversation
-        if h.role == "user"
+        for h in _last_user
     ]
-    logger.debug(
-        f"[CHAT:{id8}] synthetic_transcript built | user_turns={len(synthetic_transcript)} mode=narration"
+    logger.info(
+        f"[CHAT:{id8}] synthetic_transcript built | user_turns=1/{len(_all_user_msgs)} "
+        f"mode=narration last_msg_preview={(_last_user[0].content[:50] if _last_user else '')!r}"
     )
     if not synthetic_transcript:
         raise HTTPException(status_code=400, detail="No user messages in conversation")

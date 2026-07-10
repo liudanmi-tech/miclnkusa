@@ -24,7 +24,6 @@ struct ChatAIAssistantView: View {
 
     @State private var inputText = ""
     @FocusState private var isInputFocused: Bool
-    @State private var showExitSheet = false
     @State private var isClosingSession = false
     @State private var errorToast: String? = nil
 
@@ -121,21 +120,19 @@ struct ChatAIAssistantView: View {
             }
         }
         .navigationViewStyle(.stack)
-        .confirmationDialog(
-            "Leave this chat?",
-            isPresented: $showExitSheet,
-            titleVisibility: .visible
-        ) {
-            Button("Leave") { handleCloseWithFinalize() }
-            Button("Keep chatting", role: .cancel) {}
-        } message: {
-            Text("Your conversation will be saved.")
-        }
         .alert(chatVM.errorMessage ?? "Error", isPresented: Binding(
             get: { chatVM.errorMessage != nil },
             set: { if !$0 { chatVM.errorMessage = nil } }
         )) {
             Button("OK") {}
+        }
+        .sheet(isPresented: $chatVM.showPaywall) {
+            SubscriptionView()
+        }
+        .alert("You've reached the image generation limit", isPresented: $chatVM.showProLimitToast) {
+            Button("OK", role: .cancel) { chatVM.showProLimitToast = false }
+        } message: {
+            Text("You've used all your image generations for this period. They'll reset with your next billing cycle.")
         }
         .task {
             if isExistingSession {
@@ -496,8 +493,8 @@ struct ChatAIAssistantView: View {
             dismiss()
             return
         }
-        // 弹出选择弹窗
-        showExitSheet = true
+        // 直接以 leave 逻辑处理
+        handleCloseWithFinalize()
     }
 
     private func handleCloseWithFinalize() {
@@ -654,42 +651,14 @@ private struct SceneImageView: View {
     let url: String
 
     var body: some View {
-        AsyncImage(url: URL(string: url)) { phase in
-            switch phase {
-            case .success(let image):
-                Color.clear
-                    .aspectRatio(4/5, contentMode: .fit)
-                    .frame(maxWidth: .infinity)
-                    .overlay(
-                        image
-                            .resizable()
-                            .scaledToFill()
-                    )
-                    .clipShape(RoundedRectangle(cornerRadius: 16))
-            case .failure:
-                Color.clear
-                    .aspectRatio(4/5, contentMode: .fit)
-                    .frame(maxWidth: .infinity)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 16)
-                            .fill(Color.white.opacity(0.07))
-                            .overlay(
-                                Image(systemName: "photo")
-                                    .font(.system(size: 26))
-                                    .foregroundColor(.white.opacity(0.22))
-                            )
-                    )
-            default:
-                Color.clear
-                    .aspectRatio(4/5, contentMode: .fit)
-                    .frame(maxWidth: .infinity)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 16)
-                            .fill(Color.white.opacity(0.07))
-                            .overlay(ProgressView().tint(Color.white.opacity(0.4)))
-                    )
-            }
-        }
+        // 使用 ImageLoaderView（内存+磁盘缓存 + JWT），替代 AsyncImage（无缓存）
+        Color.clear
+            .aspectRatio(4/5, contentMode: .fit)
+            .frame(maxWidth: .infinity)
+            .overlay(
+                ImageLoaderView(imageUrl: url, imageBase64: nil, contentMode: .fill)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 16))
     }
 }
 

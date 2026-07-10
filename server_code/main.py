@@ -1020,8 +1020,8 @@ def generate_image_from_prompt(
     from google.generativeai.types import HarmCategory, HarmBlockThreshold
     from google.api_core.exceptions import ClientError
 
-    # ── 图片生成模型：gemini-3.1-flash-image-preview（v3.0，thinking，人物一致性更强）──
-    IMAGE_GEN_MODEL = "gemini-3.1-flash-image-preview"
+    # ── 图片生成模型：gemini-3.1-flash-lite-image（Nano Banana 2 Lite，50% cheaper，~4s）──
+    IMAGE_GEN_MODEL = "gemini-3.1-flash-lite-image"
 
     model = genai.GenerativeModel(IMAGE_GEN_MODEL, safety_settings=_GEMINI_SAFETY)
 
@@ -5052,7 +5052,7 @@ _PRODUCT_TIER_MAP = {
 
 _TIER_LIMITS = {
     "free": {"monthly_limit": 3,  "images_per_recording": 1},
-    "pro":  {"monthly_limit": 30, "images_per_recording": 3},
+    "pro":  {"monthly_limit": 30, "images_per_recording": 1},
 }
 
 
@@ -5114,9 +5114,9 @@ async def get_subscription_status(
     # Chat / Image 配额（复用 _PLAN_QUOTA 逻辑）
     from datetime import timedelta as _td
     _PLAN_QUOTA_SUB = {
-        "com.miclnk.pro.weekly":  {"plan": "weekly",  "chat_limit": 30,   "image_limit": 7,   "period_days": 7},
-        "com.miclnk.pro.monthly": {"plan": "monthly", "chat_limit": 100,  "image_limit": 30,  "period_days": 30},
-        "com.miclnk.pro.yearly":  {"plan": "yearly",  "chat_limit": None, "image_limit": 365, "period_days": 365},
+        "com.miclnk.pro.weekly":  {"plan": "weekly",  "chat_limit": 30,   "image_limit": 20,   "period_days": 7},
+        "com.miclnk.pro.monthly": {"plan": "monthly", "chat_limit": 100,  "image_limit": 90,   "period_days": 30},
+        "com.miclnk.pro.yearly":  {"plan": "yearly",  "chat_limit": None, "image_limit": 1100, "period_days": 365},
     }
     sub_period_start = getattr(user, "sub_period_start", None)
     if tier == "pro" and product_id and product_id in _PLAN_QUOTA_SUB:
