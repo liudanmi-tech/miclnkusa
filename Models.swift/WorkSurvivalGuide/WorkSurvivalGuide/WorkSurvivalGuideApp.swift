@@ -11,9 +11,65 @@ import KochavaNetworking
 import KochavaMeasurement
 import KochavaTracking
 import AppTrackingTransparency
+import UserNotifications
+
+// MARK: - AppDelegate（Push 通知 + 冷启动路由）
+
+class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
+
+    /// 冷启动时（App 被杀后用户点通知）暂存动作，等 ContentView 加载后处理
+    var pendingPushAction: String? = nil
+
+    func application(_ application: UIApplication,
+                     didFinishLaunchingWithOptions _: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
+        UNUserNotificationCenter.current().delegate = self
+        return true
+    }
+
+    // APNs 返回 device token → 上传服务端
+    func application(_ application: UIApplication,
+                     didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
+        let token = deviceToken.map { String(format: "%02x", $0) }.joined()
+        Task { try? await NetworkManager.shared.registerDeviceToken(token) }
+    }
+
+    func application(_ application: UIApplication,
+                     didFailToRegisterForRemoteNotificationsWithError error: Error) {
+        print("⚠️ [Push] Failed to register: \(error)")
+    }
+
+    // 用户点击通知（App 在前台或后台）
+    func userNotificationCenter(_ center: UNUserNotificationCenter,
+                                 didReceive response: UNNotificationResponse,
+                                 withCompletionHandler completionHandler: @escaping () -> Void) {
+        let info = response.notification.request.content.userInfo
+        // 记录点击
+        if let nid = info["notification_log_id"] as? Int {
+            Task { try? await NetworkManager.shared.trackNotificationOpened(id: nid) }
+        }
+        // 暂存动作，ContentView 的 onAppear/onReceive 会消费
+        pendingPushAction = info["action"] as? String ?? "open_chat"
+        NotificationCenter.default.post(
+            name: NSNotification.Name("PushNotificationTapped"),
+            object: nil
+        )
+        completionHandler()
+    }
+
+    // App 在前台时收到通知 → 静默展示（不弹 banner）
+    func userNotificationCenter(_ center: UNUserNotificationCenter,
+                                 willPresent notification: UNNotification,
+                                 withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+        completionHandler([])
+    }
+}
+
+// MARK: - App Entry Point
 
 @main
 struct WorkSurvivalGuideApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+
     init() {
         // TikTok Business SDK initialization
         // ATT 弹窗由 SplashCoordinator 在 scenePhase=.active 时统一发起
@@ -69,9 +125,21 @@ struct SplashCoordinator: View {
             }
         }
         .onChange(of: scenePhase) { newPhase in
-            guard newPhase == .active, !attRequested else { return }
+            guard newPhase == .active else { return }
+            // 清除 App 角标
+            UIApplication.shared.applicationIconBadgeNumber = 0
+            // ATT（只请求一次）
+            guard !attRequested else { return }
             attRequested = true
             ATTrackingManager.requestTrackingAuthorization { _ in }
+            // Push 权限（只请求一次，ATT 之后请求可提升通过率）
+            UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { granted, _ in
+                if granted {
+                    DispatchQueue.main.async {
+                        UIApplication.shared.registerForRemoteNotifications()
+                    }
+                }
+            }
         }
     }
 }

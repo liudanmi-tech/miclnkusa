@@ -184,6 +184,9 @@ app.include_router(live_audio_router)
 from api.live_sse import router as live_sse_router
 app.include_router(live_sse_router)
 
+from api.notifications import router as notifications_router
+app.include_router(notifications_router)
+
 # 导入数据库相关
 from database.connection import get_db, init_db, close_db
 from database.models import User, Session, AnalysisResult, StrategyAnalysis, Skill, SkillExecution, Profile

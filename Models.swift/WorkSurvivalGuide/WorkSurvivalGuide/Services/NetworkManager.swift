@@ -2709,6 +2709,39 @@ extension NetworkManager {
     }
 
     /// 直接退出：归档 session，触发异步 finalize（生成 card_title / summary / mood_state）
+    // MARK: - Push Notifications
+
+    /// 注册/刷新 APNs device token，同时上报用户时区
+    func registerDeviceToken(_ token: String) async throws {
+        let authToken = getAuthToken()
+        guard !authToken.isEmpty else { return }
+        var request = URLRequest(url: URL(string: "\(baseURLForWrite)/api/v1/device/token")!)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(authToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = 10
+        let body: [String: Any] = [
+            "device_token": token,
+            "timezone":     TimeZone.current.identifier,
+            "sandbox":      AppConfig.shared.useTestServer,
+        ]
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let (_, _) = try await URLSession.shared.data(for: request)
+    }
+
+    /// 用户点击推送通知后记录打开事件
+    func trackNotificationOpened(id: Int) async throws {
+        let authToken = getAuthToken()
+        guard !authToken.isEmpty else { return }
+        var request = URLRequest(url: URL(string: "\(baseURLForWrite)/api/v1/notification/opened")!)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(authToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = 10
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["notification_log_id": id])
+        let (_, _) = try await URLSession.shared.data(for: request)
+    }
+
     func closeChatSession(sessionId: String, conversation: [[String: String]]) async throws {
         let token = getAuthToken()
         guard !token.isEmpty else {

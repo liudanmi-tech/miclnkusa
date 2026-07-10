@@ -17,6 +17,7 @@ struct ContentView: View {
     @State private var showSubscriptionStatus = false
     @AppStorage("onboarding_completed") private var onboardingCompleted = false
     @AppStorage("hasAcceptedTerms") private var hasAcceptedTerms = false
+    @UIApplicationDelegateAdaptor private var appDelegate: AppDelegate
 
     var body: some View {
         Group {
@@ -182,6 +183,19 @@ struct ContentView: View {
             }
         } message: {
             Text(recordingViewModel.uploadError ?? "")
+        }
+        // ── Push 通知点击路由（App 在前/后台时）──────────────────────────────
+        .onReceive(NotificationCenter.default.publisher(for:
+            NSNotification.Name("PushNotificationTapped"))) { _ in
+            guard authManager.isLoggedIn else { return }
+            recordingViewModel.createChatSession()
+        }
+        // ── 冷启动路由（App 被杀后点通知重新启动）────────────────────────────
+        .onAppear {
+            if let _ = appDelegate.pendingPushAction, authManager.isLoggedIn {
+                appDelegate.pendingPushAction = nil
+                recordingViewModel.createChatSession()
+            }
         }
     }
 }

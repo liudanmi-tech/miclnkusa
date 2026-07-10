@@ -30,8 +30,16 @@ class User(Base):
     subscription_product_id = Column(String(100), nullable=True)  # com.miclnk.pro.weekly/monthly/yearly
     sub_period_start = Column(DateTime(timezone=True), nullable=True)  # 当前订阅周期起始时间（用于配额滚动计算）
 
+    # Push notification fields
+    apns_device_token   = Column(String(512), nullable=True)
+    apns_sandbox        = Column(Boolean, default=False)
+    notification_opt_in = Column(Boolean, default=True)
+    timezone            = Column(String(64), default="America/New_York")
+    last_active_at      = Column(DateTime(timezone=True), nullable=True)
+
     # 关系
     sessions = relationship("Session", back_populates="user", cascade="all, delete-orphan")
+    notification_logs = relationship("NotificationLog", back_populates="user", cascade="all, delete-orphan")
 
 
 class Session(Base):
@@ -440,3 +448,24 @@ class LivePanelBatch(Base):
 
     session = relationship("Session", back_populates="live_panel_batches")
     segment = relationship("LiveSegment", back_populates="batches")
+
+
+class NotificationLog(Base):
+    """Push 通知发送记录表"""
+    __tablename__ = "notification_log"
+
+    id               = Column(Integer, primary_key=True, autoincrement=True)
+    user_id          = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    sent_at          = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    tier             = Column(Integer, nullable=False)         # 1/2/3/4
+    hook_type        = Column(String(50), nullable=False)      # followup/emotion/perspective/action/reflection/memory_ref/encouragement/challenge/generic_N
+    hook_index       = Column(Integer, nullable=True)          # Tier 4 模板序号 1-14
+    title            = Column(String(100))
+    body             = Column(String(200))
+    ref_session_id   = Column(String(100))                     # 生成依据的 session id
+    ref_session_date = Column(DateTime(timezone=True))
+    opened           = Column(Boolean, default=False)
+    opened_at        = Column(DateTime(timezone=True))
+    created_at       = Column(DateTime(timezone=True), server_default=func.now())
+
+    user = relationship("User", back_populates="notification_logs")
