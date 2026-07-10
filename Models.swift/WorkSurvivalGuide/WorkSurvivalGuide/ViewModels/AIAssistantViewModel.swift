@@ -48,6 +48,17 @@ struct AssistantMessage: Identifiable, Codable {
                          memeURL: url, skillName: nil, audioFileURL: nil, sceneImageURL: nil)
     }
 
+    /// 场景图独立消息工厂（"loading" = 骨架屏；真实 URL = 已就绪）
+    static func sceneImage(url: String) -> AssistantMessage {
+        AssistantMessage(id: UUID(), role: .assistant, content: "", timestamp: Date(),
+                         memeURL: nil, skillName: nil, audioFileURL: nil, sceneImageURL: url)
+    }
+
+    /// true = 这是一条独立场景图消息（内容为空，仅含 sceneImageURL）
+    var isSceneImage: Bool {
+        sceneImageURL != nil && content.isEmpty && memeURL == nil && audioFileURL == nil
+    }
+
     /// 语音消息工厂
     static func voice(fileURL: String) -> AssistantMessage {
         AssistantMessage(id: UUID(), role: .user, content: "[Voice message]", timestamp: Date(),

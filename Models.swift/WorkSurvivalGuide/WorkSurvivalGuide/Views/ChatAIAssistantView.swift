@@ -546,60 +546,43 @@ private struct ChatBubble: View {
     let message: AssistantMessage
 
     var isUser: Bool { message.role == .user }
-    /// AI 消息且有图片区（骨架屏或真实图片）
-    var showImageSection: Bool {
-        !isUser && (message.isGeneratingSceneImage || message.hasSceneImage)
-    }
 
     var body: some View {
-        // 语音消息：transcript 未到达时（占位符）显示波形气泡
         if message.isVoice, let path = message.audioFileURL,
            message.content == "[Voice message]" {
+            // 语音消息：波形播放气泡
             VoiceMessageBubble(fileURLPath: path)
+        } else if message.isSceneImage {
+            // 场景图独立气泡（4:5 全宽）
+            SceneImageBubble(
+                url: message.sceneImageURL ?? "loading",
+                isGenerating: message.isGeneratingSceneImage
+            )
+            .animation(.easeInOut(duration: 0.3), value: message.hasSceneImage)
         } else {
+            // 普通文字气泡
             HStack(alignment: .bottom, spacing: 0) {
                 if isUser { Spacer(minLength: 60) }
 
-                VStack(alignment: isUser ? .trailing : .leading, spacing: 0) {
-                    // ── 文字内容 ──────────────────────────────────────────
-                    if !message.content.isEmpty {
-                        HStack(spacing: 6) {
-                            if message.isVoice {
-                                Image(systemName: "mic.fill")
-                                    .font(.system(size: 11))
-                                    .foregroundColor(.white.opacity(0.6))
-                            }
-                            Text(message.content)
-                                .font(.system(size: 15, design: .rounded))
-                                .foregroundColor(.white)
-                                .multilineTextAlignment(isUser ? .trailing : .leading)
-                        }
-                        .padding(.horizontal, 14)
-                        .padding(.top, 10)
-                        .padding(.bottom, showImageSection ? 8 : 10)
+                HStack(spacing: 6) {
+                    if message.isVoice {
+                        Image(systemName: "mic.fill")
+                            .font(.system(size: 11))
+                            .foregroundColor(.white.opacity(0.6))
                     }
-
-                    // ── 场景图片区（仅 AI 消息）──────────────────────────
-                    if showImageSection {
-                        if message.isGeneratingSceneImage {
-                            SceneImageSkeletonView()
-                                .padding(.horizontal, 8)
-                                .padding(.bottom, 8)
-                        } else if message.hasSceneImage, let url = message.sceneImageURL {
-                            SceneImageView(url: url)
-                                .padding(.horizontal, 8)
-                                .padding(.bottom, 8)
-                                .transition(.opacity.combined(with: .scale(scale: 0.96)))
-                        }
-                    }
+                    Text(message.content)
+                        .font(.system(size: 15, design: .rounded))
+                        .foregroundColor(.white)
+                        .multilineTextAlignment(isUser ? .trailing : .leading)
                 }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
                 .background(
                     RoundedRectangle(cornerRadius: 16)
                         .fill(isUser
                             ? Color(hex: "#2D4A5E")
                             : Color.white.opacity(0.1))
                 )
-                .animation(.easeInOut(duration: 0.3), value: message.hasSceneImage)
 
                 if !isUser { Spacer(minLength: 60) }
             }
@@ -607,46 +590,65 @@ private struct ChatBubble: View {
     }
 }
 
-// MARK: - Scene Image Skeleton (生成中骨架屏)
+// MARK: - Scene Image Bubble (独立消息气泡，4:5 全宽)
+
+private struct SceneImageBubble: View {
+    let url: String
+    let isGenerating: Bool
+
+    var body: some View {
+        if isGenerating {
+            SceneImageSkeletonView()
+        } else {
+            SceneImageView(url: url)
+        }
+    }
+}
+
+// MARK: - Scene Image Skeleton (生成中骨架屏，4:5 全宽)
 
 private struct SceneImageSkeletonView: View {
     @State private var shimmerOffset: CGFloat = -1.0
 
     var body: some View {
-        RoundedRectangle(cornerRadius: 12)
-            .fill(Color.white.opacity(0.07))
-            .frame(width: 220, height: 220)
+        Color.clear
+            .aspectRatio(4/5, contentMode: .fit)
+            .frame(maxWidth: .infinity)
             .overlay(
-                GeometryReader { geo in
-                    LinearGradient(
-                        colors: [.clear, Color.white.opacity(0.13), .clear],
-                        startPoint: .leading,
-                        endPoint: .trailing
-                    )
-                    .frame(width: geo.size.width * 0.6)
-                    .offset(x: shimmerOffset * geo.size.width)
-                }
-                .clipShape(RoundedRectangle(cornerRadius: 12))
-            )
-            .overlay(
-                VStack(spacing: 6) {
-                    Image(systemName: "sparkles")
-                        .font(.system(size: 22))
-                        .foregroundColor(.white.opacity(0.25))
-                    Text("Generating scene...")
-                        .font(.system(size: 11, weight: .medium, design: .rounded))
-                        .foregroundColor(.white.opacity(0.25))
+                ZStack {
+                    RoundedRectangle(cornerRadius: 16)
+                        .fill(Color.white.opacity(0.07))
+                    // shimmer
+                    GeometryReader { geo in
+                        LinearGradient(
+                            colors: [.clear, Color.white.opacity(0.12), .clear],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                        .frame(width: geo.size.width * 0.5)
+                        .offset(x: shimmerOffset * geo.size.width)
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: 16))
+                    // label
+                    VStack(spacing: 8) {
+                        Image(systemName: "sparkles")
+                            .font(.system(size: 26))
+                            .foregroundColor(.white.opacity(0.22))
+                        Text("Generating scene...")
+                            .font(.system(size: 12, weight: .medium, design: .rounded))
+                            .foregroundColor(.white.opacity(0.22))
+                    }
                 }
             )
             .onAppear {
-                withAnimation(.linear(duration: 1.4).repeatForever(autoreverses: false)) {
+                withAnimation(.linear(duration: 1.5).repeatForever(autoreverses: false)) {
                     shimmerOffset = 1.6
                 }
             }
     }
 }
 
-// MARK: - Scene Image View (图片就绪)
+// MARK: - Scene Image View (图片就绪，4:5 全宽)
 
 private struct SceneImageView: View {
     let url: String
@@ -655,25 +657,37 @@ private struct SceneImageView: View {
         AsyncImage(url: URL(string: url)) { phase in
             switch phase {
             case .success(let image):
-                image
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-                    .frame(width: 220, height: 220)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-            case .failure:
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(Color.white.opacity(0.07))
-                    .frame(width: 220, height: 220)
+                Color.clear
+                    .aspectRatio(4/5, contentMode: .fit)
+                    .frame(maxWidth: .infinity)
                     .overlay(
-                        Image(systemName: "photo")
-                            .font(.system(size: 22))
-                            .foregroundColor(.white.opacity(0.25))
+                        image
+                            .resizable()
+                            .scaledToFill()
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 16))
+            case .failure:
+                Color.clear
+                    .aspectRatio(4/5, contentMode: .fit)
+                    .frame(maxWidth: .infinity)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16)
+                            .fill(Color.white.opacity(0.07))
+                            .overlay(
+                                Image(systemName: "photo")
+                                    .font(.system(size: 26))
+                                    .foregroundColor(.white.opacity(0.22))
+                            )
                     )
             default:
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(Color.white.opacity(0.07))
-                    .frame(width: 220, height: 220)
-                    .overlay(ProgressView().tint(Color.white.opacity(0.4)))
+                Color.clear
+                    .aspectRatio(4/5, contentMode: .fit)
+                    .frame(maxWidth: .infinity)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16)
+                            .fill(Color.white.opacity(0.07))
+                            .overlay(ProgressView().tint(Color.white.opacity(0.4)))
+                    )
             }
         }
     }
