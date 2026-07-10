@@ -22,13 +22,9 @@ struct ChatAIAssistantView: View {
     @StateObject private var chatVM: ChatAIAssistantViewModel
     @Environment(\.dismiss) private var dismiss
 
-    @AppStorage("image_style") private var selectedImageStyle: String = "spider_verse"
-
     @State private var inputText = ""
     @FocusState private var isInputFocused: Bool
-    @State private var showExitSheet = false
     @State private var isClosingSession = false
-    @State private var isGeneratingImage = false
     @State private var errorToast: String? = nil
 
     // ── scroll proxy for auto-scroll to bottom ──
@@ -42,7 +38,7 @@ struct ChatAIAssistantView: View {
     init(sessionId: String, isExistingSession: Bool = false) {
         self.sessionId = sessionId
         self.isExistingSession = isExistingSession
-        _chatVM = StateObject(wrappedValue: ChatAIAssistantViewModel(sessionId: sessionId))
+        _chatVM = StateObject(wrappedValue: ChatAIAssistantViewModel(sessionId: sessionId, isExistingSession: isExistingSession))
     }
 
     // MARK: - Body
@@ -98,10 +94,10 @@ struct ChatAIAssistantView: View {
                     .zIndex(99)
                 }
 
-                // Loading overlay for history / close / generate
-                if chatVM.isLoadingHistory || isClosingSession || isGeneratingImage {
+                // Loading overlay for history / close
+                if chatVM.isLoadingHistory || isClosingSession {
                     Color.black.opacity(0.5).ignoresSafeArea()
-                    ProgressView(chatVM.isLoadingHistory ? "Loading history..." : isGeneratingImage ? "Starting image generation..." : "Saving...")
+                    ProgressView(chatVM.isLoadingHistory ? "Loading history..." : "Saving...")
                         .foregroundColor(.white)
                         .tint(.white)
                 }
@@ -119,30 +115,24 @@ struct ChatAIAssistantView: View {
                             .font(.system(size: 14, weight: .semibold))
                             .foregroundColor(.white.opacity(0.85))
                     }
-                    .disabled(isClosingSession || isGeneratingImage)
+                    .disabled(isClosingSession)
                 }
             }
         }
         .navigationViewStyle(.stack)
-        .confirmationDialog(
-            "What would you like to do?",
-            isPresented: $showExitSheet,
-            titleVisibility: .visible
-        ) {
-            // image quota 耗尽时隐藏 "Convert to image"，直接只留 Just close
-            if SubscriptionManager.shared.canGenerateImage {
-                Button("Convert to image") { handleGenerateImage() }
-            }
-            Button("Just close") { handleCloseWithFinalize() }
-            Button("Keep chatting", role: .cancel) {}
-        } message: {
-            Text("Your conversation will be saved either way.")
-        }
         .alert(chatVM.errorMessage ?? "Error", isPresented: Binding(
             get: { chatVM.errorMessage != nil },
             set: { if !$0 { chatVM.errorMessage = nil } }
         )) {
             Button("OK") {}
+        }
+        .sheet(isPresented: $chatVM.showPaywall) {
+            SubscriptionView()
+        }
+        .alert("You've reached the image generation limit", isPresented: $chatVM.showProLimitToast) {
+            Button("OK", role: .cancel) { chatVM.showProLimitToast = false }
+        } message: {
+            Text("You've used all your image generations for this period. They'll reset with your next billing cycle.")
         }
         .task {
             if isExistingSession {
@@ -498,18 +488,13 @@ struct ChatAIAssistantView: View {
             deleteOrphanSession()
             return
         }
-        // 已经做过退出决策（convert/just-close）→ 不重复弹窗
+        // 已经做过退出决策 → 不重复弹窗
         if hasAlreadyExited {
             dismiss()
             return
         }
-        // 配额耗尽 → 跳过弹窗，直接 just-close
-        if !SubscriptionManager.shared.canGenerateImage {
-            handleCloseWithFinalize()
-            return
-        }
-        // 正常：弹出选择弹窗
-        showExitSheet = true
+        // 直接以 leave 逻辑处理
+        handleCloseWithFinalize()
     }
 
     private func handleCloseWithFinalize() {
@@ -538,31 +523,6 @@ struct ChatAIAssistantView: View {
         }
     }
 
-    private func handleGenerateImage() {
-        markSessionExit(action: "convert")
-        isGeneratingImage = true
-        let conversation = chatVM.conversationForServer()
-        Task {
-            do {
-                _ = try await NetworkManager.shared.generateImageFromChat(
-                    sessionId: sessionId,
-                    conversation: conversation,
-                    styleKey: selectedImageStyle
-                )
-            } catch {
-                print("⚠️ [ChatAIAssistantView] generateImageFromChat failed: \(error)")
-            }
-            await MainActor.run {
-                isGeneratingImage = false
-                NotificationCenter.default.post(
-                    name: NSNotification.Name("ChatSessionGeneratingImage"),
-                    object: sessionId
-                )
-                dismiss()
-            }
-        }
-    }
-
     private func deleteOrphanSession() {
         Task {
             try? await NetworkManager.shared.deleteSession(sessionId)
@@ -585,17 +545,23 @@ private struct ChatBubble: View {
     var isUser: Bool { message.role == .user }
 
     var body: some View {
-        // 语音消息：transcript 未到达时（占位符）显示波形气泡；
-        // transcript 到达后 content 已更新为真实文字，走普通文字气泡
         if message.isVoice, let path = message.audioFileURL,
            message.content == "[Voice message]" {
+            // 语音消息：波形播放气泡
             VoiceMessageBubble(fileURLPath: path)
+        } else if message.isSceneImage {
+            // 场景图独立气泡（4:5 全宽）
+            SceneImageBubble(
+                url: message.sceneImageURL ?? "loading",
+                isGenerating: message.isGeneratingSceneImage
+            )
+            .animation(.easeInOut(duration: 0.3), value: message.hasSceneImage)
         } else {
+            // 普通文字气泡
             HStack(alignment: .bottom, spacing: 0) {
                 if isUser { Spacer(minLength: 60) }
 
                 HStack(spacing: 6) {
-                    // 若该条消息原为语音输入，加小麦克风图标提示
                     if message.isVoice {
                         Image(systemName: "mic.fill")
                             .font(.system(size: 11))
@@ -618,6 +584,81 @@ private struct ChatBubble: View {
                 if !isUser { Spacer(minLength: 60) }
             }
         }
+    }
+}
+
+// MARK: - Scene Image Bubble (独立消息气泡，4:5 全宽)
+
+private struct SceneImageBubble: View {
+    let url: String
+    let isGenerating: Bool
+
+    var body: some View {
+        if isGenerating {
+            SceneImageSkeletonView()
+        } else {
+            SceneImageView(url: url)
+        }
+    }
+}
+
+// MARK: - Scene Image Skeleton (生成中骨架屏，4:5 全宽)
+
+private struct SceneImageSkeletonView: View {
+    @State private var shimmerOffset: CGFloat = -1.0
+
+    var body: some View {
+        Color.clear
+            .aspectRatio(4/5, contentMode: .fit)
+            .frame(maxWidth: .infinity)
+            .overlay(
+                ZStack {
+                    RoundedRectangle(cornerRadius: 16)
+                        .fill(Color.white.opacity(0.07))
+                    // shimmer
+                    GeometryReader { geo in
+                        LinearGradient(
+                            colors: [.clear, Color.white.opacity(0.12), .clear],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                        .frame(width: geo.size.width * 0.5)
+                        .offset(x: shimmerOffset * geo.size.width)
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: 16))
+                    // label
+                    VStack(spacing: 8) {
+                        Image(systemName: "sparkles")
+                            .font(.system(size: 26))
+                            .foregroundColor(.white.opacity(0.22))
+                        Text("Generating scene...")
+                            .font(.system(size: 12, weight: .medium, design: .rounded))
+                            .foregroundColor(.white.opacity(0.22))
+                    }
+                }
+            )
+            .onAppear {
+                withAnimation(.linear(duration: 1.5).repeatForever(autoreverses: false)) {
+                    shimmerOffset = 1.6
+                }
+            }
+    }
+}
+
+// MARK: - Scene Image View (图片就绪，4:5 全宽)
+
+private struct SceneImageView: View {
+    let url: String
+
+    var body: some View {
+        // 使用 ImageLoaderView（内存+磁盘缓存 + JWT），替代 AsyncImage（无缓存）
+        Color.clear
+            .aspectRatio(4/5, contentMode: .fit)
+            .frame(maxWidth: .infinity)
+            .overlay(
+                ImageLoaderView(imageUrl: url, imageBase64: nil, contentMode: .fill)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 16))
     }
 }
 

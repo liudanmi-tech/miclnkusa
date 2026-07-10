@@ -55,7 +55,7 @@ struct ImageLoaderView: View {
     }
     
     /// 将旧 HTTP IP 地址替换为新 HTTPS 域名，兼容数据库中存储的历史 URL
-    private static func normalizedURL(_ urlString: String) -> String {
+    static func normalizedURL(_ urlString: String) -> String {
         let oldPrefixes = [
             "http://34.74.150.225",
             "http://47.79.254.213",
@@ -69,6 +69,23 @@ struct ImageLoaderView: View {
             }
         }
         return result
+    }
+
+    /// 后台预下载并缓存图片，ViewModel 轮询拿到 URL 后调用，使首次渲染直接命中缓存
+    static func prefetch(urlString: String) async {
+        let normalized = normalizedURL(urlString)
+        guard ImageCacheManager.shared.image(for: normalized) == nil else { return }
+        guard let url = URL(string: normalized) else { return }
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 90
+        if normalized.contains("/api/v1/"),
+           let token = KeychainManager.shared.getToken(), !token.isEmpty {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        guard let (data, response) = try? await URLSession.shared.data(for: request),
+              (response as? HTTPURLResponse)?.statusCode == 200,
+              let img = UIImage(data: data) else { return }
+        ImageCacheManager.shared.cache(img, for: normalized)
     }
 
     private func loadImage() {

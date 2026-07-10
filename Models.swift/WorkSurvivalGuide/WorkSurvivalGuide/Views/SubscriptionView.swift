@@ -152,11 +152,11 @@ struct SubscriptionView: View {
     private func services(for productId: String) -> String {
         switch productId {
         case SubscriptionManager.yearlyProductID:
-            return "365 convert to image · 30 profiles · AI chat"
+            return "1100 convert to image · 30 profiles · AI chat"
         case SubscriptionManager.monthlyProductID:
-            return "30 convert to image · 15 profiles · AI chat"
+            return "90 convert to image · 15 profiles · AI chat"
         case SubscriptionManager.weeklyProductID:
-            return "7 convert to image · 7 profiles · AI chat"
+            return "20 convert to image · 7 profiles · AI chat"
         default:
             return ""
         }

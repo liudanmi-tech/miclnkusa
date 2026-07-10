@@ -17,9 +17,18 @@ struct AssistantMessage: Identifiable, Codable {
     let memeURL: String?       // non-nil → 这是一条梗图消息（独立消息行）
     let skillName: String?     // AI 回复时关联的技能名，用于消息气泡标签
     let audioFileURL: String?  // non-nil → 这是一条语音消息，值为本地 .m4a 文件绝对路径
+    /// nil = 无图；"loading" = 生成中（骨架屏）；其他 = 真实图片 URL
+    let sceneImageURL: String?
 
     var isMeme: Bool  { memeURL != nil }
     var isVoice: Bool { audioFileURL != nil }
+    /// true = 正在生成图片，显示骨架屏
+    var isGeneratingSceneImage: Bool { sceneImageURL == "loading" }
+    /// true = 图片已就绪
+    var hasSceneImage: Bool {
+        guard let url = sceneImageURL else { return false }
+        return url != "loading"
+    }
 
     /// 普通文字消息
     init(role: MessageRole, content: String, skillName: String? = nil) {
@@ -30,31 +39,51 @@ struct AssistantMessage: Identifiable, Codable {
         self.memeURL = nil
         self.skillName = skillName
         self.audioFileURL = nil
+        self.sceneImageURL = nil
     }
 
     /// 梗图消息工厂
     static func meme(url: String) -> AssistantMessage {
         AssistantMessage(id: UUID(), role: .assistant, content: "", timestamp: Date(),
-                         memeURL: url, skillName: nil, audioFileURL: nil)
+                         memeURL: url, skillName: nil, audioFileURL: nil, sceneImageURL: nil)
+    }
+
+    /// 场景图独立消息工厂（"loading" = 骨架屏；真实 URL = 已就绪）
+    static func sceneImage(url: String) -> AssistantMessage {
+        AssistantMessage(id: UUID(), role: .assistant, content: "", timestamp: Date(),
+                         memeURL: nil, skillName: nil, audioFileURL: nil, sceneImageURL: url)
+    }
+
+    /// true = 这是一条独立场景图消息（内容为空，仅含 sceneImageURL）
+    var isSceneImage: Bool {
+        sceneImageURL != nil && content.isEmpty && memeURL == nil && audioFileURL == nil
     }
 
     /// 语音消息工厂
     static func voice(fileURL: String) -> AssistantMessage {
         AssistantMessage(id: UUID(), role: .user, content: "[Voice message]", timestamp: Date(),
-                         memeURL: nil, skillName: nil, audioFileURL: fileURL)
+                         memeURL: nil, skillName: nil, audioFileURL: fileURL, sceneImageURL: nil)
     }
 
     private init(id: UUID, role: MessageRole, content: String, timestamp: Date,
-                 memeURL: String?, skillName: String?, audioFileURL: String?) {
+                 memeURL: String?, skillName: String?, audioFileURL: String?, sceneImageURL: String?) {
         self.id = id; self.role = role; self.content = content
         self.timestamp = timestamp; self.memeURL = memeURL; self.skillName = skillName
-        self.audioFileURL = audioFileURL
+        self.audioFileURL = audioFileURL; self.sceneImageURL = sceneImageURL
+    }
+
+    /// 返回附带场景图片 URL 的副本（"loading" = 骨架屏；nil = 清除；其他 = 真实 URL）
+    func withSceneImage(_ url: String?) -> AssistantMessage {
+        AssistantMessage(id: id, role: role, content: content, timestamp: timestamp,
+                         memeURL: memeURL, skillName: skillName, audioFileURL: audioFileURL,
+                         sceneImageURL: url)
     }
 
     /// 返回一条 content 已更新为转写文本的副本（保留其他所有字段，用于语音消息转写）
     func withTranscript(_ text: String) -> AssistantMessage {
         AssistantMessage(id: id, role: role, content: text, timestamp: timestamp,
-                         memeURL: memeURL, skillName: skillName, audioFileURL: audioFileURL)
+                         memeURL: memeURL, skillName: skillName, audioFileURL: audioFileURL,
+                         sceneImageURL: sceneImageURL)
     }
 
     enum MessageRole: String, Codable { case user, assistant }

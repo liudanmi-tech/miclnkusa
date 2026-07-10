@@ -1384,7 +1384,7 @@ struct SceneRestoreImageCarouselView: View {
                     )
             } else {
                 TabView(selection: $currentIndex) {
-                    ForEach(Array(validImages.enumerated()), id: \.element.id) { index, sceneImage in
+                    ForEach(Array(validImages.enumerated()), id: \.offset) { index, sceneImage in
                         SceneRestoreImageView(
                             sceneImage: sceneImage,
                             baseURL: baseURL,

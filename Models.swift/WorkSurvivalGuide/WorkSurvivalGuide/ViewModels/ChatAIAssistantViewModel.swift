@@ -7,6 +7,7 @@
 
 import Foundation
 import Combine
+import SwiftUI
 
 // MARK: - Chat Persistence
 
@@ -33,7 +34,9 @@ private enum ChatSessionStore {
 
     static func save(_ messages: [AssistantMessage], sessionId: String) {
         guard !messages.isEmpty else { return }
-        let trimmed = Array(messages.suffix(maxMessages))
+        // 存储前移除还在生成中的骨架屏消息，防止重启后残留
+        let cleaned = messages.filter { !$0.isGeneratingSceneImage }
+        let trimmed = Array(cleaned.suffix(maxMessages))
         let h = ChatHistoryPersistence(savedAt: Date(), messages: trimmed)
         if let data = try? JSONEncoder().encode(h) {
             UserDefaults.standard.set(data, forKey: key(sessionId))
@@ -72,10 +75,13 @@ final class ChatAIAssistantViewModel: ObservableObject {
     @Published var baselinePhase: String? = nil
     /// 重入时从服务端拉取历史中
     @Published var isLoadingHistory: Bool = false
+    /// true = 正在后台触发生图请求（防并发）
+    @Published var isImageGenerating: Bool = false
 
     // MARK: Immutable
 
     let sessionId: String
+    let isExistingSession: Bool
 
     // MARK: Private
 
@@ -87,8 +93,9 @@ final class ChatAIAssistantViewModel: ObservableObject {
 
     // MARK: Init
 
-    init(sessionId: String) {
+    init(sessionId: String, isExistingSession: Bool = false) {
         self.sessionId = sessionId
+        self.isExistingSession = isExistingSession
         let saved = ChatSessionStore.load(sessionId)
         if !saved.isEmpty {
             self.messages = saved
@@ -151,6 +158,8 @@ final class ChatAIAssistantViewModel: ObservableObject {
 
         messages.append(AssistantMessage(role: .user, content: trimmed))
         streamRequest(message: trimmed)
+        // 用户发送后立即并行触发生图，无需等待 AI 文字回复（服务端只用最后一条用户消息）
+        triggerAutoImageGeneration()
     }
 
     /// 发送语音消息。fileURL 用于消息气泡本地回放；audioData 用于上传服务器。
@@ -337,6 +346,8 @@ final class ChatAIAssistantViewModel: ObservableObject {
                     if let idx = self.messages.lastIndex(where: { $0.isVoice }) {
                         self.messages[idx] = self.messages[idx].withTranscript(text)
                     }
+                    // 转写到手后立即并行触发生图（服务端只用最后一条用户消息，无需等 AI 回复）
+                    self.triggerAutoImageGeneration()
                 }
             },
             onToken: { [weak self] token in
@@ -444,5 +455,112 @@ final class ChatAIAssistantViewModel: ObservableObject {
                 isMatchingSkills = false
             }
         }
+    }
+
+    // MARK: - Auto Image Generation
+
+    /// 每次 AI 回复完成后自动触发生图，图片作为独立消息气泡追加到对话流。
+    /// 流程：追加骨架屏消息 → 触发生图 API → 轮询 cover_image_url → 回填真实图片。
+    /// 防并发：isImageGenerating 确保同一时间只有一个请求在飞。
+    /// 配额耗尽：移除骨架屏消息 + 立即弹订阅墙。
+    private func triggerAutoImageGeneration() {
+        guard !isExistingSession else { return }
+        guard !isImageGenerating else { return }
+
+        // ── 配额检查 ──────────────────────────────────────────────────────────
+        guard SubscriptionManager.shared.canGenerateImage else {
+            showPaywall = true
+            return
+        }
+
+        // ── 追加独立骨架屏消息（不修改文字消息） ─────────────────────────────
+        isImageGenerating = true
+        let skeletonMsg = AssistantMessage.sceneImage(url: "loading")
+        let imageMessageId = skeletonMsg.id
+        messages.append(skeletonMsg)
+
+        let conv = conversationForServer()
+        let sid  = sessionId
+        let styleKey = UserDefaults.standard.string(forKey: "image_style") ?? "spider_verse"
+
+        Task {
+            // ── 发起生图请求 ──────────────────────────────────────────────────
+            // 服务端返回裸 dict（非 APIResponse 包装），JSON 解码可能抛 DecodingError。
+            // 只有 HTTP 403 image_limit_reached 才移除骨架屏；其他错误继续走轮询
+            // （HTTP 202 表示服务端已接受，骨架屏应保留直到轮询拿到真实 URL）。
+            do {
+                _ = try await NetworkManager.shared.generateImageFromChat(
+                    sessionId: sid,
+                    conversation: conv,
+                    styleKey: styleKey
+                )
+            } catch let err as NSError where err.localizedDescription.contains("image_limit_reached") {
+                // 真正的 403 配额耗尽 → 移除骨架屏 + 弹订阅墙
+                await MainActor.run { [weak self] in
+                    guard let self else { return }
+                    self._rollbackSceneImage(targetId: imageMessageId)
+                    self.isImageGenerating = false
+                    if SubscriptionManager.shared.isPro {
+                        self.showProLimitToast = true
+                    } else {
+                        self.showPaywall = true
+                    }
+                }
+                return
+            } catch {
+                // JSON 解码失败等非致命错误：服务端大概率已接受（HTTP 202），继续轮询
+                print("⚠️ [triggerAutoImageGeneration] generateImageFromChat non-fatal: \(error)")
+            }
+
+            // 服务端已接受请求：通知 Moment 列表开始轮询卡片封面
+            await MainActor.run {
+                NotificationCenter.default.post(
+                    name: NSNotification.Name("ChatSessionGeneratingImage"),
+                    object: sid
+                )
+            }
+
+            // ── 轮询 cover_image_url（每 3s，最多 20 次 = 60s）─────────────────
+            // 记录本轮轮询前已展示的图片 URL，防止误用上一轮已有的 URL 提前终止轮询
+            let previousImageURL: String? = await MainActor.run { [weak self] in
+                self?.messages
+                    .filter { $0.isSceneImage && !$0.isGeneratingSceneImage && $0.id != imageMessageId }
+                    .last?
+                    .sceneImageURL
+            }
+            for _ in 0..<20 {
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                do {
+                    let detail = try await NetworkManager.shared.getTaskDetail(sessionId: sid)
+                    if let url = detail.coverImageUrl, !url.isEmpty, url != previousImageURL {
+                        // 图片就绪：先预下载进本地缓存，再更新消息，首次渲染直接命中缓存不显示转圈
+                        await ImageLoaderView.prefetch(urlString: url)
+                        await MainActor.run { [weak self] in
+                            guard let self else { return }
+                            if let idx = self.messages.firstIndex(where: { $0.id == imageMessageId }) {
+                                self.messages[idx] = self.messages[idx].withSceneImage(url)
+                            }
+                            self.isImageGenerating = false
+                        }
+                        await SubscriptionManager.shared.refreshFromBackend()
+                        return
+                    }
+                } catch {
+                    // 轮询失败继续重试，不中断
+                }
+            }
+
+            // ── 超时：移除骨架屏消息 ─────────────────────────────────────────
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                self._rollbackSceneImage(targetId: imageMessageId)
+                self.isImageGenerating = false
+            }
+        }
+    }
+
+    /// 移除指定的骨架屏/图片消息（从消息数组中删除）
+    private func _rollbackSceneImage(targetId: UUID) {
+        messages.removeAll { $0.id == targetId }
     }
 }
