@@ -518,7 +518,7 @@ async def generate_scene_images(
                         asyncio.to_thread(
                             generate_image_fn,
                             scene_with_profile,
-                            user_id, session_id, 1000 + i,  # index 1000+ 避免与技能图片冲突
+                            user_id, session_id, int(time.time()) + i,  # 时间戳保证每轮 URL 唯一，避免覆盖上一轮
                             ref, 1, style_key, labels       # 并行模式：不重试，失败直接跳过
                         ),
                         timeout=180.0,  # 并行模式：单张超时 180s，总体最坏 180s（原串行 ~400s）
@@ -569,10 +569,10 @@ async def generate_scene_images(
                 first_url = next((s["image_url"] for s in scene_images if s.get("image_url")), None)
                 if first_url:
                     sess_cover = await db.get(Session, _uuid.UUID(session_id))
-                    if sess_cover and not sess_cover.cover_image_url:
+                    if sess_cover:
                         sess_cover.cover_image_url = first_url
                         await db.commit()
-                        logger.info(f"[场景生图] cover_image_url 已写入 session={session_id}")
+                        logger.info(f"[场景生图] cover_image_url 已更新 session={session_id}")
             else:
                 # StrategyAnalysis 尚未创建（技能还在跑），暂存到 analysis_stage_detail
                 sess2 = await db.get(Session, _uuid.UUID(session_id))
