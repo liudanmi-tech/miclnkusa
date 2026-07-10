@@ -517,24 +517,26 @@ async def _generate_suggested_questions(
             f"对话背景（最近几轮）：\n{ctx}\n\n"
             f"用户刚才说：{user_message[:200]}\n\n"
             f"AI刚才的回复：{ai_reply[:400]}\n\n"
-            f"根据以上对话，生成3个用户接下来可能想问的问题。要求：\n"
-            f"- 站在用户角度，用第一人称（如：我该如何...、如果...怎么办、怎么才能...）\n"
-            f"- 每个问题不超过20字\n"
-            f"- 紧扣AI刚才回复的内容，自然延伸\n"
+            f"根据以上情绪事件，生成3个「下一幕场景」——用户在这件事发生后，可能经历的具体画面。要求：\n"
+            f"- 描述一个有画面感的时间/地点/动作，用现在进行时\n"
+            f"- 不是问题，不是建议，是一个场景片段\n"
+            f"- 每条不超过15字，简洁直接\n"
+            f"- 场景要真实、有代入感，可以是独处/倾诉/行动/回忆等\n"
             f"- 仅输出JSON数组，不要任何其他文字\n"
-            f'示例：["我该怎么和领导沟通这件事？","如果对方不接受怎么办？","有没有具体的话术？"]'
+            f'示例：["散会后一个人坐在工位前发呆…","下班走在路上，脑子里反复回放那一幕…","回到家，跟朋友倾诉今天的事…"]'
         )
     else:
         prompt = (
             f"Conversation context (recent turns):\n{ctx}\n\n"
             f"User just said: {user_message[:200]}\n\n"
             f"AI just replied: {ai_reply[:400]}\n\n"
-            f"Based on the above, generate 3 questions the user might want to ask next. Requirements:\n"
-            f"- From the user's first-person perspective (e.g., 'How do I...', 'What if...', 'Should I...', 'Can I...')\n"
-            f"- Under 15 words each\n"
-            f"- Directly related to what the AI just said, naturally extending it\n"
+            f"Based on this emotional event, generate 3 'next scene' continuations — specific visual moments the user might experience after this. Requirements:\n"
+            f"- Describe a vivid scene with a time, place, or action — present tense\n"
+            f"- NOT a question or advice — a scene fragment\n"
+            f"- Under 12 words each, short and evocative\n"
+            f"- Real and relatable: alone processing it, venting to someone, taking action, replaying it, etc.\n"
             f"- Output only a JSON array, no other text\n"
-            f'Example: ["How do I bring this up without sounding defensive?","What if my manager disagrees?","Are there specific phrases I can use?"]'
+            f'Example: ["Sitting alone at my desk after the meeting…","Walking home, replaying every word in my head…","Telling my best friend what just happened…"]'
         )
     try:
         genai.configure(api_key=GEMINI_API_KEY)

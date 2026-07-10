@@ -30,6 +30,10 @@ struct ChatAIAssistantView: View {
     // ── scroll proxy for auto-scroll to bottom ──
     @State private var scrollToBottom = false
 
+    // ── full-screen image viewer ──
+    @State private var showFullScreen = false
+    @State private var fullScreenInitialIndex = 0
+
     // ── voice input ──
     @State private var inputMode: ChatInputMode = .voice
     @State private var isRecording: Bool = false
@@ -39,6 +43,12 @@ struct ChatAIAssistantView: View {
         self.sessionId = sessionId
         self.isExistingSession = isExistingSession
         _chatVM = StateObject(wrappedValue: ChatAIAssistantViewModel(sessionId: sessionId, isExistingSession: isExistingSession))
+    }
+
+    private var sceneImageItems: [(imageUrl: String?, imageBase64: String?)] {
+        chatVM.messages
+            .filter { $0.isSceneImage && !$0.isGeneratingSceneImage }
+            .map { (imageUrl: $0.sceneImageURL, imageBase64: nil) }
     }
 
     // MARK: - Body
@@ -126,6 +136,13 @@ struct ChatAIAssistantView: View {
         )) {
             Button("OK") {}
         }
+        .fullScreenCover(isPresented: $showFullScreen) {
+            FullScreenImageViewer(
+                items: sceneImageItems,
+                initialIndex: fullScreenInitialIndex,
+                baseURL: ""
+            ) { showFullScreen = false }
+        }
         .sheet(isPresented: $chatVM.showPaywall) {
             SubscriptionView()
         }
@@ -197,8 +214,13 @@ struct ChatAIAssistantView: View {
             ScrollView {
                 LazyVStack(spacing: 12) {
                     ForEach(chatVM.messages) { msg in
-                        ChatBubble(message: msg)
-                            .id(msg.id)
+                        ChatBubble(message: msg, onImageTap: { url in
+                            let items = sceneImageItems
+                            let idx = items.firstIndex { $0.imageUrl == url } ?? 0
+                            fullScreenInitialIndex = idx
+                            showFullScreen = true
+                        })
+                        .id(msg.id)
                     }
 
                     // Streaming bubble
@@ -250,16 +272,14 @@ struct ChatAIAssistantView: View {
 
     private var suggestedQuestionsView: some View {
         VStack(alignment: .leading, spacing: 7) {
-            Text("You might ask:")
+            Text("Next scene:")
                 .font(.system(size: 11, weight: .medium, design: .rounded))
                 .foregroundColor(.white.opacity(0.4))
                 .padding(.leading, 2)
 
             ForEach(chatVM.suggestions, id: \.self) { question in
                 Button(action: {
-                    inputText = question
-                    inputMode = .text
-                    isInputFocused = true
+                    chatVM.send(text: question)
                 }) {
                     HStack(spacing: 10) {
                         Text(question)
@@ -267,7 +287,7 @@ struct ChatAIAssistantView: View {
                             .foregroundColor(.white.opacity(0.82))
                             .multilineTextAlignment(.leading)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                        Image(systemName: "arrow.up.circle")
+                        Image(systemName: "sparkles")
                             .font(.system(size: 15))
                             .foregroundColor(.white.opacity(0.35))
                     }
@@ -541,6 +561,7 @@ struct ChatAIAssistantView: View {
 
 private struct ChatBubble: View {
     let message: AssistantMessage
+    var onImageTap: ((String) -> Void)? = nil
 
     var isUser: Bool { message.role == .user }
 
@@ -553,7 +574,8 @@ private struct ChatBubble: View {
             // 场景图独立气泡（4:5 全宽）
             SceneImageBubble(
                 url: message.sceneImageURL ?? "loading",
-                isGenerating: message.isGeneratingSceneImage
+                isGenerating: message.isGeneratingSceneImage,
+                onTap: message.isGeneratingSceneImage ? nil : { onImageTap?(message.sceneImageURL ?? "") }
             )
             .animation(.easeInOut(duration: 0.3), value: message.hasSceneImage)
         } else {
@@ -592,12 +614,13 @@ private struct ChatBubble: View {
 private struct SceneImageBubble: View {
     let url: String
     let isGenerating: Bool
+    var onTap: (() -> Void)? = nil
 
     var body: some View {
         if isGenerating {
             SceneImageSkeletonView()
         } else {
-            SceneImageView(url: url)
+            SceneImageView(url: url, onTap: onTap)
         }
     }
 }
@@ -649,6 +672,7 @@ private struct SceneImageSkeletonView: View {
 
 private struct SceneImageView: View {
     let url: String
+    var onTap: (() -> Void)? = nil
 
     var body: some View {
         // 使用 ImageLoaderView（内存+磁盘缓存 + JWT），替代 AsyncImage（无缓存）
@@ -659,6 +683,8 @@ private struct SceneImageView: View {
                 ImageLoaderView(imageUrl: url, imageBase64: nil, contentMode: .fill)
             )
             .clipShape(RoundedRectangle(cornerRadius: 16))
+            .contentShape(Rectangle())
+            .onTapGesture { onTap?() }
     }
 }
 

@@ -1148,8 +1148,8 @@ def generate_image_from_prompt(
         logger.info(f"[图片生成] 使用 {len(reference_images)} 张档案照片作为人物参考图")
     # 追加 4:5 竖版尺寸要求（使用 512×640 小尺寸，加快生成速度，客户端可放大）
     full_prompt += "\n\n【输出尺寸】请生成 4:5 竖版比例的图片（512×640px），适合竖版展示。"
-    # 禁止 Gemini 在画面中复制参考图的水印或生成任何文字水印
-    full_prompt += "\n\n【严禁】画面中不得出现任何文字、水印、logo、版权标注，包括但不限于 miclnk、MicLnk、Chattoon、AI Generated 等字样。参考图中若有水印请忽略，不得复制到生成图片中。"
+    # 禁止 Gemini 在画面中生成任何文字（不点名品牌，避免模型反向学习）
+    full_prompt += "\n\n【严禁】画面中不得出现任何文字、字母、数字或符号。忽略参考图中的所有文字内容，不得将其复制到生成图片中。"
     contents_list.append(full_prompt)
 
     for attempt in range(max_retries):
