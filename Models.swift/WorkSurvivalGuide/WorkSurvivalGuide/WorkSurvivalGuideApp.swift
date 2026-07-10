@@ -13,6 +13,16 @@ import KochavaTracking
 import AppTrackingTransparency
 import UserNotifications
 
+// MARK: - Push 异步辅助函数（文件级，避免在类方法上下文触发 Swift 并发类型推导 bug）
+
+fileprivate func pushUploadToken(_ token: String) async {
+    try? await NetworkManager.shared.registerDeviceToken(token)
+}
+
+fileprivate func pushTrackOpen(_ id: Int) async {
+    try? await NetworkManager.shared.trackNotificationOpened(id: id)
+}
+
 // MARK: - AppDelegate（Push 通知 + 冷启动路由）
 
 class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
@@ -30,7 +40,10 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     func application(_ application: UIApplication,
                      didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
         let token = deviceToken.map { String(format: "%02x", $0) }.joined()
-        Task { try? await NetworkManager.shared.registerDeviceToken(token) }
+        print("✅ [Push] Got device token: \(token.prefix(20))...")
+        // 暂存 token，供登录后上传
+        UserDefaults.standard.set(token, forKey: "pending_apns_token")
+        _Concurrency.Task { await pushUploadToken(token) }
     }
 
     func application(_ application: UIApplication,
@@ -40,26 +53,25 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
 
     // 用户点击通知（App 在前台或后台）
     func userNotificationCenter(_ center: UNUserNotificationCenter,
-                                 didReceive response: UNNotificationResponse,
-                                 withCompletionHandler completionHandler: @escaping () -> Void) {
+                                didReceive response: UNNotificationResponse,
+                                withCompletionHandler completionHandler: @escaping () -> Void) {
         let info = response.notification.request.content.userInfo
-        // 记录点击
-        if let nid = info["notification_log_id"] as? Int {
-            Task { try? await NetworkManager.shared.trackNotificationOpened(id: nid) }
+        let nid  = info["notification_log_id"] as? Int
+        let action = info["action"] as? String ?? "open_chat"
+        if let notifId = nid {
+            _Concurrency.Task { await pushTrackOpen(notifId) }
         }
-        // 暂存动作，ContentView 的 onAppear/onReceive 会消费
-        pendingPushAction = info["action"] as? String ?? "open_chat"
-        NotificationCenter.default.post(
-            name: NSNotification.Name("PushNotificationTapped"),
-            object: nil
-        )
+        DispatchQueue.main.async { [weak self] in
+            self?.pendingPushAction = action
+            NotificationCenter.default.post(name: NSNotification.Name("PushNotificationTapped"), object: nil)
+        }
         completionHandler()
     }
 
-    // App 在前台时收到通知 → 静默展示（不弹 banner）
+    // App 在前台时收到通知 → 静默不弹 banner
     func userNotificationCenter(_ center: UNUserNotificationCenter,
-                                 willPresent notification: UNNotification,
-                                 withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+                                willPresent notification: UNNotification,
+                                withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
         completionHandler([])
     }
 }

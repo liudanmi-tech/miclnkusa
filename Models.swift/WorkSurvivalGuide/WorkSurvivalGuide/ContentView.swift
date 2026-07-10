@@ -17,7 +17,6 @@ struct ContentView: View {
     @State private var showSubscriptionStatus = false
     @AppStorage("onboarding_completed") private var onboardingCompleted = false
     @AppStorage("hasAcceptedTerms") private var hasAcceptedTerms = false
-    @UIApplicationDelegateAdaptor private var appDelegate: AppDelegate
 
     var body: some View {
         Group {
@@ -119,6 +118,10 @@ struct ContentView: View {
                 selectedTab = .profile
                 TourManager.shared.startMainTour()
             }
+            // 登录后重新触发 APNs token 注册（确保 auth token 已就位时上传 device token）
+            if authManager.isLoggedIn {
+                UIApplication.shared.registerForRemoteNotifications()
+            }
         }
         .onChange(of: authManager.isLoggedIn) { isLoggedIn in
             // 处理从 LoginView 刚登录完成的情况
@@ -129,6 +132,16 @@ struct ContentView: View {
                 // 导致 onboarding 完成后再次 startMainTour() 时 onChange 不触发（值未变）→ 引导延迟 3-5 秒
                 if onboardingCompleted {
                     TourManager.shared.startMainTour()
+                }
+            }
+            // 登录后触发 APNs token 注册（此时 auth token 已写入 Keychain）
+            if isLoggedIn {
+                UIApplication.shared.registerForRemoteNotifications()
+                // 如果 AppDelegate 已缓存了 token（解决时序问题），直接上传
+                if let token = UserDefaults.standard.string(forKey: "pending_apns_token") {
+                    print("✅ [Push] Uploading pending token after login: \(token.prefix(20))...")
+                    Task { try? await NetworkManager.shared.registerDeviceToken(token) }
+                    UserDefaults.standard.removeObject(forKey: "pending_apns_token")
                 }
             }
         }
@@ -192,8 +205,10 @@ struct ContentView: View {
         }
         // ── 冷启动路由（App 被杀后点通知重新启动）────────────────────────────
         .onAppear {
-            if let _ = appDelegate.pendingPushAction, authManager.isLoggedIn {
-                appDelegate.pendingPushAction = nil
+            if let delegate = UIApplication.shared.delegate as? AppDelegate,
+               delegate.pendingPushAction != nil,
+               authManager.isLoggedIn {
+                delegate.pendingPushAction = nil
                 recordingViewModel.createChatSession()
             }
         }

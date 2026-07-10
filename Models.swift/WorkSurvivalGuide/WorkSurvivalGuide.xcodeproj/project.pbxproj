@@ -580,7 +580,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = WorkSurvivalGuide/WorkSurvivalGuide.entitlements;
+				CODE_SIGN_ENTITLEMENTS = WorkSurvivalGuide/WorkSurvivalGuideRelease.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1.2.4;
 				DEVELOPMENT_TEAM = CBFK93A25K;

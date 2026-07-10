@@ -54,7 +54,8 @@ BUCKET_TIMEZONES: dict[str, list[str]] = {
         "America/Phoenix", "America/Tijuana",
     ],
     "SGT": [
-        "Asia/Singapore",
+        "Asia/Singapore", "Asia/Shanghai", "Asia/Hong_Kong",
+        "Asia/Taipei", "Asia/Kuala_Lumpur",
     ],
 }
 

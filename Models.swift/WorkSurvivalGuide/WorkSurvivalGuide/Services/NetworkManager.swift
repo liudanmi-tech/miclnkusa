@@ -2715,7 +2715,7 @@ extension NetworkManager {
     func registerDeviceToken(_ token: String) async throws {
         let authToken = getAuthToken()
         guard !authToken.isEmpty else { return }
-        var request = URLRequest(url: URL(string: "\(baseURLForWrite)/api/v1/device/token")!)
+        var request = URLRequest(url: URL(string: "\(baseURLForWrite)/device/token")!)
         request.httpMethod = "POST"
         request.setValue("Bearer \(authToken)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -2733,7 +2733,7 @@ extension NetworkManager {
     func trackNotificationOpened(id: Int) async throws {
         let authToken = getAuthToken()
         guard !authToken.isEmpty else { return }
-        var request = URLRequest(url: URL(string: "\(baseURLForWrite)/api/v1/notification/opened")!)
+        var request = URLRequest(url: URL(string: "\(baseURLForWrite)/notification/opened")!)
         request.httpMethod = "POST"
         request.setValue("Bearer \(authToken)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")

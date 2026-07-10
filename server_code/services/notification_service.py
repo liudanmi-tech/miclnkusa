@@ -31,7 +31,16 @@ logger = logging.getLogger(__name__)
 APNS_KEY_ID    = os.getenv("APNS_KEY_ID", "")
 APNS_TEAM_ID   = os.getenv("APNS_TEAM_ID", "")
 APNS_BUNDLE_ID = os.getenv("APNS_BUNDLE_ID", "com.miclnk.pro")
-APNS_P8_KEY    = os.getenv("APNS_P8_KEY", "")   # 完整 PEM 内容
+
+# p8 key：优先读文件（推荐），也支持直接写 PEM 字符串到 APNS_P8_KEY 环境变量
+def _load_p8_key() -> str:
+    path = os.getenv("APNS_P8_KEY_PATH", "")
+    if path and os.path.exists(path):
+        with open(path, "r") as f:
+            return f.read().strip()
+    return os.getenv("APNS_P8_KEY", "")
+
+APNS_P8_KEY = _load_p8_key()
 
 # Gemini（复用 main.py 的 client，这里用独立 httpx 调用）
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
@@ -111,7 +120,7 @@ async def build_user_context(user_id: str, db: AsyncSession) -> dict:
 
     result = await db.execute(
         text("""
-            SELECT id, card_title, mood_state, emotion_type, skill_tags, created_at
+            SELECT id, card_title, mood_state, emotion_type, created_at
             FROM sessions
             WHERE user_id      = :uid
               AND session_type = 'chat'
