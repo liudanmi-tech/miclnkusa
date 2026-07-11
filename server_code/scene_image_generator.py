@@ -203,6 +203,31 @@ async def _fuzzy_match_profiles(
     return {n: None for n in unmatched_names}
 
 
+def _build_comic_prompt(scenes: list) -> str:
+    """
+    将多个场景描述合并为单张多格漫画 prompt。
+    1 个场景 → 直接返回原描述（不加多格指令，避免干扰）
+    2-4 个场景 → 拼成 N-panel comic strip 描述
+    """
+    n = len(scenes)
+    if n <= 1:
+        return scenes[0] if scenes else ""
+
+    layout_desc = {
+        2: "panels arranged side by side (left and right)",
+        3: "panels arranged in a horizontal strip from left to right",
+        4: "panels arranged in a 2x2 grid",
+    }.get(n, "panels arranged in a horizontal strip")
+
+    panel_lines = "\n".join([f"Panel {i + 1}: {s}" for i, s in enumerate(scenes)])
+    return (
+        f"A {n}-panel comic strip, {layout_desc}. "
+        f"Each panel clearly separated by a thin white border line.\n"
+        f"{panel_lines}\n"
+        f"Consistent characters and art style across all panels."
+    )
+
+
 async def generate_scene_images(
     transcript: list,           # 已解析的对话列表
     style_key: str,
@@ -214,6 +239,7 @@ async def generate_scene_images(
     speaker_mapping: dict = None,       # {Speaker_0: profile_id, ...}，用于场景类型判断
     fetch_profile_image_fn=None,        # 场景2：传入 _fetch_profile_image_from_oss（sync）
     max_images: int = 3,        # 按订阅 tier 控制最多生成图片数（Free=1，Pro=3）
+    comic_strip_mode: bool = False,  # True=AI Chat：多场景合并为单张漫画；False=普通/Live录音：不变
 ):
     """
     分析录音场景并并行生成图片，保存到 strategy_analysis.scene_images。
@@ -325,7 +351,8 @@ async def generate_scene_images(
                     logger.warning(f"[场景2 合并调用] JSON 解析失败: {_pe}, raw={raw[:200]}")
                     combined_data = {}
 
-                scenes = combined_data.get("scenes", [])[:max_images]
+                _scene_limit = 4 if comic_strip_mode else max_images
+                scenes = combined_data.get("scenes", [])[:_scene_limit]
 
                 # 从合并结果构建 _name_mapping 和 _matched_profiles
                 for transcript_name, profile_name in combined_data.get("name_mapping", {}).items():
@@ -370,7 +397,8 @@ async def generate_scene_images(
                 text = response.text.strip()
                 json_match = re.search(r'\{.*\}', text, re.DOTALL)
                 scenes_data = json.loads(json_match.group()) if json_match else {}
-                scenes = scenes_data.get("scenes", [])[:max_images]
+                _scene_limit = 4 if comic_strip_mode else max_images
+                scenes = scenes_data.get("scenes", [])[:_scene_limit]
 
             if not scenes:
                 logger.warning(f"[场景生图] 未提取到场景, session={session_id}")
@@ -462,9 +490,14 @@ async def generate_scene_images(
 
             logger.info(f"[场景生图] 步骤5 档案照片加载完成 耗时={time.time()-t_photo:.2f}s elapsed={time.time()-t_start:.2f}s")
 
-            # ── 6. 并行生成所有图片 ─────────────────────────────────────────
+            # ── 6. 生成图片 ─────────────────────────────────────────────────
+            # comic_strip_mode=True（AI Chat）：所有场景合并为单张多格漫画，只调用一次生图
+            # comic_strip_mode=False（普通/Live录音）：每个场景单独生图，并行执行（原逻辑不变）
             t_gen_start = time.time()
-            logger.info(f"[场景生图] 步骤6 并行生成{len(scenes)}张图片开始 elapsed={t_gen_start-t_start:.2f}s")
+            logger.info(
+                f"[场景生图] 步骤6 生图开始 mode={'comic_strip' if comic_strip_mode else 'parallel'} "
+                f"scenes={len(scenes)} elapsed={t_gen_start-t_start:.2f}s"
+            )
 
             async def gen_one(i, scene):
                 if is_narration_mode:
@@ -512,7 +545,7 @@ async def generate_scene_images(
                 # generate_image_fn 是同步函数，通过 asyncio.to_thread 调用
                 # 每张图最多等 180 秒，超时返回 None（视为失败）
                 t_img = time.time()
-                logger.info(f"[场景生图] 图{i} 生成开始 ref_images={len(ref) if ref else 0} scene={scene[:60]}")
+                logger.info(f"[场景生图] 图{i} 生成开始 ref_images={len(ref) if ref else 0} scene={scene[:80]}")
                 try:
                     result = await asyncio.wait_for(
                         asyncio.to_thread(
@@ -529,11 +562,25 @@ async def generate_scene_images(
                     logger.error(f"[场景生图] 图{i} 生成超时(180s) 耗时={time.time()-t_img:.2f}s，跳过")
                     return None
 
-            results = await asyncio.gather(
-                *[gen_one(i, scene) for i, scene in enumerate(scenes)],
-                return_exceptions=True
-            )
-            logger.info(f"[场景生图] 步骤6 全部图片生成完成 耗时={time.time()-t_gen_start:.2f}s elapsed={time.time()-t_start:.2f}s")
+            if comic_strip_mode:
+                # ── Comic Strip 模式：将所有场景合并为单张多格漫画 ──────────────
+                combined_scene = _build_comic_prompt(scenes)
+                logger.info(
+                    f"[场景生图] comic_strip prompt 已构建 scenes={len(scenes)} "
+                    f"prompt_len={len(combined_scene)} preview={combined_scene[:120]}"
+                )
+                single_result = await gen_one(0, combined_scene)
+                results = [single_result]
+                # 用拼接描述替换 scenes，供步骤7保存
+                scenes = [" | ".join(scenes)]
+            else:
+                # ── 普通模式：每个场景并行单独生图（原逻辑不变）─────────────────
+                results = await asyncio.gather(
+                    *[gen_one(i, scene) for i, scene in enumerate(scenes)],
+                    return_exceptions=True
+                )
+
+            logger.info(f"[场景生图] 步骤6 生图完成 耗时={time.time()-t_gen_start:.2f}s elapsed={time.time()-t_start:.2f}s")
 
             # ── 7. 组装 scene_images ────────────────────────────────────────
             scene_images = []

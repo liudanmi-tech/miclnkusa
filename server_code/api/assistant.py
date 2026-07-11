@@ -1835,10 +1835,11 @@ async def generate_image_from_chat(
         fetch_profile_image_fn=_fetch_prof_img_fn,
         speaker_mapping=speaker_mapping,
         max_images=_max_images,
+        comic_strip_mode=True,  # AI Chat：多场景合并为单张多格漫画
     ))
     logger.info(
         f"[CHAT:{id8}] scene_image triggered | style={req.style_key} "
-        f"max_images={_max_images} profile_id={profile_id[:8] if profile_id else 'none'}"
+        f"max_images={_max_images} comic_strip=True profile_id={profile_id[:8] if profile_id else 'none'}"
     )
 
     # 5. fire-and-forget：退出后处理（与 close-chat-session 路径相同）
