@@ -150,16 +150,18 @@ async def get_current_user(
     _user_cache[user_id] = (snapshot, now + _USER_CACHE_TTL)
 
     # 后台更新 last_active_at（用于推送通知的今日活跃判断）
-    # 用 create_task 避免阻塞当前请求
+    # 用独立 session 而非 DI db，避免 create_task 与 get_db() cleanup 并发操作同一连接
     import asyncio
     from sqlalchemy import text as sa_text
+    from database.connection import AsyncSessionLocal
     async def _update_last_active():
         try:
-            await db.execute(
-                sa_text("UPDATE users SET last_active_at = NOW() WHERE id = :uid"),
-                {"uid": user_id},
-            )
-            await db.commit()
+            async with AsyncSessionLocal() as _db:
+                await _db.execute(
+                    sa_text("UPDATE users SET last_active_at = NOW() WHERE id = :uid"),
+                    {"uid": user_id},
+                )
+                await _db.commit()
         except Exception:
             pass
     asyncio.create_task(_update_last_active())

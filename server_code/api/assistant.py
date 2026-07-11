@@ -23,11 +23,22 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from datetime import datetime, timezone, timedelta
 from pydantic import BaseModel
 
-from database.connection import get_db
+from database.connection import get_db, AsyncSessionLocal
 from database.models import AnalysisResult, StrategyAnalysis, User, Session, SkillExecution
 from auth.jwt_handler import get_current_user_id
 
 logger = logging.getLogger(__name__)
+
+
+async def _get_kg_context_isolated(mem_query: str, user_id: str) -> str:
+    """
+    KG 记忆检索，使用独立 DB session 而非 DI session。
+    这样即使被 asyncio.wait_for 取消，也不会污染请求的主 session。
+    """
+    from services.knowledge_graph import get_ai_context_kg
+    async with AsyncSessionLocal() as _kg_db:
+        return await get_ai_context_kg(mem_query, user_id, _kg_db)
+
 
 # ─── Quota Config ─────────────────────────────────────────────────────────────
 
@@ -475,7 +486,8 @@ async def _transcribe_audio(audio_bytes: bytes, audio_mime_type: str) -> str:
     Returns the raw transcription; empty string on failure."""
     def _run():
         genai.configure(api_key=GEMINI_API_KEY)
-        _model = genai.GenerativeModel(ASSISTANT_MODEL, safety_settings=_GEMINI_SAFETY)
+        # 转写用 gemini-2.5-flash-lite：最轻量多模态模型，无重型 Thinking，非流式速度快
+        _model = genai.GenerativeModel("gemini-2.5-flash-lite", safety_settings=_GEMINI_SAFETY)
         audio_part = genai.protos.Part(
             inline_data=genai.protos.Blob(mime_type=audio_mime_type, data=audio_bytes)
         )
@@ -920,14 +932,14 @@ async def assistant_chat(
     memory_used = False
     memory_context = ""
     try:
-        from services.knowledge_graph import get_ai_context_kg
         if req.message in ("__INIT__", "__SWITCH__"):
             # INIT/SWITCH：用对话摘要检索背景
             mem_query = conv_summary[:200] or skill_name
         else:
             mem_query = req.message
+        # 用独立 session，避免 wait_for 取消时污染主 db session
         memory_context = await asyncio.wait_for(
-            get_ai_context_kg(mem_query, user_id, db),
+            _get_kg_context_isolated(mem_query, user_id),
             timeout=3.0,
         )
         memory_used = bool(memory_context)
@@ -1277,10 +1289,10 @@ async def assistant_chat_audio(
     memory_used = False
     memory_context = ""
     try:
-        from services.knowledge_graph import get_ai_context_kg
         mem_query = conv_summary[:200] or skill_name
+        # 用独立 session，避免 wait_for 取消时污染主 db session
         memory_context = await asyncio.wait_for(
-            get_ai_context_kg(mem_query, user_id, db),
+            _get_kg_context_isolated(mem_query, user_id),
             timeout=3.0,
         )
         memory_used = bool(memory_context)

@@ -61,6 +61,7 @@ engine = create_async_engine(
     max_overflow=30,
     pool_pre_ping=True,
     pool_recycle=3600,
+    pool_reset_on_return="rollback",  # 确保连接归还池前 asyncpg 先 rollback，避免脏连接
     connect_args=connect_args
 )
 
@@ -89,8 +90,9 @@ async def get_db() -> AsyncSession:
         except Exception:
             await session.rollback()
             raise
-        finally:
-            await session.close()
+        # 注意：不在 finally 里手动调用 session.close()
+        # async with AsyncSessionLocal() 退出时会自动调用 close()
+        # 手动 close() + 自动 close() 双重调用会导致连接以脏状态归还连接池
 
 
 async def init_db():
