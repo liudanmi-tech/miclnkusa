@@ -1822,10 +1822,8 @@ async def generate_image_from_chat(
     from main import _fetch_profile_image_from_oss as _fetch_prof_img_fn
     _gemini_model = os.getenv("GEMINI_FLASH_MODEL", ASSISTANT_MODEL)
 
-    # Pro 用户最多生成 3 张，Free 用户限 1 张
-    _user_r = await db.execute(select(User).where(User.id == uuid.UUID(user_id)))
-    _user = _user_r.scalar_one_or_none()
-    _max_images = 3 if (_user and _user.subscription_tier == "pro") else 1
+    # Chat session 固定生成 1 张图片
+    _max_images = 1
 
     asyncio.create_task(_gen_scene_imgs(
         transcript=synthetic_transcript,

@@ -25,9 +25,11 @@ struct LoginView: View {
 
                     // ── Logo + Tagline ──
                     VStack(spacing: 14) {
-                        Image(systemName: "sparkles")
-                            .font(.system(size: 72))
-                            .foregroundColor(.blue)
+                        Image("AppLogoIcon")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 90, height: 90)
+                            .cornerRadius(20)
 
                         Text("Chattoon")
                             .font(.system(size: 26, weight: .bold))
