@@ -90,6 +90,10 @@ final class ChatAIAssistantViewModel: ObservableObject {
     private var typewriterTask: Task<Void, Never>?    // 打字机 Task
     private var hasReceivedSkillTags: Bool = false
     private var pendingMemeURL: String?
+    /// 每轮生图的唯一标识；新一轮开始时更新，旧轮的轮询检测到 token 变化后静默退出
+    private var imageGenerationToken: UUID = UUID()
+    /// 当前生图骨架屏消息的 ID，用于新一轮开始时回滚旧骨架屏
+    private var activeImageMessageId: UUID? = nil
 
     // MARK: Init
 
@@ -461,11 +465,19 @@ final class ChatAIAssistantViewModel: ObservableObject {
 
     /// 每次 AI 回复完成后自动触发生图，图片作为独立消息气泡追加到对话流。
     /// 流程：追加骨架屏消息 → 触发生图 API → 轮询 cover_image_url → 回填真实图片。
-    /// 防并发：isImageGenerating 确保同一时间只有一个请求在飞。
+    /// 抢占：新一轮触发时若旧轮仍在轮询，立即回滚旧骨架屏、开启新一轮（不阻塞）。
+    /// 超时兜底：60s 轮询无结果时将骨架屏替换为占位提示图（url="error"），不移除气泡。
     /// 配额耗尽：移除骨架屏消息 + 立即弹订阅墙。
     private func triggerAutoImageGeneration() {
         guard !isExistingSession else { return }
-        guard !isImageGenerating else { return }
+
+        // ── 抢占上一轮（若仍在轮询中）────────────────────────────────────────
+        // 不使用 guard !isImageGenerating，而是回滚旧骨架屏后立即开启新一轮
+        if isImageGenerating, let oldId = activeImageMessageId {
+            _rollbackSceneImage(targetId: oldId)
+            isImageGenerating = false
+            activeImageMessageId = nil
+        }
 
         // ── 配额检查 ──────────────────────────────────────────────────────────
         guard SubscriptionManager.shared.canGenerateImage else {
@@ -477,11 +489,16 @@ final class ChatAIAssistantViewModel: ObservableObject {
         isImageGenerating = true
         let skeletonMsg = AssistantMessage.sceneImage(url: "loading")
         let imageMessageId = skeletonMsg.id
+        activeImageMessageId = imageMessageId
         messages.append(skeletonMsg)
 
         let conv = conversationForServer()
         let sid  = sessionId
         let styleKey = UserDefaults.standard.string(forKey: "image_style") ?? "spider_verse"
+
+        // 每轮生图分配唯一 token；轮询中途若 token 变化（被新一轮抢占），静默退出
+        let myToken = UUID()
+        imageGenerationToken = myToken
 
         Task {
             // ── 发起生图请求 ──────────────────────────────────────────────────
@@ -497,9 +514,10 @@ final class ChatAIAssistantViewModel: ObservableObject {
             } catch let err as NSError where err.localizedDescription.contains("image_limit_reached") {
                 // 真正的 403 配额耗尽 → 移除骨架屏 + 弹订阅墙
                 await MainActor.run { [weak self] in
-                    guard let self else { return }
+                    guard let self, self.imageGenerationToken == myToken else { return }
                     self._rollbackSceneImage(targetId: imageMessageId)
                     self.isImageGenerating = false
+                    self.activeImageMessageId = nil
                     if SubscriptionManager.shared.isPro {
                         self.showProLimitToast = true
                     } else {
@@ -530,17 +548,24 @@ final class ChatAIAssistantViewModel: ObservableObject {
             }
             for _ in 0..<20 {
                 try? await Task.sleep(nanoseconds: 3_000_000_000)
+                // 若此轮已被新一轮抢占（token 已变），静默退出，不修改消息状态
+                let isStillActive = await MainActor.run { [weak self] in
+                    self?.imageGenerationToken == myToken
+                }
+                guard isStillActive else { return }
+
                 do {
                     let detail = try await NetworkManager.shared.getTaskDetail(sessionId: sid)
                     if let url = detail.coverImageUrl, !url.isEmpty, url != previousImageURL {
                         // 图片就绪：先预下载进本地缓存，再更新消息，首次渲染直接命中缓存不显示转圈
                         await ImageLoaderView.prefetch(urlString: url)
                         await MainActor.run { [weak self] in
-                            guard let self else { return }
+                            guard let self, self.imageGenerationToken == myToken else { return }
                             if let idx = self.messages.firstIndex(where: { $0.id == imageMessageId }) {
                                 self.messages[idx] = self.messages[idx].withSceneImage(url)
                             }
                             self.isImageGenerating = false
+                            self.activeImageMessageId = nil
                         }
                         await SubscriptionManager.shared.refreshFromBackend()
                         return
@@ -550,11 +575,14 @@ final class ChatAIAssistantViewModel: ObservableObject {
                 }
             }
 
-            // ── 超时：移除骨架屏消息 ─────────────────────────────────────────
+            // ── 超时：骨架屏替换为兜底占位图（不移除气泡） ──────────────────────
             await MainActor.run { [weak self] in
-                guard let self else { return }
-                self._rollbackSceneImage(targetId: imageMessageId)
+                guard let self, self.imageGenerationToken == myToken else { return }
+                if let idx = self.messages.firstIndex(where: { $0.id == imageMessageId }) {
+                    self.messages[idx] = self.messages[idx].withSceneImage("error")
+                }
                 self.isImageGenerating = false
+                self.activeImageMessageId = nil
             }
         }
     }

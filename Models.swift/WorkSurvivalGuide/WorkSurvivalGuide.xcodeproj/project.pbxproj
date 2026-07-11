@@ -65,11 +65,15 @@
 		};
 		C1B8D3D52F0F6202002950F2 /* WorkSurvivalGuideTests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+			);
 			path = WorkSurvivalGuideTests;
 			sourceTree = "<group>";
 		};
 		C1B8D3DF2F0F6202002950F2 /* WorkSurvivalGuideUITests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+			);
 			path = WorkSurvivalGuideUITests;
 			sourceTree = "<group>";
 		};
@@ -342,13 +346,9 @@
 			inputFileListPaths = (
 				"${PODS_ROOT}/Target Support Files/Pods-WorkSurvivalGuide/Pods-WorkSurvivalGuide-frameworks-${CONFIGURATION}-input-files.xcfilelist",
 			);
-			inputPaths = (
-			);
 			name = "[CP] Embed Pods Frameworks";
 			outputFileListPaths = (
 				"${PODS_ROOT}/Target Support Files/Pods-WorkSurvivalGuide/Pods-WorkSurvivalGuide-frameworks-${CONFIGURATION}-output-files.xcfilelist",
-			);
-			outputPaths = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;

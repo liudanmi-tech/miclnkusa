@@ -47,7 +47,7 @@ struct ChatAIAssistantView: View {
 
     private var sceneImageItems: [(imageUrl: String?, imageBase64: String?)] {
         chatVM.messages
-            .filter { $0.isSceneImage && !$0.isGeneratingSceneImage }
+            .filter { $0.isSceneImage && !$0.isGeneratingSceneImage && $0.sceneImageURL != "error" }
             .map { (imageUrl: $0.sceneImageURL, imageBase64: nil) }
     }
 
@@ -575,7 +575,7 @@ private struct ChatBubble: View {
             SceneImageBubble(
                 url: message.sceneImageURL ?? "loading",
                 isGenerating: message.isGeneratingSceneImage,
-                onTap: message.isGeneratingSceneImage ? nil : { onImageTap?(message.sceneImageURL ?? "") }
+                onTap: (message.isGeneratingSceneImage || message.sceneImageURL == "error") ? nil : { onImageTap?(message.sceneImageURL ?? "") }
             )
             .animation(.easeInOut(duration: 0.3), value: message.hasSceneImage)
         } else {
@@ -619,6 +619,8 @@ private struct SceneImageBubble: View {
     var body: some View {
         if isGenerating {
             SceneImageSkeletonView()
+        } else if url == "error" {
+            SceneImageFailedView()
         } else {
             SceneImageView(url: url, onTap: onTap)
         }
@@ -665,6 +667,30 @@ private struct SceneImageSkeletonView: View {
                     shimmerOffset = 1.6
                 }
             }
+    }
+}
+
+// MARK: - Scene Image Failed (生图超时/被安全过滤，显示占位提示)
+
+private struct SceneImageFailedView: View {
+    var body: some View {
+        Color.clear
+            .aspectRatio(4/5, contentMode: .fit)
+            .frame(maxWidth: .infinity)
+            .overlay(
+                ZStack {
+                    RoundedRectangle(cornerRadius: 16)
+                        .fill(Color.white.opacity(0.07))
+                    VStack(spacing: 8) {
+                        Image(systemName: "photo.badge.exclamationmark")
+                            .font(.system(size: 26))
+                            .foregroundColor(.white.opacity(0.3))
+                        Text("Image unavailable")
+                            .font(.system(size: 12, weight: .medium, design: .rounded))
+                            .foregroundColor(.white.opacity(0.3))
+                    }
+                }
+            )
     }
 }
 
