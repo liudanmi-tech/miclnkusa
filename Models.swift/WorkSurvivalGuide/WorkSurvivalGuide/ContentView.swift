@@ -17,6 +17,8 @@ struct ContentView: View {
     @State private var showSubscriptionStatus = false
     @AppStorage("onboarding_completed") private var onboardingCompleted = false
     @AppStorage("hasAcceptedTerms") private var hasAcceptedTerms = false
+    @AppStorage("hasShownRatingPrompt") private var hasShownRatingPrompt = false
+    @State private var showRatingPrompt = false
 
     var body: some View {
         Group {
@@ -210,6 +212,27 @@ struct ContentView: View {
                authManager.isLoggedIn {
                 delegate.pendingPushAction = nil
                 recordingViewModel.createChatSession()
+            }
+        }
+        // ── 首次 AI Chat 退出后评价弹窗 ──────────────────────────────────────
+        .onReceive(NotificationCenter.default.publisher(for:
+            NSNotification.Name("ChatSessionClosed"))) { _ in
+            guard !hasShownRatingPrompt else { return }
+            hasShownRatingPrompt = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+                withAnimation(.easeInOut(duration: 0.25)) {
+                    showRatingPrompt = true
+                }
+            }
+        }
+        .overlay {
+            if showRatingPrompt {
+                RatingPromptView {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        showRatingPrompt = false
+                    }
+                }
+                .zIndex(9000)
             }
         }
     }

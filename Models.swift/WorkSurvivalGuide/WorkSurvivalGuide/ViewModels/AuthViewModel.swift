@@ -9,6 +9,7 @@ import Foundation
 import AuthenticationServices
 import TikTokBusinessSDK
 import KochavaMeasurement
+import GoogleSignIn
 
 @MainActor
 class AuthViewModel: ObservableObject {
@@ -141,6 +142,55 @@ class AuthViewModel: ObservableObject {
             let nsErr = error as NSError
             if nsErr.code != ASAuthorizationError.canceled.rawValue {
                 showAuthError("Apple Sign In failed: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    // MARK: - Google Sign In
+
+    func handleGoogleSignIn() {
+        guard let windowScene = UIApplication.shared.connectedScenes
+            .compactMap({ $0 as? UIWindowScene })
+            .first(where: { $0.activationState == .foregroundActive }),
+              let rootVC = windowScene.windows.first(where: { $0.isKeyWindow })?.rootViewController else {
+            showAuthError("Cannot present Google Sign In")
+            return
+        }
+
+        isLoading = true
+        errorMessage = nil
+
+        GIDSignIn.sharedInstance.signIn(withPresenting: rootVC) { [weak self] result, error in
+            guard let self = self else { return }
+
+            if let error = error {
+                self.isLoading = false
+                let nsErr = error as NSError
+                if nsErr.code != GIDSignInError.canceled.rawValue {
+                    self.showAuthError("Google Sign In failed: \(error.localizedDescription)")
+                }
+                return
+            }
+
+            guard let idToken = result?.user.idToken?.tokenString else {
+                self.isLoading = false
+                self.showAuthError("Google Sign In failed: missing credentials")
+                return
+            }
+
+            _Concurrency.Task {
+                do {
+                    _ = try await AuthService.shared.googleLogin(idToken: idToken)
+                    let userInfo = try await AuthService.shared.getCurrentUser()
+                    self.isLoading = false
+                    AuthManager.shared.loginSuccess(userInfo: userInfo)
+                    TikTokBusiness.trackEvent("Login")
+                    TikTokBusiness.identify(withExternalID: userInfo.user_id, externalUserName: nil, phoneNumber: nil, email: userInfo.email)
+                    IdentityLink.register(name: "User ID", identifier: userInfo.user_id)
+                } catch {
+                    self.isLoading = false
+                    self.showAuthError(error.localizedDescription)
+                }
             }
         }
     }

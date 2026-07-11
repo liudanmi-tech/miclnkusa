@@ -7,6 +7,7 @@
 
 import SwiftUI
 import AuthenticationServices
+import GoogleSignIn
 
 // MARK: - Landing Page
 
@@ -51,6 +52,28 @@ struct LoginView: View {
                         .signInWithAppleButtonStyle(.white)
                         .frame(height: 50)
                         .cornerRadius(10)
+                        .disabled(viewModel.isLoading)
+
+                        // Google Sign In
+                        Button(action: { viewModel.handleGoogleSignIn() }) {
+                            HStack(spacing: 10) {
+                                ZStack {
+                                    Circle()
+                                        .fill(Color.white)
+                                        .frame(width: 20, height: 20)
+                                    Text("G")
+                                        .font(.system(size: 13, weight: .bold))
+                                        .foregroundColor(Color(red: 0.26, green: 0.52, blue: 0.96))
+                                }
+                                Text("Continue with Google")
+                                    .font(.system(size: 16, weight: .semibold))
+                                    .foregroundColor(.black)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 50)
+                            .background(Color.white)
+                            .cornerRadius(10)
+                        }
                         .disabled(viewModel.isLoading)
 
                         if viewModel.isLoading {

@@ -12,6 +12,7 @@ import KochavaMeasurement
 import KochavaTracking
 import AppTrackingTransparency
 import UserNotifications
+import GoogleSignIn
 
 // MARK: - Push 异步辅助函数（文件级，避免在类方法上下文触发 Swift 并发类型推导 bug）
 
@@ -33,7 +34,16 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     func application(_ application: UIApplication,
                      didFinishLaunchingWithOptions _: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
         UNUserNotificationCenter.current().delegate = self
+        GIDSignIn.sharedInstance.configuration = GIDConfiguration(
+            clientID: "180700562709-ii6cnrfpafp3n34cirpg72gp4m4dh814.apps.googleusercontent.com"
+        )
         return true
+    }
+
+    // Google Sign In OAuth 回调
+    func application(_ app: UIApplication, open url: URL,
+                     options: [UIApplication.OpenURLOptionsKey: Any] = [:]) -> Bool {
+        return GIDSignIn.sharedInstance.handle(url)
     }
 
     // APNs 返回 device token → 上传服务端

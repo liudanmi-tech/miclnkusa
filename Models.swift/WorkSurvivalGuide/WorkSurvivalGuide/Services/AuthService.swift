@@ -86,6 +86,38 @@ class AuthService {
                       userInfo: [NSLocalizedDescriptionKey: msg])
     }
 
+    // MARK: - Google Sign In
+
+    func googleLogin(idToken: String) async throws -> LoginResponse {
+        let dataResponse = await AF.request(
+            "\(baseURLForWrite)/auth/google-login",
+            method: .post,
+            parameters: ["id_token": idToken],
+            encoding: JSONEncoding.default,
+            headers: ["Content-Type": "application/json"],
+            requestModifier: { $0.timeoutInterval = 30 }
+        )
+        .serializingData()
+        .response
+
+        let statusCode = dataResponse.response?.statusCode ?? 0
+        let responseData = dataResponse.data ?? Data()
+
+        if statusCode == 200 {
+            let decoded = try JSONDecoder().decode(APIResponse<LoginResponse>.self, from: responseData)
+            guard decoded.code == 200, let data = decoded.data else {
+                throw NSError(domain: "AuthError", code: decoded.code,
+                              userInfo: [NSLocalizedDescriptionKey: decoded.message])
+            }
+            _ = KeychainManager.shared.saveToken(data.token)
+            _ = KeychainManager.shared.saveUserID(data.user_id)
+            return data
+        }
+        let msg = Self.parseFastAPIErrorDetail(responseData) ?? "Google Sign In failed"
+        throw NSError(domain: "AuthError", code: statusCode,
+                      userInfo: [NSLocalizedDescriptionKey: msg])
+    }
+
     // MARK: - Get Current User
 
     func getCurrentUser() async throws -> UserInfo {
