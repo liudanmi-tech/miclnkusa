@@ -1,6 +1,6 @@
 """
 认证相关API接口
-支持：手机号+验证码（旧）、邮箱+密码、Apple Sign In
+支持：手机号+验证码（旧）、邮箱+密码、Apple Sign In、Google Sign In
 """
 import os
 import httpx
@@ -236,6 +236,92 @@ async def apple_login(
         user.last_login_at = datetime.utcnow()
         await db.commit()
         logger.info("Apple login: user_id=" + str(user.id))
+
+    token = create_access_token(str(user.id))
+    expires_in = int(os.getenv("JWT_EXPIRATION_HOURS", "168")) * 3600
+    return {
+        "code": 200,
+        "message": "success",
+        "data": {"token": token, "user_id": str(user.id), "expires_in": expires_in}
+    }
+
+
+# ──────────────────────────────────────────────
+# 新接口：Google Sign In
+# ──────────────────────────────────────────────
+
+GOOGLE_TOKEN_INFO_URL = "https://oauth2.googleapis.com/tokeninfo"
+GOOGLE_CLIENT_ID = "180700562709-ii6cnrfpafp3n34cirpg72gp4m4dh814.apps.googleusercontent.com"
+
+
+class GoogleLoginRequest(BaseModel):
+    id_token: str
+
+
+async def _verify_google_token(id_token: str) -> dict:
+    """通过 Google tokeninfo 端点验证 ID token，返回 payload。"""
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(GOOGLE_TOKEN_INFO_URL, params={"id_token": id_token})
+            if resp.status_code != 200:
+                logger.warning(f"Google tokeninfo returned {resp.status_code}: {resp.text}")
+                raise HTTPException(status_code=401, detail="Invalid Google ID token")
+            payload = resp.json()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to verify Google token: {e}")
+        raise HTTPException(status_code=502, detail="Failed to contact Google servers")
+
+    if payload.get("aud") != GOOGLE_CLIENT_ID:
+        raise HTTPException(status_code=401, detail="Google token audience mismatch")
+
+    return payload
+
+
+@router.post("/google-login", response_model=dict, summary="Google Sign In")
+async def google_login(
+    request: GoogleLoginRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    验证 Google ID token，创建或找到对应用户。
+    """
+    payload = await _verify_google_token(request.id_token)
+    google_sub = payload.get("sub")
+    google_email = payload.get("email", "").lower().strip()
+
+    if not google_sub:
+        raise HTTPException(status_code=400, detail="Invalid Google token payload")
+
+    # 先按 google_user_id 查
+    result = await db.execute(select(User).where(User.google_user_id == google_sub))
+    user = result.scalar_one_or_none()
+
+    if user is None:
+        # 按 email 查（合并已有账户）
+        if google_email:
+            result2 = await db.execute(select(User).where(User.email == google_email))
+            existing = result2.scalar_one_or_none()
+        else:
+            existing = None
+
+        if existing:
+            existing.google_user_id = google_sub
+            existing.last_login_at = datetime.utcnow()
+            await db.commit()
+            user = existing
+            logger.info(f"Google linked to existing account: user_id={user.id}")
+        else:
+            user = User(google_user_id=google_sub, email=google_email or None)
+            db.add(user)
+            await db.commit()
+            await db.refresh(user)
+            logger.info(f"Google new user: user_id={user.id}")
+    else:
+        user.last_login_at = datetime.utcnow()
+        await db.commit()
+        logger.info(f"Google login: user_id={user.id}")
 
     token = create_access_token(str(user.id))
     expires_in = int(os.getenv("JWT_EXPIRATION_HOURS", "168")) * 3600
