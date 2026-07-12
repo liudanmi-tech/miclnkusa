@@ -197,13 +197,47 @@ private final class FullScreenImageViewController: UIViewController {
 
     @objc private func shareTapped() {
         guard let img = currentPageImage() else { return }
-        let vc = UIActivityViewController(activityItems: [img], applicationActivities: nil)
-        // iPad 防崩溃：提供 popover 锚点
-        if let popover = vc.popoverPresentationController {
+
+        let sheet = UIAlertController(title: nil, message: nil, preferredStyle: .actionSheet)
+
+        // Instagram Stories — URL Scheme 直接跳转（不经过 Share Sheet）
+        if let igURL = URL(string: "instagram-stories://share"),
+           UIApplication.shared.canOpenURL(igURL) {
+            sheet.addAction(UIAlertAction(title: "Instagram Stories", style: .default) { [weak self] _ in
+                self?.shareToInstagramStories(image: img)
+            })
+        }
+
+        // 通用分享（微信、存图、小红书等）
+        sheet.addAction(UIAlertAction(title: "More...", style: .default) { [weak self] _ in
+            guard let self else { return }
+            let vc = UIActivityViewController(activityItems: [img], applicationActivities: nil)
+            if let popover = vc.popoverPresentationController {
+                popover.sourceView = self.view
+                popover.sourceRect = CGRect(x: self.view.bounds.midX, y: 60, width: 0, height: 0)
+            }
+            self.present(vc, animated: true)
+        })
+
+        sheet.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+
+        // iPad 防崩溃
+        if let popover = sheet.popoverPresentationController {
             popover.sourceView = view
             popover.sourceRect = CGRect(x: view.bounds.midX, y: 60, width: 0, height: 0)
         }
-        present(vc, animated: true)
+        present(sheet, animated: true)
+    }
+
+    private func shareToInstagramStories(image: UIImage) {
+        guard let imageData = image.pngData(),
+              let url = URL(string: "instagram-stories://share") else { return }
+        // 把图片写入剪贴板，Instagram 会读取该 key 作为 Stories 背景图
+        UIPasteboard.general.setItems(
+            [["com.instagram.sharedSticker.backgroundImage": imageData]],
+            options: [.expirationDate: Date().addingTimeInterval(300)]
+        )
+        UIApplication.shared.open(url)
     }
     
     private func showSaveAction() {
