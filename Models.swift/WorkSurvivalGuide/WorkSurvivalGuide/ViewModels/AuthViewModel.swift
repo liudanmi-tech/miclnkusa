@@ -47,7 +47,7 @@ class AuthViewModel: ObservableObject {
                 let userInfo = try await AuthService.shared.getCurrentUser()
                 isLoading = false
                 AuthManager.shared.loginSuccess(userInfo: userInfo)
-                TikTokBusiness.trackEvent("Login")
+                TikTokBusiness.trackEvent("Login", withProperties: ["method": "email"])
                 TikTokBusiness.identify(withExternalID: userInfo.user_id, externalUserName: nil, phoneNumber: nil, email: userInfo.email)
                 // Kochava IdentityLink：只传内部用户 ID，不传 PII
                 IdentityLink.register(name: "User ID", identifier: userInfo.user_id)
@@ -80,12 +80,14 @@ class AuthViewModel: ObservableObject {
 
         _Concurrency.Task {
             do {
-                _ = try await AuthService.shared.emailLogin(email: trimmedEmail, password: password)
+                let loginData = try await AuthService.shared.emailLogin(email: trimmedEmail, password: password)
                 let userInfo = try await AuthService.shared.getCurrentUser()
                 isLoading = false
                 AuthManager.shared.loginSuccess(userInfo: userInfo)
-                TikTokBusiness.trackEvent("Registration")
-                TikTokBusiness.trackEvent("Login")
+                if loginData.is_new_user == true {
+                    TikTokBusiness.trackEvent("Registration", withProperties: ["method": "email"])
+                }
+                TikTokBusiness.trackEvent("Login", withProperties: ["method": "email"])
                 TikTokBusiness.identify(withExternalID: userInfo.user_id, externalUserName: nil, phoneNumber: nil, email: userInfo.email)
                 IdentityLink.register(name: "User ID", identifier: userInfo.user_id)
             } catch {
@@ -120,7 +122,7 @@ class AuthViewModel: ObservableObject {
 
             _Concurrency.Task {
                 do {
-                    _ = try await AuthService.shared.appleLogin(
+                    let loginData = try await AuthService.shared.appleLogin(
                         identityToken: identityToken,
                         authCode: authCode,
                         fullName: fullName
@@ -128,7 +130,10 @@ class AuthViewModel: ObservableObject {
                     let userInfo = try await AuthService.shared.getCurrentUser()
                     isLoading = false
                     AuthManager.shared.loginSuccess(userInfo: userInfo)
-                    TikTokBusiness.trackEvent("Login")
+                    if loginData.is_new_user == true {
+                        TikTokBusiness.trackEvent("Registration", withProperties: ["method": "apple"])
+                    }
+                    TikTokBusiness.trackEvent("Login", withProperties: ["method": "apple"])
                     TikTokBusiness.identify(withExternalID: userInfo.user_id, externalUserName: nil, phoneNumber: nil, email: userInfo.email)
                     IdentityLink.register(name: "User ID", identifier: userInfo.user_id)
                 } catch {
@@ -180,11 +185,14 @@ class AuthViewModel: ObservableObject {
 
             _Concurrency.Task {
                 do {
-                    _ = try await AuthService.shared.googleLogin(idToken: idToken)
+                    let loginData = try await AuthService.shared.googleLogin(idToken: idToken)
                     let userInfo = try await AuthService.shared.getCurrentUser()
                     self.isLoading = false
                     AuthManager.shared.loginSuccess(userInfo: userInfo)
-                    TikTokBusiness.trackEvent("Login")
+                    if loginData.is_new_user == true {
+                        TikTokBusiness.trackEvent("Registration", withProperties: ["method": "google"])
+                    }
+                    TikTokBusiness.trackEvent("Login", withProperties: ["method": "google"])
                     TikTokBusiness.identify(withExternalID: userInfo.user_id, externalUserName: nil, phoneNumber: nil, email: userInfo.email)
                     IdentityLink.register(name: "User ID", identifier: userInfo.user_id)
                 } catch {

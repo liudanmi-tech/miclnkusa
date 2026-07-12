@@ -8,6 +8,7 @@
 import Foundation
 import Combine
 import UIKit
+import TikTokBusinessSDK
 
 class RecordingViewModel: ObservableObject {
     @Published var isRecording = false
@@ -17,6 +18,7 @@ class RecordingViewModel: ObservableObject {
     @Published var uploadPhaseDescription: String = "Uploading"  // "Uploading" | "Processing, please wait..."
     @Published var showPaywall: Bool = false
     @Published var showProLimitAlert: Bool = false
+    @Published var showProChatLimitAlert: Bool = false
     @Published var uploadError: String? = nil
 
     private let audioRecorder = AudioRecorderService.shared
@@ -40,8 +42,12 @@ class RecordingViewModel: ObservableObject {
             defer { self.isCreatingSession = false }
             // 配额检查（在 MainActor 上访问 SubscriptionManager）
             guard SubscriptionManager.shared.canStartChat else {
-                print("⚠️ [RecordingViewModel] chat_limit_reached (local check) — showPaywall")
-                self.showPaywall = true
+                print("⚠️ [RecordingViewModel] chat_limit_reached (local check)")
+                if SubscriptionManager.shared.isPro {
+                    self.showProChatLimitAlert = true
+                } else {
+                    self.showPaywall = true
+                }
                 return
             }
             do {
@@ -69,8 +75,12 @@ class RecordingViewModel: ObservableObject {
             } catch {
                 let nsErr = error as NSError
                 if nsErr.code == 403 {
-                    print("⚠️ [RecordingViewModel] createChatSession 403 — showPaywall")
-                    self.showPaywall = true
+                    print("⚠️ [RecordingViewModel] createChatSession 403")
+                    if SubscriptionManager.shared.isPro {
+                        self.showProChatLimitAlert = true
+                    } else {
+                        self.showPaywall = true
+                    }
                 } else {
                     print("❌ [RecordingViewModel] createChatSession 失败: \(error.localizedDescription)")
                 }
@@ -310,6 +320,10 @@ class RecordingViewModel: ObservableObject {
                     )
 
                     print("✅ [RecordingViewModel] 上传成功！")
+                    TikTokBusiness.trackEvent("ViewContent", withProperties: [
+                        "content_id": "recording_complete",
+                        "content_type": "feature"
+                    ])
                     print("📋 [RecordingViewModel] 响应数据:")
                     print("   - sessionId: \(response.sessionId)")
                     #if DEBUG || INTERNALTEST

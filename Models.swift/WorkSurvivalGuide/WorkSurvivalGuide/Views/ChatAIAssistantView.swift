@@ -7,6 +7,7 @@
 
 import SwiftUI
 import AVFoundation
+import TikTokBusinessSDK
 
 // MARK: - ChatInputMode
 
@@ -161,6 +162,12 @@ struct ChatAIAssistantView: View {
             Button("OK", role: .cancel) { chatVM.showProLimitToast = false }
         } message: {
             Text("You've used all your image generations for this period. They'll reset with your next billing cycle.")
+        }
+        .onAppear {
+            TikTokBusiness.trackEvent("ViewContent", withProperties: [
+                "content_id": "ai_chat",
+                "content_type": "feature"
+            ])
         }
         .task {
             if isExistingSession {

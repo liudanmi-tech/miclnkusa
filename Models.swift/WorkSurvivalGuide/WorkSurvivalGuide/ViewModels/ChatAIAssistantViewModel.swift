@@ -135,7 +135,7 @@ final class ChatAIAssistantViewModel: ObservableObject {
     /// 构建服务端 close / generate-image 接口所需的 conversation 数组
     func conversationForServer() -> [[String: String]] {
         messages.compactMap { msg -> [String: String]? in
-            guard !msg.isMeme else { return nil }
+            guard !msg.isMeme, !msg.isSceneImage else { return nil }
             return ["role": msg.role == .user ? "user" : "assistant",
                     "content": msg.content]
         }
@@ -214,8 +214,9 @@ final class ChatAIAssistantViewModel: ObservableObject {
         errorMessage = nil
 
         // history = 全部已有消息（含刚追加的用户消息，与 AIAssistantViewModel 保持一致）
+        // 过滤 meme 和 scene image（content 为空，发给服务端会产生无效条目）
         let history: [[String: String]] = messages.compactMap { msg in
-            guard !msg.isMeme else { return nil }
+            guard !msg.isMeme, !msg.isSceneImage else { return nil }
             return ["role": msg.role == .user ? "user" : "assistant",
                     "content": msg.content]
         }
@@ -332,7 +333,7 @@ final class ChatAIAssistantViewModel: ObservableObject {
 
         // history 包含刚追加的 "🎤 Voice message" user bubble
         let history: [[String: String]] = messages.compactMap { msg in
-            guard !msg.isMeme else { return nil }
+            guard !msg.isMeme, !msg.isSceneImage else { return nil }
             return ["role": msg.role == .user ? "user" : "assistant",
                     "content": msg.content]
         }
@@ -471,7 +472,6 @@ final class ChatAIAssistantViewModel: ObservableObject {
     /// 超时兜底：60s 轮询无结果时将骨架屏替换为占位提示图（url="error"），不移除气泡。
     /// 配额耗尽：移除骨架屏消息 + 立即弹订阅墙。
     private func triggerAutoImageGeneration() {
-        guard !isExistingSession else { return }
 
         // ── 抢占上一轮（若仍在轮询中）────────────────────────────────────────
         // 不使用 guard !isImageGenerating，而是回滚旧骨架屏后立即开启新一轮

@@ -189,6 +189,11 @@ struct ContentView: View {
         } message: {
             Text("You've used all 30 recordings this month. Your quota resets on the 1st of next month. Thanks for being a Pro member!")
         }
+        .alert("Chat Limit Reached", isPresented: $recordingViewModel.showProChatLimitAlert) {
+            Button("OK", role: .cancel) { recordingViewModel.showProChatLimitAlert = false }
+        } message: {
+            Text("You've used all your AI chat sessions for this period. They'll reset with your next billing cycle.")
+        }
         .alert("Upload Failed", isPresented: Binding(
             get: { recordingViewModel.uploadError != nil },
             set: { if !$0 { recordingViewModel.uploadError = nil } }

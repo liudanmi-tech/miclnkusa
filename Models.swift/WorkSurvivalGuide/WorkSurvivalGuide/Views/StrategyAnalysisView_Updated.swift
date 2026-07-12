@@ -1486,6 +1486,8 @@ struct SceneRestoreImageView: View {
                     .font(.system(size: 18, weight: .bold, design: .rounded)) // Nunito 700, 18px
                     .foregroundColor(.white)
                     .shadow(color: Color.black.opacity(0.12), radius: 3, x: 0, y: 0) // 根据Figma: boxShadow
+                    .lineLimit(5)
+                    .truncationMode(.tail)
             }
             .padding(.leading, 23.99)
             .padding(.bottom, 24) // 底部内边距

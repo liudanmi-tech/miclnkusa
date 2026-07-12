@@ -7,6 +7,7 @@
 
 import SwiftUI
 import StoreKit
+import TikTokBusinessSDK
 
 struct SubscriptionView: View {
     @Environment(\.dismiss) private var dismiss
@@ -85,6 +86,12 @@ struct SubscriptionView: View {
                     .padding(.top, 24)
                 }
             }
+        }
+        .onAppear {
+            TikTokBusiness.trackEvent("ViewContent", withProperties: [
+                "content_id": "paywall",
+                "content_type": "subscription"
+            ])
         }
         .onChange(of: manager.isPro) { newValue in
             if newValue { dismiss() }
@@ -245,7 +252,14 @@ private struct ProductCard: View {
     }
 
     var body: some View {
-        Button(action: onPurchase) {
+        Button(action: {
+            TikTokBusiness.trackEvent("InitiateCheckout", withProperties: [
+                "content_id": product.id,
+                "currency": "USD",
+                "value": NSDecimalNumber(decimal: product.price).doubleValue
+            ])
+            onPurchase()
+        }) {
             HStack(alignment: .top, spacing: 12) {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 8) {

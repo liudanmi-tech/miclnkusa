@@ -175,6 +175,13 @@ struct TaskDetailView: View {
             .fullScreenCover(isPresented: $showChatView) {
                 ChatAIAssistantView(sessionId: task.id, isExistingSession: true)
             }
+            .onChange(of: showChatView) { isPresented in
+                if !isPresented {
+                    // Chat 关闭后失效缓存，重新拉取策略分析（含最新生图）
+                    DetailCacheManager.shared.invalidateStrategy(for: task.id)
+                    loadStrategyAnalysis()
+                }
+            }
             .sheet(isPresented: $showSummarySheet) {
                 SummarySheet(
                     summary: detail?.summary ?? task.summary,

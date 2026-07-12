@@ -185,8 +185,9 @@ async def email_login(
 
     result = await db.execute(select(User).where(User.email == email))
     user = result.scalar_one_or_none()
+    is_new_user = user is None
 
-    if user is None:
+    if is_new_user:
         # 自动注册
         hashed = _hash_password(password)
         user = User(email=email, password_hash=hashed)
@@ -207,7 +208,7 @@ async def email_login(
     return {
         "code": 200,
         "message": "success",
-        "data": {"token": token, "user_id": str(user.id), "expires_in": expires_in}
+        "data": {"token": token, "user_id": str(user.id), "expires_in": expires_in, "is_new_user": is_new_user}
     }
 
 
@@ -270,8 +271,9 @@ async def apple_login(
     # 先按 apple_user_id 查
     result = await db.execute(select(User).where(User.apple_user_id == apple_sub))
     user = result.scalar_one_or_none()
+    is_new_user = user is None
 
-    if user is None:
+    if is_new_user:
         # 新用户；若 Apple 返回了 email 则同时存 email
         user = User(apple_user_id=apple_sub, email=apple_email)
         db.add(user)
@@ -297,7 +299,7 @@ async def apple_login(
     return {
         "code": 200,
         "message": "success",
-        "data": {"token": token, "user_id": str(user.id), "expires_in": expires_in}
+        "data": {"token": token, "user_id": str(user.id), "expires_in": expires_in, "is_new_user": is_new_user}
     }
 
 
@@ -353,6 +355,7 @@ async def google_login(
     result = await db.execute(select(User).where(User.google_user_id == google_sub))
     user = result.scalar_one_or_none()
 
+    is_new_user = False
     if user is None:
         # 按 email 查（合并已有账户）
         if google_email:
@@ -362,12 +365,15 @@ async def google_login(
             existing = None
 
         if existing:
+            # 已有邮件账户，绑定 Google —— 不算新注册
             existing.google_user_id = google_sub
             existing.last_login_at = datetime.utcnow()
             await db.commit()
             user = existing
             logger.info(f"Google linked to existing account: user_id={user.id}")
         else:
+            # 全新用户
+            is_new_user = True
             user = User(google_user_id=google_sub, email=google_email or None)
             db.add(user)
             await db.commit()
@@ -383,7 +389,7 @@ async def google_login(
     return {
         "code": 200,
         "message": "success",
-        "data": {"token": token, "user_id": str(user.id), "expires_in": expires_in}
+        "data": {"token": token, "user_id": str(user.id), "expires_in": expires_in, "is_new_user": is_new_user}
     }
 
 

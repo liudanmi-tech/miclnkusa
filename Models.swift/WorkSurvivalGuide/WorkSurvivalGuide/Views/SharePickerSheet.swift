@@ -7,6 +7,7 @@
 
 import SwiftUI
 import Photos
+import TikTokBusinessSDK
 
 // MARK: - Share Picker Sheet
 
@@ -87,6 +88,11 @@ struct SharePickerSheet: View {
     }
 
     private func instagramTap() {
+        TikTokBusiness.trackEvent("ClickButton", withProperties: [
+            "content_id": "share_instagram",
+            "content_type": "comic",
+            "quantity": selected.count
+        ])
         let urls = imageURLs.filter { selected.contains($0) }
         let images = urls.compactMap { ImageCacheManager.shared.image(for: $0) }
         dismiss()

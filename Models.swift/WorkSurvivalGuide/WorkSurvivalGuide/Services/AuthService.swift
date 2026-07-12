@@ -243,6 +243,7 @@ struct LoginResponse: Codable {
     let token: String
     let user_id: String
     let expires_in: Int?
+    let is_new_user: Bool?
     var expiresInSeconds: Int { expires_in ?? (24 * 3600) }
 }
 
