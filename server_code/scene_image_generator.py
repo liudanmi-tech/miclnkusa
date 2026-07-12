@@ -249,13 +249,11 @@ def _build_comic_prompt(scenes: list) -> str:
 
     return (
         f"A single comic book page with {n} panels in a dynamic layout: {cfg['layout']}.\n"
-        f"Art style: expressive manga/comic hybrid — bold ink outlines, "
-        f"cinematic framing, vivid character emotions and dynamic poses.\n"
         f"\n"
         f"{panels_str}\n"
         f"\n"
         f"Panel borders: hand-drawn style bold black lines with slightly varied thickness, "
-        f"giving an authentic comic book feel rather than a rigid geometric grid.\n"
+        f"giving an authentic comic book feel rather than a rigid geometric grid. "
         f"The panels flow naturally as a sequential story from start to finish. "
         f"Characters maintain consistent appearance and clothing across all panels."
     )
