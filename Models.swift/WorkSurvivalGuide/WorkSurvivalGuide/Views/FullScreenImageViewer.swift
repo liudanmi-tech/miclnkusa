@@ -118,14 +118,20 @@ private final class FullScreenImageViewController: UIViewController {
         closeBtn.tintColor = .white.withAlphaComponent(0.9)
         closeBtn.addTarget(self, action: #selector(closeTapped), for: .touchUpInside)
         closeBtn.translatesAutoresizingMaskIntoConstraints = false
-        
+
         let saveBtn = UIButton(type: .system)
         saveBtn.setImage(UIImage(systemName: "square.and.arrow.down"), for: .normal)
         saveBtn.tintColor = .white.withAlphaComponent(0.9)
         saveBtn.addTarget(self, action: #selector(saveTapped), for: .touchUpInside)
         saveBtn.translatesAutoresizingMaskIntoConstraints = false
-        
-        let stack = UIStackView(arrangedSubviews: [saveBtn, closeBtn])
+
+        let shareBtn = UIButton(type: .system)
+        shareBtn.setImage(UIImage(systemName: "square.and.arrow.up"), for: .normal)
+        shareBtn.tintColor = .white.withAlphaComponent(0.9)
+        shareBtn.addTarget(self, action: #selector(shareTapped), for: .touchUpInside)
+        shareBtn.translatesAutoresizingMaskIntoConstraints = false
+
+        let stack = UIStackView(arrangedSubviews: [shareBtn, saveBtn, closeBtn])
         stack.axis = .horizontal
         stack.spacing = 12
         stack.translatesAutoresizingMaskIntoConstraints = false
@@ -187,6 +193,17 @@ private final class FullScreenImageViewController: UIViewController {
     
     @objc private func saveTapped() {
         showSaveAction()
+    }
+
+    @objc private func shareTapped() {
+        guard let img = currentPageImage() else { return }
+        let vc = UIActivityViewController(activityItems: [img], applicationActivities: nil)
+        // iPad 防崩溃：提供 popover 锚点
+        if let popover = vc.popoverPresentationController {
+            popover.sourceView = view
+            popover.sourceRect = CGRect(x: view.bounds.midX, y: 60, width: 0, height: 0)
+        }
+        present(vc, animated: true)
     }
     
     private func showSaveAction() {
