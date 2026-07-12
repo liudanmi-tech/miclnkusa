@@ -207,24 +207,55 @@ def _build_comic_prompt(scenes: list) -> str:
     """
     将多个场景描述合并为单张多格漫画 prompt。
     1 个场景 → 直接返回原描述（不加多格指令，避免干扰）
-    2-4 个场景 → 拼成 N-panel comic strip 描述
+    2-4 个场景 → 拼成具有漫画感的 N-panel 版式描述
+
+    版式设计原则：
+    - 首格宽幅（交代环境），中间格推进情绪，末格近景收尾
+    - 使用漫画分镜语言（wide shot / medium shot / close-up）
+    - 面板边框手绘风格，非几何硬分割
+    - 明确的叙事流向，保持角色形象一致
     """
     n = len(scenes)
     if n <= 1:
         return scenes[0] if scenes else ""
 
-    layout_desc = {
-        2: "panels arranged side by side (left and right)",
-        3: "panels arranged in a horizontal strip from left to right",
-        4: "panels arranged in a 2x2 grid",
-    }.get(n, "panels arranged in a horizontal strip")
+    # ── 按场景数定义动态版式 ──────────────────────────────────────────────
+    layout_configs = {
+        2: {
+            "layout": "two panels: a wide panel on top (full width, establishing shot) "
+                      "and a narrower panel on the bottom (close-up reaction shot)",
+            "framing": ["wide establishing shot", "close-up reaction shot"],
+        },
+        3: {
+            "layout": "three panels: one large panel on the left (about 55% width, main scene) "
+                      "and two smaller stacked panels on the right (top: mid-shot, bottom: close-up)",
+            "framing": ["wide establishing shot", "medium shot with expressive emotions", "close-up reaction shot"],
+        },
+        4: {
+            "layout": "four panels: the first panel spans the full top width (establishing shot), "
+                      "then three equal-width panels in a row below (story progression)",
+            "framing": ["wide establishing shot", "medium shot", "medium shot with expressive emotions", "close-up reaction shot"],
+        },
+    }
+    cfg = layout_configs.get(n, layout_configs[3])
 
-    panel_lines = "\n".join([f"Panel {i + 1}: {s}" for i, s in enumerate(scenes)])
+    # ── 组装每格描述，注入分镜语言 ───────────────────────────────────────
+    panel_lines = []
+    for i, scene in enumerate(scenes):
+        framing = cfg["framing"][i] if i < len(cfg["framing"]) else "medium shot"
+        panel_lines.append(f"Panel {i + 1} ({framing}): {scene}")
+
+    panels_str = "\n".join(panel_lines)
+
     return (
-        f"A {n}-panel comic strip, {layout_desc}. "
-        f"Each panel clearly separated by a thin white border line.\n"
-        f"{panel_lines}\n"
-        f"Consistent characters and art style across all panels."
+        f"A single comic book page with {n} panels in a dynamic layout: {cfg['layout']}.\n"
+        f"\n"
+        f"{panels_str}\n"
+        f"\n"
+        f"Panel borders: hand-drawn style bold black lines with slightly varied thickness, "
+        f"giving an authentic comic book feel rather than a rigid geometric grid. "
+        f"The panels flow naturally as a sequential story from start to finish. "
+        f"Characters maintain consistent appearance and clothing across all panels."
     )
 
 
