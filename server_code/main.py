@@ -3166,6 +3166,7 @@ async def get_image_status(
             "status": sess.image_status or "pending",
             "total_scenes": len(scene_images),
             "images": scene_images,
+            "unmatched_people": (sess.analysis_stage_detail or {}).get("unmatched_people", []),
         },
         timestamp=datetime.now().isoformat(),
     )

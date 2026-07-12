@@ -28,6 +28,8 @@ struct ChatAIAssistantView: View {
     @State private var isClosingSession = false
     @State private var errorToast: String? = nil
     @State private var showSharePicker = false
+    @State private var showUnmatchedPersonToast = false
+    @State private var showProfileCreate = false
 
     // ── scroll proxy for auto-scroll to bottom ──
     @State private var scrollToBottom = false
@@ -106,6 +108,37 @@ struct ChatAIAssistantView: View {
                     .zIndex(99)
                 }
 
+                // Unmatched person toast — tap to create profile
+                if showUnmatchedPersonToast {
+                    VStack {
+                        Spacer()
+                        Button { showProfileCreate = true } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: "person.badge.plus")
+                                    .font(.system(size: 14, weight: .semibold))
+                                Text("New character detected. Create a profile for more consistent results.")
+                                    .font(.system(size: 13, weight: .medium, design: .rounded))
+                                    .multilineTextAlignment(.leading)
+                            }
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 18)
+                            .padding(.vertical, 12)
+                            .background(Color(hex: "#1D4ED8").opacity(0.92))
+                            .cornerRadius(20)
+                            .padding(.horizontal, 24)
+                            .padding(.bottom, 96)
+                        }
+                    }
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+                    .zIndex(98)
+                    .onAppear {
+                        Task {
+                            try? await Task.sleep(nanoseconds: 3_000_000_000)
+                            await MainActor.run { withAnimation { showUnmatchedPersonToast = false } }
+                        }
+                    }
+                }
+
                 // Loading overlay for history / close
                 if chatVM.isLoadingHistory || isClosingSession {
                     Color.black.opacity(0.5).ignoresSafeArea()
@@ -157,6 +190,14 @@ struct ChatAIAssistantView: View {
         }
         .sheet(isPresented: $showSharePicker) {
             SharePickerSheet(imageURLs: sceneImageItems.compactMap { $0.imageUrl })
+        }
+        .sheet(isPresented: $showProfileCreate) {
+            ProfileEditView(profile: nil)
+        }
+        .onChange(of: chatVM.unmatchedPeople) { people in
+            if !people.isEmpty {
+                withAnimation { showUnmatchedPersonToast = true }
+            }
         }
         .alert("You've reached the image generation limit", isPresented: $chatVM.showProLimitToast) {
             Button("OK", role: .cancel) { chatVM.showProLimitToast = false }

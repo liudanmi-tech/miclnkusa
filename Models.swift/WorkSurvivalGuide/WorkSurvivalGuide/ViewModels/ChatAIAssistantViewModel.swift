@@ -79,6 +79,8 @@ final class ChatAIAssistantViewModel: ObservableObject {
     @Published var isLoadingHistory: Bool = false
     /// true = 正在后台触发生图请求（防并发）
     @Published var isImageGenerating: Bool = false
+    /// 生图完成后，口述中提到但未匹配到档案的人名（用于弹 toast）
+    @Published var unmatchedPeople: [String] = []
 
     // MARK: Immutable
 
@@ -578,6 +580,11 @@ final class ChatAIAssistantViewModel: ObservableObject {
                             }
                             self.isImageGenerating = false
                             self.activeImageMessageId = nil
+                        }
+                        // 检查是否有提到但未匹配档案的人名，用于弹 toast 提示创建档案
+                        if let imgStatus = try? await NetworkManager.shared.getImageStatus(sessionId: sid),
+                           let people = imgStatus.unmatchedPeople, !people.isEmpty {
+                            await MainActor.run { [weak self] in self?.unmatchedPeople = people }
                         }
                         await SubscriptionManager.shared.refreshFromBackend()
                         return

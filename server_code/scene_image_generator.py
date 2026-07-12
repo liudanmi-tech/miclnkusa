@@ -426,6 +426,17 @@ async def generate_scene_images(
                                     user_id, _t_name, str(_prof.id), db
                                 )
                             )
+
+                # 计算未匹配到档案的人名，写入 DB 供 iOS 弹 toast 提示创建档案
+                _unmatched_people = [n for n in _mentioned_people if n not in _name_mapping]
+                if _unmatched_people:
+                    logger.info(f"[场景2] 未匹配档案人名: {_unmatched_people}，写入 analysis_stage_detail")
+                    _sess_u = await db.get(Session, _uuid.UUID(session_id))
+                    if _sess_u:
+                        _detail = dict(_sess_u.analysis_stage_detail or {})
+                        _detail["unmatched_people"] = _unmatched_people
+                        _sess_u.analysis_stage_detail = _detail
+                        await db.commit()
             else:
                 # 场景1：仅生成场景描述
                 scene_prompt = f"""分析以下录音对话，识别1-3个最有画面感的场景。

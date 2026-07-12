@@ -762,11 +762,17 @@ class NetworkManager {
         let status: String
         let totalScenes: Int
         let images: [SceneImage]
+        let unmatchedPeople: [String]?
         enum CodingKeys: String, CodingKey {
             case status
             case totalScenes = "total_scenes"
             case images
+            case unmatchedPeople = "unmatched_people"
         }
+    }
+
+    func getImageStatus(sessionId: String) async throws -> ImageStatusResponse {
+        try await getImageStatus(sessionId: sessionId, authToken: getAuthToken())
     }
 
     func getImageStatus(sessionId: String, authToken: String) async throws -> ImageStatusResponse {
