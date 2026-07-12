@@ -353,24 +353,36 @@ async def generate_scene_images(
             t_scene_extract = time.time()
             logger.info(f"[场景生图] 步骤4 Gemini场景提取开始 elapsed={t_scene_extract-t_start:.2f}s")
             if is_narration_mode:
-                # 场景2：人物匹配 + 场景生成 合并为一次 Gemini 调用
+                # 场景2：三步链式推理，单次 Gemini 调用
+                # Step1 先提取人名（门控），Step2 仅在 Step1 非空时做档案匹配，Step3 提取场景
+                # 链式依赖使 Gemini 无法在 Step1=[] 时在 Step2 幻觉出档案人物
                 _profile_names_str = json.dumps(list(_profile_name_map.keys()), ensure_ascii=False)
-                combined_prompt = f"""分析以下用户的事后口述，完成两项任务并返回JSON。
+                combined_prompt = f"""分析以下用户的事后口述，按三个步骤完成任务并返回JSON。
 
 口述内容：
 {transcript_str}
 
 用户档案列表：{_profile_names_str}
 
-任务1：识别1-3个最有画面感的场景（英文描述）。
-任务2：找出口述中**明确提到**的第三方人物名字，与档案列表匹配（考虑谐音/昵称，如"妞蛋"→"小妞"），高置信度才匹配，不确定填null。
+【步骤1】提取人物：口述中是否提到了任何具体的第三方人物（人名、称呼、昵称）？
+- 若有，列出所有提到的名字/称呼，返回数组
+- 若无，返回空数组 []
+- 排除"我"、"大家"、"他们"、"自己"等泛指词
 
-规则：
-- 场景描述必须用英文（English only），场景数量1-3个，选最有代表性的
-- 场景中第三方人物的名称使用匹配后的档案名，无匹配时保留口述中的原称呼
-- 重要：口述中的"我"代指用户本人，禁止将"我"映射到档案列表中的任何人名；若档案列表为空或场景仅涉及用户自身，场景中用"I"代指口述者，不要使用任何具体人名
+【步骤2】档案匹配（严格依赖步骤1）：
+- 若步骤1为空数组 [] → 此处必须返回空对象 {{}}，禁止从档案列表中自行添加任何人物
+- 若步骤1非空 → 将步骤1中每个名字与档案列表做谐音/昵称匹配（如"妞蛋"→"刘丹"），高置信度才匹配，不确定填 null
 
-只返回JSON（不要解释）：{{"name_mapping": {{"口述中的名字": "档案名或null"}}, "scenes": ["scene 1 in English", "scene 2 in English"]}}"""
+【步骤3】提取场景：识别1-3个最有画面感的场景（英文描述）
+- 场景数量1-3个，选最有代表性的，必须用英文（English only）
+- 若步骤1非空：场景中人物使用步骤2匹配后的档案名
+- 若步骤1为空：场景中只用"I"代指口述者，不得出现任何档案中的人名
+
+只返回JSON，不要解释：
+{{"mentioned_people": ["示例名"], "name_mapping": {{"示例名": "档案名或null"}}, "scenes": ["scene in English"]}}
+
+步骤1为空时示例：
+{{"mentioned_people": [], "name_mapping": {{}}, "scenes": ["I am sitting alone, feeling exhausted"]}}"""
 
                 model = genai.GenerativeModel(gemini_flash_model)
                 response = await asyncio.to_thread(model.generate_content, combined_prompt)
@@ -379,19 +391,29 @@ async def generate_scene_images(
                     json_match = re.search(r'\{.*\}', raw, re.DOTALL)
                     combined_data = json.loads(json_match.group()) if json_match else {}
                 except Exception as _pe:
-                    logger.warning(f"[场景2 合并调用] JSON 解析失败: {_pe}, raw={raw[:200]}")
+                    logger.warning(f"[场景2 합并调用] JSON 解析失败: {_pe}, raw={raw[:200]}")
                     combined_data = {}
+
+                _mentioned_people = combined_data.get("mentioned_people", [])
+                logger.info(f"[场景2 Step1] 口述提取人物: {_mentioned_people}")
 
                 _scene_limit = 4 if comic_strip_mode else max_images
                 scenes = combined_data.get("scenes", [])[:_scene_limit]
 
+                # Step2 结果：仅当 mentioned_people 非空时 name_mapping 才有效
+                # mentioned_people=[] 时 Gemini 被约束返回 {}，此处再做一层保险
+                _raw_name_mapping = combined_data.get("name_mapping", {})
+                if not _mentioned_people:
+                    _raw_name_mapping = {}
+                    logger.info(f"[场景2 Step2] mentioned_people 为空，强制清空 name_mapping，跳过档案匹配")
+
                 # 从合并结果构建 _name_mapping 和 _matched_profiles
-                for transcript_name, profile_name in combined_data.get("name_mapping", {}).items():
+                for transcript_name, profile_name in _raw_name_mapping.items():
                     if profile_name and profile_name in _profile_name_map:
                         _name_mapping[transcript_name] = profile_name
                         _matched_profiles[transcript_name] = _profile_name_map[profile_name]
 
-                logger.info(f"[场景2 合并调用] 名称对照: {_name_mapping}, 场景数: {len(scenes)}")
+                logger.info(f"[场景2 Step2] 名称对照: {_name_mapping}, 场景数: {len(scenes)}")
                 # 将名字匹配结果回写 kg_persons.profile_id，供记忆查询使用
                 if _name_mapping and db:
                     from services.knowledge_graph import link_kg_person_to_profile
