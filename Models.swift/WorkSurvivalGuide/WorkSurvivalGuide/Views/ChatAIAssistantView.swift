@@ -7,6 +7,7 @@
 
 import SwiftUI
 import AVFoundation
+import Photos
 
 // MARK: - ChatInputMode
 
@@ -26,6 +27,7 @@ struct ChatAIAssistantView: View {
     @FocusState private var isInputFocused: Bool
     @State private var isClosingSession = false
     @State private var errorToast: String? = nil
+    @State private var showSharePicker = false
 
     // ── scroll proxy for auto-scroll to bottom ──
     @State private var scrollToBottom = false
@@ -119,7 +121,14 @@ struct ChatAIAssistantView: View {
                         .font(.system(size: 16, weight: .semibold, design: .rounded))
                         .foregroundColor(.white)
                 }
-                ToolbarItem(placement: .navigationBarTrailing) {
+                ToolbarItemGroup(placement: .navigationBarTrailing) {
+                    if !sceneImageItems.isEmpty {
+                        Button { showSharePicker = true } label: {
+                            Image(systemName: "square.and.arrow.up")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(.white.opacity(0.85))
+                        }
+                    }
                     Button(action: handleCloseTap) {
                         Image(systemName: "xmark")
                             .font(.system(size: 14, weight: .semibold))
@@ -145,6 +154,9 @@ struct ChatAIAssistantView: View {
         }
         .sheet(isPresented: $chatVM.showPaywall) {
             SubscriptionView()
+        }
+        .sheet(isPresented: $showSharePicker) {
+            SharePickerSheet(imageURLs: sceneImageItems.compactMap { $0.imageUrl })
         }
         .alert("You've reached the image generation limit", isPresented: $chatVM.showProLimitToast) {
             Button("OK", role: .cancel) { chatVM.showProLimitToast = false }
@@ -890,5 +902,162 @@ private struct VoiceMessageBubble: View {
     private func formatTime(_ t: TimeInterval) -> String {
         let s = max(0, Int(t.rounded()))
         return "\(s)\""
+    }
+}
+
+// MARK: - Share Picker Sheet
+
+private struct SharePickerSheet: View {
+    let imageURLs: [String]
+    @Environment(\.dismiss) private var dismiss
+    @State private var selected: Set<String>
+
+    init(imageURLs: [String]) {
+        self.imageURLs = imageURLs
+        _selected = State(initialValue: Set(imageURLs))
+    }
+
+    private var isInstagramAvailable: Bool {
+        guard let url = URL(string: "instagram://camera") else { return false }
+        return UIApplication.shared.canOpenURL(url)
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Capsule()
+                .fill(Color.white.opacity(0.3))
+                .frame(width: 36, height: 4)
+                .padding(.top, 12)
+
+            Text("Select comics to share")
+                .font(.system(size: 16, weight: .semibold, design: .rounded))
+                .foregroundColor(.white)
+                .padding(.top, 16)
+                .padding(.bottom, 20)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 10) {
+                    ForEach(imageURLs, id: \.self) { url in
+                        ComicThumbnailCell(url: url, isSelected: selected.contains(url)) {
+                            if selected.contains(url) { selected.remove(url) }
+                            else { selected.insert(url) }
+                        }
+                    }
+                }
+                .padding(.horizontal, 20)
+            }
+
+            Spacer().frame(height: 24)
+
+            VStack(spacing: 12) {
+                if isInstagramAvailable {
+                    Button(action: instagramTap) {
+                        Label(
+                            selected.isEmpty ? "Instagram Stories" : "Instagram Stories (\(selected.count))",
+                            systemImage: "camera.fill"
+                        )
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                        .background(selected.isEmpty ? Color.white.opacity(0.1) : Color(hex: "#405DE6"))
+                        .foregroundColor(selected.isEmpty ? .white.opacity(0.4) : .white)
+                        .cornerRadius(12)
+                        .font(.system(size: 15, weight: .semibold))
+                    }
+                    .disabled(selected.isEmpty)
+                }
+
+                Button(action: moreTap) {
+                    Text("More...")
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                        .background(Color.white.opacity(0.1))
+                        .foregroundColor(selected.isEmpty ? .white.opacity(0.4) : .white)
+                        .cornerRadius(12)
+                        .font(.system(size: 15, weight: .medium))
+                }
+                .disabled(selected.isEmpty)
+
+                Button("Cancel") { dismiss() }
+                    .foregroundColor(.white.opacity(0.5))
+                    .font(.system(size: 15))
+                    .padding(.vertical, 8)
+            }
+            .padding(.horizontal, 20)
+            .padding(.bottom, 32)
+        }
+        .background(Color(red: 0.08, green: 0.08, blue: 0.12).ignoresSafeArea())
+        .presentationDetents([.medium])
+        .presentationDragIndicator(.hidden)
+    }
+
+    private func instagramTap() {
+        let urls = imageURLs.filter { selected.contains($0) }
+        let images = urls.compactMap { ImageCacheManager.shared.image(for: $0) }
+        dismiss()
+        guard !images.isEmpty, let igURL = URL(string: "instagram://camera") else { return }
+        PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
+            guard status == .authorized || status == .limited else { return }
+            PHPhotoLibrary.shared().performChanges {
+                for img in images { PHAssetChangeRequest.creationRequestForAsset(from: img) }
+            } completionHandler: { _, _ in
+                DispatchQueue.main.async { UIApplication.shared.open(igURL) }
+            }
+        }
+    }
+
+    private func moreTap() {
+        let urls = imageURLs.filter { selected.contains($0) }
+        let images = urls.compactMap { ImageCacheManager.shared.image(for: $0) }
+        guard !images.isEmpty else { return }
+        dismiss()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            let vc = UIActivityViewController(activityItems: images, applicationActivities: nil)
+            guard let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+                  var topVC = scene.windows.first?.rootViewController else { return }
+            while let p = topVC.presentedViewController { topVC = p }
+            vc.popoverPresentationController?.sourceView = topVC.view
+            vc.popoverPresentationController?.sourceRect = CGRect(
+                x: topVC.view.bounds.midX, y: topVC.view.bounds.midY, width: 0, height: 0
+            )
+            topVC.present(vc, animated: true)
+        }
+    }
+}
+
+// MARK: - Comic Thumbnail Cell
+
+private struct ComicThumbnailCell: View {
+    let url: String
+    let isSelected: Bool
+    let onTap: () -> Void
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            Color.clear
+                .aspectRatio(4/5, contentMode: .fit)
+                .frame(width: 90)
+                .overlay(ImageLoaderView(imageUrl: url, imageBase64: nil, contentMode: .fill))
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(isSelected ? Color(hex: "#405DE6") : Color.clear, lineWidth: 3)
+                )
+                .opacity(isSelected ? 1.0 : 0.4)
+
+            Circle()
+                .fill(isSelected ? Color(hex: "#405DE6") : Color.white.opacity(0.25))
+                .frame(width: 22, height: 22)
+                .overlay(
+                    Group {
+                        if isSelected {
+                            Image(systemName: "checkmark")
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundColor(.white)
+                        }
+                    }
+                )
+                .padding(6)
+        }
+        .onTapGesture(perform: onTap)
     }
 }
