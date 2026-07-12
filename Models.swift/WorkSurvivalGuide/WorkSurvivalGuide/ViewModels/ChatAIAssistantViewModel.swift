@@ -71,6 +71,8 @@ final class ChatAIAssistantViewModel: ObservableObject {
     @Published var errorMessage: String? = nil
     @Published var showPaywall: Bool = false
     @Published var showProLimitToast: Bool = false
+    /// Pro 用户本次 session 内已弹过生图额度 alert，不再重复弹
+    private var hasShownImageLimitToast = false
     /// baseline_init SSE：当前阶段（"ask" / "save"），nil 表示无 baseline 流程
     @Published var baselinePhase: String? = nil
     /// 重入时从服务端拉取历史中
@@ -481,7 +483,14 @@ final class ChatAIAssistantViewModel: ObservableObject {
 
         // ── 配额检查 ──────────────────────────────────────────────────────────
         guard SubscriptionManager.shared.canGenerateImage else {
-            showPaywall = true
+            if SubscriptionManager.shared.isPro {
+                if !hasShownImageLimitToast {
+                    hasShownImageLimitToast = true
+                    showProLimitToast = true
+                }
+            } else {
+                showPaywall = true
+            }
             return
         }
 
@@ -519,7 +528,10 @@ final class ChatAIAssistantViewModel: ObservableObject {
                     self.isImageGenerating = false
                     self.activeImageMessageId = nil
                     if SubscriptionManager.shared.isPro {
-                        self.showProLimitToast = true
+                        if !self.hasShownImageLimitToast {
+                            self.hasShownImageLimitToast = true
+                            self.showProLimitToast = true
+                        }
                     } else {
                         self.showPaywall = true
                     }
