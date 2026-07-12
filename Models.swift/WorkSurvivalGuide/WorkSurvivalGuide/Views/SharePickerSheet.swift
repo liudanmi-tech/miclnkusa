@@ -73,17 +73,6 @@ struct SharePickerSheet: View {
                         .disabled(selected.isEmpty)
                     }
 
-                    Button(action: moreTap) {
-                        Text("More...")
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 14)
-                            .background(Color.white.opacity(0.1))
-                            .foregroundColor(selected.isEmpty ? .white.opacity(0.4) : .white)
-                            .cornerRadius(12)
-                            .font(.system(size: 15, weight: .medium))
-                    }
-                    .disabled(selected.isEmpty)
-
                     Button("Cancel") { dismiss() }
                         .foregroundColor(.white.opacity(0.5))
                         .font(.system(size: 15))
@@ -112,23 +101,6 @@ struct SharePickerSheet: View {
         }
     }
 
-    private func moreTap() {
-        let urls = imageURLs.filter { selected.contains($0) }
-        let images = urls.compactMap { ImageCacheManager.shared.image(for: $0) }
-        guard !images.isEmpty else { return }
-        dismiss()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-            let vc = UIActivityViewController(activityItems: images, applicationActivities: nil)
-            guard let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-                  var topVC = scene.windows.first?.rootViewController else { return }
-            while let p = topVC.presentedViewController { topVC = p }
-            vc.popoverPresentationController?.sourceView = topVC.view
-            vc.popoverPresentationController?.sourceRect = CGRect(
-                x: topVC.view.bounds.midX, y: topVC.view.bounds.midY, width: 0, height: 0
-            )
-            topVC.present(vc, animated: true)
-        }
-    }
 }
 
 // MARK: - Comic Thumbnail Cell
