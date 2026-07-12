@@ -118,13 +118,13 @@ private final class FullScreenImageViewController: UIViewController {
         closeBtn.tintColor = .white.withAlphaComponent(0.9)
         closeBtn.addTarget(self, action: #selector(closeTapped), for: .touchUpInside)
         closeBtn.translatesAutoresizingMaskIntoConstraints = false
-        
+
         let saveBtn = UIButton(type: .system)
         saveBtn.setImage(UIImage(systemName: "square.and.arrow.down"), for: .normal)
         saveBtn.tintColor = .white.withAlphaComponent(0.9)
         saveBtn.addTarget(self, action: #selector(saveTapped), for: .touchUpInside)
         saveBtn.translatesAutoresizingMaskIntoConstraints = false
-        
+
         let stack = UIStackView(arrangedSubviews: [saveBtn, closeBtn])
         stack.axis = .horizontal
         stack.spacing = 12
@@ -188,7 +188,7 @@ private final class FullScreenImageViewController: UIViewController {
     @objc private func saveTapped() {
         showSaveAction()
     }
-    
+
     private func showSaveAction() {
         let alert = UIAlertController(title: "Save Image", message: "Save this image to your photo library", preferredStyle: .actionSheet)
         alert.addAction(UIAlertAction(title: "Save to Photos", style: .default) { [weak self] _ in

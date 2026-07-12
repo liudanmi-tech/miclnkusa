@@ -69,7 +69,8 @@ struct TaskDetailView: View {
                             moodEmojiUrl: moodEmojiUrl,
                             moodState: moodState,
                             startTime: task.startTime,
-                            strategyIsLoading: strategyIsLoading
+                            strategyIsLoading: strategyIsLoading,
+                            imageURLs: strategyAnalysis?.sceneImages?.compactMap { $0.imageUrl }.filter { !$0.isEmpty } ?? []
                         )
                         .padding(.horizontal, 16)
                         .padding(.top, 12)
@@ -412,7 +413,9 @@ private struct MomentInfoCard: View {
     let moodState: String?
     let startTime: Date
     let strategyIsLoading: Bool
+    let imageURLs: [String]
     @State private var emojiLoadFailed = false
+    @State private var showSharePicker = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -447,21 +450,15 @@ private struct MomentInfoCard: View {
                 }
 
                 // Share button
-                Button(action: {
-                    let av = UIActivityViewController(
-                        activityItems: ["Shared from Chattoon"],
-                        applicationActivities: nil
-                    )
-                    if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-                       let root = scene.windows.first?.rootViewController {
-                        root.present(av, animated: true)
-                    }
-                }) {
+                Button(action: { showSharePicker = true }) {
                     Image(systemName: "paperplane.fill")
                         .font(.system(size: 22))
                         .foregroundColor(.white.opacity(0.85))
                 }
                 .padding(.leading, 22)
+                .sheet(isPresented: $showSharePicker) {
+                    SharePickerSheet(imageURLs: imageURLs)
+                }
 
                 Spacer()
 

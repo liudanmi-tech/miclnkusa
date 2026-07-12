@@ -26,6 +26,7 @@ struct ChatAIAssistantView: View {
     @FocusState private var isInputFocused: Bool
     @State private var isClosingSession = false
     @State private var errorToast: String? = nil
+    @State private var showSharePicker = false
 
     // ── scroll proxy for auto-scroll to bottom ──
     @State private var scrollToBottom = false
@@ -119,7 +120,14 @@ struct ChatAIAssistantView: View {
                         .font(.system(size: 16, weight: .semibold, design: .rounded))
                         .foregroundColor(.white)
                 }
-                ToolbarItem(placement: .navigationBarTrailing) {
+                ToolbarItemGroup(placement: .navigationBarTrailing) {
+                    if !sceneImageItems.isEmpty {
+                        Button { showSharePicker = true } label: {
+                            Image(systemName: "square.and.arrow.up")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(.white.opacity(0.85))
+                        }
+                    }
                     Button(action: handleCloseTap) {
                         Image(systemName: "xmark")
                             .font(.system(size: 14, weight: .semibold))
@@ -145,6 +153,9 @@ struct ChatAIAssistantView: View {
         }
         .sheet(isPresented: $chatVM.showPaywall) {
             SubscriptionView()
+        }
+        .sheet(isPresented: $showSharePicker) {
+            SharePickerSheet(imageURLs: sceneImageItems.compactMap { $0.imageUrl })
         }
         .alert("You've reached the image generation limit", isPresented: $chatVM.showProLimitToast) {
             Button("OK", role: .cancel) { chatVM.showProLimitToast = false }
@@ -892,3 +903,4 @@ private struct VoiceMessageBubble: View {
         return "\(s)\""
     }
 }
+

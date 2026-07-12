@@ -30,6 +30,10 @@
 			</dict>
 		</dict>
 	</dict>
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<string>instagram</string>
+	</array>
 	<key>SKAdNetworkItems</key>
 	<array>
 		<dict>
