@@ -15,6 +15,10 @@ from typing import List, Optional
 
 import httpx
 import google.generativeai as genai
+
+# 新 SDK — 仅用于 _transcribe_audio，设置 thinking_budget=0 以禁用 Thinking 机制
+from google import genai as _genai_new
+from google.genai import types as _genai_new_types
 from fastapi import APIRouter, Depends, HTTPException, Form, File, UploadFile
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -483,18 +487,24 @@ async def _stream_gemini_with_audio(prompt: str, audio_bytes: bytes, audio_mime_
 
 async def _transcribe_audio(audio_bytes: bytes, audio_mime_type: str) -> str:
     """Quick non-streaming Gemini call to get the user's speech as text.
+    Uses google-genai new SDK with thinking_budget=0 to disable Thinking mechanism,
+    avoiding the 8-12s thinking latency that caused 15s timeout failures.
     Returns the raw transcription; empty string on failure."""
     def _run():
-        genai.configure(api_key=GEMINI_API_KEY)
-        # 转写用 gemini-2.5-flash-lite：最轻量多模态模型，无重型 Thinking，非流式速度快
-        _model = genai.GenerativeModel("gemini-2.5-flash-lite", safety_settings=_GEMINI_SAFETY)
-        audio_part = genai.protos.Part(
-            inline_data=genai.protos.Blob(mime_type=audio_mime_type, data=audio_bytes)
+        client = _genai_new.Client(api_key=GEMINI_API_KEY)
+        audio_part = _genai_new_types.Part.from_bytes(
+            data=audio_bytes, mime_type=audio_mime_type
         )
-        resp = _model.generate_content(
-            [audio_part,
-             "Transcribe exactly what the user said in this audio clip. "
-             "Output only the transcription in the original language, nothing else."]
+        resp = client.models.generate_content(
+            model="gemini-2.5-flash-lite",
+            contents=[
+                audio_part,
+                "Transcribe exactly what the user said in this audio clip. "
+                "Output only the transcription in the original language, nothing else.",
+            ],
+            config=_genai_new_types.GenerateContentConfig(
+                thinking_config=_genai_new_types.ThinkingConfig(thinking_budget=0)
+            ),
         )
         return (resp.text or "").strip()
 
