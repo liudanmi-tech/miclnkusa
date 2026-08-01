@@ -2490,7 +2490,7 @@ async def get_task_list(
             TaskItem(
                 session_id=str(s.id),
                 title=s.title or "",
-                start_time=s.start_time.isoformat() if s.start_time else "",
+                start_time=s.start_time.isoformat() if s.start_time else s.created_at.isoformat(),
                 end_time=s.end_time.isoformat() if s.end_time else None,
                 duration=s.duration or 0,
                 tags=s.tags or [],
@@ -2578,7 +2578,7 @@ async def get_task_detail(
             detail = TaskDetailResponse(
                 session_id=str(db_session.id),
                 title=db_session.title or "",
-                start_time=db_session.start_time.isoformat() if db_session.start_time else "",
+                start_time=db_session.start_time.isoformat() if db_session.start_time else db_session.created_at.isoformat(),
                 end_time=db_session.end_time.isoformat() if db_session.end_time else None,
                 duration=db_session.duration or 0,
                 tags=db_session.tags or [],
@@ -2756,7 +2756,7 @@ async def get_task_detail(
         detail = TaskDetailResponse(
             session_id=str(db_session.id),
             title=db_session.title or "",
-            start_time=db_session.start_time.isoformat() if db_session.start_time else "",
+            start_time=db_session.start_time.isoformat() if db_session.start_time else db_session.created_at.isoformat(),
             end_time=db_session.end_time.isoformat() if db_session.end_time else None,
             duration=db_session.duration or 0,
             tags=db_session.tags or [],

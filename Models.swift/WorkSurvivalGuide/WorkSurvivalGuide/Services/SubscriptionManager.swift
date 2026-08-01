@@ -58,7 +58,8 @@ class SubscriptionManager: ObservableObject {
         transactionListenerTask = listenForTransactions()
 
         Task {
-            await refreshFromBackend() // loadProducts() 延迟到打开 Paywall 时调用，避免启动时触发 StoreKit 网络请求
+            await refreshFromBackend()
+            await loadProducts() // iOS 26 预热：登录后提前加载产品，避免 Paywall 首次打开时超时报错
         }
     }
 
@@ -78,6 +79,12 @@ class SubscriptionManager: ObservableObject {
         // 若调用时 Task 已被取消（iOS 26 重建视图场景），直接退出，不当作错误
         guard !cancelledAtEntry else {
             print("[SubscriptionManager] ⚠️ loadProducts() 入口已取消，跳过")
+            return
+        }
+
+        // 已有产品则跳过，防止 Paywall 二次调用覆盖预热结果
+        guard products.isEmpty else {
+            print("[SubscriptionManager] ✅ products 已预热(\(products.count)个)，跳过重复加载")
             return
         }
 

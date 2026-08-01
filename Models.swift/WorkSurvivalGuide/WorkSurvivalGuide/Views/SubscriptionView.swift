@@ -100,11 +100,15 @@ struct SubscriptionView: View {
         .task {
             let taskId = Int.random(in: 1000...9999)  // 区分并发 task 实例
             print("[SubscriptionView] 📦 task[\(taskId)] 开始，设备:\(UIDevice.current.model) iOS:\(UIDevice.current.systemVersion) cancelled=\(Task.isCancelled)")
+            await manager.refreshFromBackend()
+            // 预热已完成则直接展示，不重复加载
+            guard manager.products.isEmpty else {
+                print("[SubscriptionView] task[\(taskId)] ✅ products 已预热(\(manager.products.count)个)，直接展示")
+                return
+            }
             await manager.loadProducts()
             print("[SubscriptionView] task[\(taskId)] loadProducts 完成 cancelled=\(Task.isCancelled) products=\(manager.products.count)")
-            await manager.refreshFromBackend()
-            print("[SubscriptionView] task[\(taskId)] refreshFromBackend 完成 cancelled=\(Task.isCancelled)")
-            // 最多自动重试 3 次（应对 iPadOS sandbox 网络延迟），cancelled 时退出避免无意义重试
+            // 最多自动重试 3 次，cancelled 时退出
             var retries = 0
             while manager.products.isEmpty && retries < 3 && !Task.isCancelled {
                 print("[SubscriptionView] task[\(taskId)] 🔄 第\(retries + 1)次重试，等待2秒... cancelled=\(Task.isCancelled)")
@@ -117,7 +121,7 @@ struct SubscriptionView: View {
                 retries += 1
             }
             if manager.products.isEmpty {
-                print("[SubscriptionView] task[\(taskId)] ❌ 全部重试失败，显示错误页")
+                print("[SubscriptionView] task[\(taskId)] ⚠️ 自动重试未成功，显示 Retry 按钮")
                 loadTimeout = true
             } else {
                 print("[SubscriptionView] task[\(taskId)] ✅ 产品加载成功，共\(manager.products.count)个")
@@ -172,12 +176,12 @@ struct SubscriptionView: View {
     @ViewBuilder
     private var productSection: some View {
         if manager.products.isEmpty {
-            if loadTimeout && !isRetrying {
-                VStack(spacing: 12) {
-                    Text("Unable to load subscription options.\nPlease check your connection and try again.")
-                        .font(.system(size: 14))
-                        .foregroundColor(.white.opacity(0.6))
-                        .multilineTextAlignment(.center)
+            // 始终显示菊花 loading，不显示报错文字；仅在自动重试全部失败后追加 Retry 按钮
+            VStack(spacing: 16) {
+                ProgressView()
+                    .tint(.white)
+                    .frame(height: 80)
+                if loadTimeout && !isRetrying {
                     Button("Retry") {
                         loadTimeout = false
                         isRetrying = true
@@ -189,7 +193,7 @@ struct SubscriptionView: View {
                     }
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundColor(Color(hex: "#F59E0B"))
-                    // 错误状态下也保持链接可见，确保符合 Guideline 3.1.2(c)
+                    // 确保符合 Guideline 3.1.2(c)，链接始终可见
                     HStack(spacing: 16) {
                         Link("Privacy Policy", destination: URL(string: "https://yohomie.art/privacy.html")!)
                             .font(.system(size: 12))
@@ -200,12 +204,8 @@ struct SubscriptionView: View {
                     }
                     .padding(.top, 4)
                 }
-                .frame(minHeight: 100)
-            } else {
-                ProgressView()
-                    .tint(.white)
-                    .frame(height: 80)
             }
+            .frame(minHeight: 100)
         } else {
             VStack(spacing: 12) {
                 ForEach(sortedProducts, id: \.id) { product in
