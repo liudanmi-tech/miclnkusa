@@ -52,32 +52,32 @@ HOOK_ORDER_T1_T2 = ["followup", "emotion", "perspective", "action", "reflection"
 HOOK_ORDER_T3    = ["memory_ref", "encouragement", "challenge"]
 
 HOOK_INSTRUCTIONS = {
-    "followup":      "围绕「事件结果跟进」生成，语气：好奇+关心",
-    "emotion":       "围绕「用户情绪后续变化」生成，语气：温柔+陪伴",
-    "perspective":   "围绕「换一个角度看同一件事」生成，语气：启发+平静",
-    "action":        "围绕「做一件小事改变现状」生成，语气：鼓励+务实",
-    "reflection":    "围绕「时间过去后的新感受」生成，语气：沉静+智慧",
-    "memory_ref":    "模糊引用用户历史经历，让用户感到被记得，语气：温暖",
-    "encouragement": "鼓励用户说出当下状态，语气：温暖+开放",
-    "challenge":     "提一个让用户思考的小问题，语气：好奇+轻松",
+    "followup":      "Focus on following up about how the situation turned out. Tone: curious and caring",
+    "emotion":       "Focus on how the user's feelings may have shifted since then. Tone: gentle and supportive",
+    "perspective":   "Offer a fresh angle on the same situation. Tone: thoughtful and calm",
+    "action":        "Suggest one small thing the user could do to move forward. Tone: encouraging and practical",
+    "reflection":    "Invite the user to notice any new feelings now that time has passed. Tone: quiet and wise",
+    "memory_ref":    "Vaguely reference the user's past experience so they feel remembered. Tone: warm",
+    "encouragement": "Encourage the user to share how they are right now. Tone: warm and open",
+    "challenge":     "Pose a small question to get the user thinking. Tone: curious and light",
 }
 
 # ── 冷启动模板池（14 条，2 周不重复）────────────────────────────────────────
 COLD_TEMPLATES = [
-    {"day": 1,  "title": "今天工作顺利吗？",           "body": "职场上有什么卡住的地方，说出来或许就通了"},
-    {"day": 2,  "title": "最近有什么烦心事吗？",       "body": "不管大事小事，说出来会轻松很多"},
-    {"day": 3,  "title": "和同事相处还好吗？",         "body": "人与人之间的摩擦，往往值得聊聊"},
-    {"day": 4,  "title": "今天心情怎么样？",           "body": "好的坏的都可以讲，这里不会评判你"},
-    {"day": 5,  "title": "最近睡得好吗？",             "body": "睡不好往往是心里有事，聊聊？"},
-    {"day": 6,  "title": "有什么话想说却没地方说？",   "body": "找不到人说的时候，这里随时在"},
-    {"day": 7,  "title": "和家人的关系还好吗？",       "body": "亲密关系里的小摩擦，聊出来更容易看清楚"},
-    {"day": 8,  "title": "这周过得怎么样？",           "body": "回顾一下，也许有些事值得再想想"},
-    {"day": 9,  "title": "最近有让你开心的事吗？",     "body": "好消息也值得被记录下来"},
-    {"day": 10, "title": "有没有一件事一直拖着没做？", "body": "说出来，可能就是迈出第一步"},
-    {"day": 11, "title": "下周有什么让你担心的事？",   "body": "提前说出来，会比你想的好处理"},
-    {"day": 12, "title": "最近有没有让你委屈的事？",   "body": "委屈憋着会很难受，这里可以说"},
-    {"day": 13, "title": "有没有一个人你最近想多了解？","body": "关系里的困惑，说出来会更清晰"},
-    {"day": 14, "title": "今天想聊什么都可以",         "body": "不需要主题，随便说说就好"},
+    {"day": 1,  "title": "How's work going today?",          "body": "Stuck on something? Saying it out loud usually helps"},
+    {"day": 2,  "title": "Anything on your mind lately?",    "body": "Big or small — talking about it makes it lighter"},
+    {"day": 3,  "title": "Getting along okay with coworkers?","body": "Workplace friction is always worth a quick chat"},
+    {"day": 4,  "title": "How are you feeling today?",       "body": "Good or bad, no judgment here — just say it"},
+    {"day": 5,  "title": "Sleeping well these days?",        "body": "Restless nights usually mean something's on your mind"},
+    {"day": 6,  "title": "Something you've wanted to say?",  "body": "When there's no one to tell, I'm always here"},
+    {"day": 7,  "title": "How's things with family?",        "body": "Small tensions at home are worth talking through"},
+    {"day": 8,  "title": "How has this week been?",          "body": "Looking back, there might be more worth reflecting on"},
+    {"day": 9,  "title": "Anything good happen recently?",   "body": "Good news deserves to be remembered too"},
+    {"day": 10, "title": "Anything you've been putting off?","body": "Saying it out loud might be the first step"},
+    {"day": 11, "title": "Worried about anything next week?","body": "Voicing it early usually makes it easier to handle"},
+    {"day": 12, "title": "Felt hurt by something lately?",   "body": "Keeping it in is hard — this is a safe place to share"},
+    {"day": 13, "title": "Someone you want to understand more?","body": "Relationship questions get clearer when you talk them out"},
+    {"day": 14, "title": "Chat about anything today",        "body": "No topic needed — just say whatever's on your mind"},
 ]
 
 
@@ -216,22 +216,23 @@ async def generate_copy(context: dict, hook_type: str) -> dict:
     tier = context["tier"]
 
     prompt = f"""
-你是一个关心用户的 AI 好友。根据用户最近的对话，生成一条 iOS 推送通知。
+You are a caring AI friend. Based on the user's recent conversation, write one iOS push notification.
 
-用户最近对话：
-主题：{ref.card_title or ''}
-情绪：{ref.mood_state or ''}{('（' + ref.emotion_type + '）') if ref.emotion_type else ''}
-发生在：{_hours_ago(ref.created_at)} 小时前
+User's recent conversation:
+Topic: {ref.card_title or ''}
+Mood: {ref.mood_state or ''}{(' (' + ref.emotion_type + ')') if ref.emotion_type else ''}
+Happened: {_hours_ago(ref.created_at)} hours ago
 
-生成角度：{HOOK_INSTRUCTIONS.get(hook_type, '')}
+Angle: {HOOK_INSTRUCTIONS.get(hook_type, '')}
 
-输出纯 JSON，不要有其他内容：
-{{"title": "≤15字", "body": "≤35字"}}
+Output pure JSON only, nothing else:
+{{"title": "≤10 words", "body": "≤20 words"}}
 
-规则：
-- 不出现人名、公司名、具体地名
-- 口吻像好友发微信，不像 App 推送通知
-- 不用感叹号结尾
+Rules:
+- No names, company names, or specific locations
+- Tone like a text from a friend, not an app notification
+- Do not end with an exclamation mark
+- Write in English only
 """
 
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
