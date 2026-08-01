@@ -1101,8 +1101,13 @@ def generate_image_from_prompt(
                 f"即使其他角色是人类也绝不得将其变为人形，此规则优先于一切风格要求。"
             )
     elif n_refs >= 1:
-        # ── 1-2人场景：用真实档案名绑定动作，宠物追加专属约束 ───────────────
-        position_rule = "【重要】画面中左侧人物固定为用户，右侧人物固定为对方。必须严格按照场景描述中的动作主体来绘制：谁做动作就画谁在做，不能颠倒角色。\n\n"
+        # ── 1-2人场景：n_refs==1 独人，n_refs==2 双人，位置规则动态选择 ──────
+        if n_refs == 1:
+            # 只有用户自己一人，严禁生成第二个人物
+            position_rule = "【重要】画面中只有一个人物（用户本人），严格按场景描述绘制其动作和神情，不得凭空添加任何其他人物。\n\n"
+        else:
+            # 双人场景：用户左侧，对方右侧
+            position_rule = "【重要】画面中左侧人物固定为用户，右侧人物固定为对方。必须严格按照场景描述中的动作主体来绘制：谁做动作就画谁在做，不能颠倒角色。\n\n"
         ref_desc = "【人物一致性要求】以下参考照片是真实形象，绘制时必须严格还原照片中的外貌特征（照片里是什么形象就画什么形象）：\n"
         for idx in range(n_refs):
             if ref_labels and idx < len(ref_labels):
@@ -1127,7 +1132,8 @@ def generate_image_from_prompt(
         full_prompt = style_prefix + position_rule + ref_desc + prompt_body
         full_prompt += "\n\n【再次强调】所有人物外貌必须与提供的参考照片保持高度一致，这是最高优先级要求。"
     else:
-        position_rule = "【重要】画面中左侧人物固定为用户，右侧人物固定为对方。必须严格按照场景描述中的动作主体来绘制：谁做动作就画谁在做，不能颠倒角色。\n\n"
+        # 无参考图，不假设画面有第二人
+        position_rule = "【重要】按场景描述忠实绘制，不得凭空添加场景描述中未提及的人物。\n\n"
         full_prompt = style_prefix + position_rule + prompt_body
 
     # 构建 contents_list：风格参考图 + 档案参考图 + 文本 prompt
@@ -3189,18 +3195,16 @@ _CATEGORY_DISPLAY_MAP = {
 }
 
 _MOOD_ZH_TO_EN = {
-    # Chinese → aligned emoji style names
-    "高兴": "Happy",
-    "焦虑": "Slight",
-    "平常心": "Calm",
-    "亢奋": "Excited",
-    "悲伤": "Sad",
-    "平静": "Calm",
-    "轻松": "Calm",
-    "紧张": "Slight",
-    # Legacy English → aligned names
-    "Neutral": "Calm",
-    "Anxious": "Slight",
+    # Chinese → canonical sessions.mood_state enum values
+    "高兴":  "Happy",
+    "焦虑":  "Anxious",
+    "平常心": "Neutral",
+    "亢奋":  "Excited",
+    "悲伤":  "Sad",
+    "平静":  "Neutral",
+    "轻松":  "Content",
+    "紧张":  "Anxious",
+    # 注意：不再映射 "Neutral"→"Calm" / "Anxious"→"Slight"，它们本身就是合法枚举值
 }
 
 def _normalize_mood(mood: str) -> str:
@@ -3993,8 +3997,10 @@ async def generate_strategies(
                     _c = dict(_card) if isinstance(_card, dict) else _card
                     if isinstance(_c, dict) and _c.get("content_type") == "emotion":
                         _content = dict(_c.get("content") or {})
-                        # Normalize legacy Chinese mood values to English
-                        _content["mood_state"] = _normalize_mood(_content.get("mood_state", "Neutral"))
+                        # 优先用 skill_cards.content.mood_state（规范化中文遗留值），
+                        # content 为 null（chat session）时回退到 sessions.mood_state
+                        _raw_mood = _content.get("mood_state") or (db_session.mood_state if db_session else None) or "Neutral"
+                        _content["mood_state"] = _normalize_mood(_raw_mood)
                         _mood_state_v = _content.get("mood_state", "")
                         _slot = _mood_state_to_emotion(_mood_state_v)
                         _oss_key = f"emotion_avatars/{user_id}/{_slot}.png"

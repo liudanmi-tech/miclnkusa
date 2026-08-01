@@ -782,6 +782,8 @@ async def _match_skills_serial(
         # 从 kg_persons 查出对话中提到的人物及其关系，传给 match_skills_v2 做强制分类
         # 当 kg_person 有关联档案时，用档案的 relationship_type（用户手动标注，更准确）
         full_text = " ".join(item["text"] for item in transcript_stub)
+        # AI 助手身份词黑名单：防止 KG 把 AI 自称词当作真人匹配进来
+        _AI_IDENTITY_NAMES = {"对话助手", "AI助手", "助手", "ai", "AI"}
         chat_profiles: list[dict] = []
         try:
             from database.models import KgPerson, Profile as KgProfileModel
@@ -792,7 +794,11 @@ async def _match_skills_serial(
                     .where(KgPerson.user_id == uuid.UUID(user_id))
                 )
                 rows = rows_r.all()
-                mentioned = [(p, prof_rel) for p, prof_rel in rows if p.name and p.name in full_text]
+                mentioned = [
+                    (p, prof_rel) for p, prof_rel in rows
+                    if p.name and p.name in full_text
+                    and p.name not in _AI_IDENTITY_NAMES
+                ]
                 chat_profiles = []
                 for p, prof_rel in mentioned:
                     if (p.rel_type or "") in ("self", ""):
@@ -1634,7 +1640,7 @@ async def _async_session_finalize(session_id: str, conversation: list, user_id: 
         # mood_state → mood_score 整数，供 /weekly-stats mood_series 使用
         _MOOD_TO_SCORE = {
             "Excited": 90, "Happy": 82, "Content": 68, "Neutral": 50,
-            "Anxious": 32, "Frustrated": 28, "Sad": 22, "Angry": 18, "Overwhelmed": 15,
+            "Anxious": 38, "Frustrated": 35, "Sad": 22, "Angry": 35, "Overwhelmed": 15,
         }
         mood_score = _MOOD_TO_SCORE.get(mood_state, 50)
 

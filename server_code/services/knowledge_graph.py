@@ -342,10 +342,15 @@ async def get_profile_memories_kg(
 
 # ─── 内部写入工具 ──────────────────────────────────────────────────────────────
 
+_KG_AI_IDENTITY_NAMES = {"对话助手", "AI助手", "助手", "ai", "AI"}
+
 async def _upsert_person(db: AsyncSession, user_id: str, p: dict) -> Optional[KgPerson]:
     """同名人物 → 更新（亲密度/摩擦值滑动平均），新人物 → 插入"""
     name = (p.get("name") or "").strip()
     if not name:
+        return None
+    # 过滤 AI 助手身份词，防止把 AI 自称写入 kg_persons 污染人物库
+    if name in _KG_AI_IDENTITY_NAMES:
         return None
 
     uid = uuid_module.UUID(user_id)
