@@ -5149,14 +5149,21 @@ async def get_subscription_status(
         _chat_q = _chat_q.where(Session.created_at >= period_start_chat)
     chat_count = (await db.execute(_chat_q)).scalar() or 0
 
-    _img_q = select(func.count(Session.id)).where(
-        Session.user_id == uuid.UUID(user_id),
-        Session.session_type == "chat",
-        Session.cover_image_url.isnot(None),
+    # 统计 image_count：按 scene_images 数组长度之和计数（而非 session 数）
+    # 与 assistant.py _get_quota_status 保持一致：同 session 多次生图每次都计入
+    _sa_imgs_q = (
+        select(StrategyAnalysis.scene_images)
+        .join(Session, Session.id == StrategyAnalysis.session_id)
+        .where(
+            Session.user_id == uuid.UUID(user_id),
+            Session.session_type == "chat",
+            StrategyAnalysis.scene_images.isnot(None),
+        )
     )
     if period_start_chat:
-        _img_q = _img_q.where(Session.created_at >= period_start_chat)
-    image_count = (await db.execute(_img_q)).scalar() or 0
+        _sa_imgs_q = _sa_imgs_q.where(Session.created_at >= period_start_chat)
+    _sa_rows = (await db.execute(_sa_imgs_q)).scalars().all()
+    image_count = sum(len(imgs) for imgs in _sa_rows if imgs)
 
     resp = {
         "tier": tier,

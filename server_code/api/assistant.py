@@ -104,15 +104,22 @@ async def _get_quota_status(user_id: str, db: AsyncSession) -> dict:
         chat_q = chat_q.where(Session.created_at >= quota["period_start"])
     quota["used_chat"] = (await db.execute(chat_q)).scalar() or 0
 
-    # 统计 used_image
-    img_q = select(sa_func.count(Session.id)).where(
-        Session.user_id == uuid.UUID(user_id),
-        Session.session_type == "chat",
-        Session.cover_image_url.isnot(None),
+    # 统计 used_image：按 scene_images 数组长度之和计数（而非 session 数）
+    # 这样同一 session 内多次生图每次都计入，防止同 session 无限生图绕过配额
+    from database.models import StrategyAnalysis
+    sa_imgs_q = (
+        select(StrategyAnalysis.scene_images)
+        .join(Session, Session.id == StrategyAnalysis.session_id)
+        .where(
+            Session.user_id == uuid.UUID(user_id),
+            Session.session_type == "chat",
+            StrategyAnalysis.scene_images.isnot(None),
+        )
     )
     if quota["period_start"]:
-        img_q = img_q.where(Session.created_at >= quota["period_start"])
-    quota["used_image"] = (await db.execute(img_q)).scalar() or 0
+        sa_imgs_q = sa_imgs_q.where(Session.created_at >= quota["period_start"])
+    sa_rows = (await db.execute(sa_imgs_q)).scalars().all()
+    quota["used_image"] = sum(len(imgs) for imgs in sa_rows if imgs)
 
     logger.info(
         f"[quota] user={user_id[:8]} plan={quota['plan']} "
