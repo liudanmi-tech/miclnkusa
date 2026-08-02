@@ -10,6 +10,7 @@ import SwiftUI
 struct TaskDetailView: View {
     let task: TaskItem
     @ObservedObject private var profileVM = ProfileViewModel.shared
+    @ObservedObject private var emojiURLCache = SelfEmojiURLCache.shared  // 监听缓存更新，触发 moodEmojiUrl 重计算
     @State private var detail: TaskDetailResponse?
     @State private var strategyAnalysis: StrategyAnalysisResponse?
     @State private var isLoading = false
@@ -221,9 +222,11 @@ struct TaskDetailView: View {
     }
 
     private var moodState: String? {
+        // 优先从 emotion skill card 读取；chat session content 为 null 时回退到 task.emotionMood
         strategyAnalysis?.skillCards?
             .first(where: { $0.contentType == "emotion" })?
             .content?.moodState
+        ?? task.emotionMood
     }
 
     private var moodEmojiSlot: String? {
@@ -269,17 +272,14 @@ struct TaskDetailView: View {
     }
 
     private static func slotFromMoodState(_ state: String) -> String {
-        let s = state.lowercased()
-        if s.contains("very") || s.contains("excit") || s.contains("极度") || s.contains("非常开心") {
-            return "very_happy"
-        } else if s.contains("neutral") || s.contains("calm") || s.contains("normal") || s.contains("平静") || s.contains("一般") {
-            return "neutral"
-        } else if s.contains("slight") || s.contains("mild") || s.contains("轻微") || s.contains("略感") || s.contains("有点") {
-            return "slightly_sad"
-        } else if s.contains("sad") || s.contains("depress") || s.contains("unhappy") || s.contains("悲") || s.contains("难过") || s.contains("压力") || s.contains("stressed") {
-            return "sad"
-        } else {
-            return "happy"
+        // 对齐 sessions.mood_state 9 个枚举 → 5 个情绪槽（单一权威映射）
+        switch state {
+        case "Excited":                         return "very_happy"
+        case "Happy", "Content":               return "happy"
+        case "Neutral":                         return "neutral"
+        case "Anxious", "Frustrated", "Angry": return "slightly_sad"
+        case "Sad", "Overwhelmed":             return "sad"
+        default:                                return "neutral"
         }
     }
 
@@ -469,30 +469,24 @@ private struct MomentInfoCard: View {
 
                 Spacer()
 
-                // Mood
-                if let state = moodState {
-                    HStack(spacing: 6) {
-                        // 优先加载专属头像，降级 unicode emoji
-                        if let urlStr = moodEmojiUrl, !emojiLoadFailed {
-                            ImageLoaderView(
-                                imageUrl: urlStr,
-                                imageBase64: nil,
-                                contentMode: .fill,
-                                onLoadFailed: { emojiLoadFailed = true }
-                            )
-                            .frame(width: 56, height: 56)
-                            .clipShape(Circle())
-                        } else {
-                            Text(moodEmoji ?? "😐").font(.system(size: 40))
-                        }
-                        Text(state)
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundColor(.white.opacity(0.9))
+                // Mood emoji（仅图标，文字移到日期行）
+                if moodState != nil {
+                    if let urlStr = moodEmojiUrl, !emojiLoadFailed {
+                        ImageLoaderView(
+                            imageUrl: urlStr,
+                            imageBase64: nil,
+                            contentMode: .fill,
+                            onLoadFailed: { emojiLoadFailed = true }
+                        )
+                        .frame(width: 56, height: 56)
+                        .clipShape(Circle())
+                    } else {
+                        Text(moodEmoji ?? "😐").font(.system(size: 40))
                     }
                 }
             }
 
-            // Date row
+            // Date row（左：日期  右：mood 文字）
             HStack(spacing: 6) {
                 Image(systemName: "calendar")
                     .font(.system(size: 13))
@@ -500,6 +494,12 @@ private struct MomentInfoCard: View {
                 Text(dateString)
                     .font(.system(size: 13, weight: .medium, design: .rounded))
                     .foregroundColor(.white.opacity(0.65))
+                Spacer()
+                if let state = moodState {
+                    Text(state)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(.white.opacity(0.9))
+                }
             }
         }
         .padding(.horizontal, 16)

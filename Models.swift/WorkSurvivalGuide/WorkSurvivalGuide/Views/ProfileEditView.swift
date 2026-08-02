@@ -302,75 +302,8 @@ struct ProfileEditView: View {
                     }
                     .padding(.horizontal, 24)
                     
-                    // 音频选择（仅在有录音时显示）
-                    if !taskListVM.tasks.isEmpty {
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack {
-                            Text("Audio")
-                                .font(.system(size: 16, weight: .bold, design: .rounded))
-                                .foregroundColor(AppColors.headerText)
-                            Text("Optional")
-                                .font(.system(size: 12, design: .rounded))
-                                .foregroundColor(AppColors.secondaryText)
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 2)
-                                .background(Color.gray.opacity(0.12))
-                                .cornerRadius(4)
-                        }
-                        
-                        HStack(spacing: 8) {
-                            Button(action: {
-                                showingAudioSelection = true
-                            }) {
-                                HStack {
-                                    if let audioInfo = viewModel.audioInfo {
-                                        VStack(alignment: .leading, spacing: 4) {
-                                            Text("Audio selected")
-                                                .font(.system(size: 14, design: .rounded))
-                                                .foregroundColor(AppColors.headerText)
-                                            Text(audioInfo)
-                                                .font(.system(size: 12, design: .rounded))
-                                                .foregroundColor(AppColors.secondaryText)
-                                        }
-                                    } else {
-                                        Text("Select from recordings")
-                                            .font(.system(size: 14, design: .rounded))
-                                            .foregroundColor(AppColors.secondaryText)
-                                    }
-                                    Spacer()
-                                    Image(systemName: "chevron.right")
-                                        .font(.system(size: 14))
-                                        .foregroundColor(AppColors.secondaryText)
-                                }
-                                .padding()
-                                .background(Color.gray.opacity(0.1))
-                                .cornerRadius(8)
-                            }
-
-                            // 删除音频按钮（有音频时才显示）
-                            if viewModel.audioInfo != nil {
-                                Button(action: {
-                                    viewModel.audioSessionId = nil
-                                    viewModel.audioSegmentId = nil
-                                    viewModel.audioStartTime = nil
-                                    viewModel.audioEndTime   = nil
-                                    viewModel.audioUrl       = nil
-                                }) {
-                                    Image(systemName: "xmark.circle.fill")
-                                        .font(.system(size: 24))
-                                        .foregroundColor(Color.gray.opacity(0.6))
-                                }
-                            }
-                        }
-                    }
-                    .padding(.horizontal, 24)
-                    } // end if !taskListVM.tasks.isEmpty
-
-                    // 声纹注册（仅在编辑已有档案时显示）
-                    if let existingProfile = profile {
-                        VoiceprintEnrollSection(profileId: existingProfile.id)
-                            .padding(.horizontal, 24)
-                    }
+                    // Audio 入口已隐藏
+                    // Voice ID 入口已隐藏
 
                     // Emoji 风格选择（始终可见）
                     VStack(alignment: .leading, spacing: 8) {
@@ -729,9 +662,15 @@ struct ProfileEditView: View {
 // 关系类型枚举
 enum RelationshipType: String, CaseIterable {
     case self_ = "Self"
+    case partner = "Partner"
     case friend = "Best Friend"
-    case leader = "Manager"
+    case casualFriend = "Friend"
+    case classmate = "Classmate"
     case colleague = "Colleague"
+    case leader = "Manager"
+    case subordinate = "Subordinate"
+    case teacher = "Teacher"
+    case neighbor = "Neighbor"
     case family = "Family"
     case pet = "Pet"
     case other = "Other"

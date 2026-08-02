@@ -101,9 +101,6 @@ struct TaskCardView: View {
                             .font(.system(size: 12, weight: .regular, design: .rounded))
                             .foregroundColor(.white.opacity(0.9))
                         Spacer()
-                        Text(task.durationString)
-                            .font(.system(size: 12, weight: .regular, design: .rounded))
-                            .foregroundColor(.white.opacity(0.9))
                     }
                 }
                 .padding(.leading, 12)
@@ -252,12 +249,14 @@ struct TaskCardView: View {
     }
 
     private func moodSlot(for mood: String) -> String {
-        switch mood.lowercased() {
-        case "excited":                         return "very_happy"
-        case "happy", "content":               return "happy"
-        case "anxious", "frustrated", "angry": return "slightly_sad"
-        case "sad", "overwhelmed":             return "sad"
-        default:                               return "neutral"
+        // 对齐 sessions.mood_state 9 个枚举 → 5 个情绪槽（单一权威映射）
+        switch mood {
+        case "Excited":                         return "very_happy"
+        case "Happy", "Content":               return "happy"
+        case "Neutral":                         return "neutral"
+        case "Anxious", "Frustrated", "Angry": return "slightly_sad"
+        case "Sad", "Overwhelmed":             return "sad"
+        default:                                return "neutral"
         }
     }
 

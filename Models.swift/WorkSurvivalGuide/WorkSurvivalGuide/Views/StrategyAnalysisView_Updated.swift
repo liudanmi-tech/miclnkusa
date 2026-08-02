@@ -781,11 +781,31 @@ struct StrategySkillCardView: View {
 // 情绪卡片 UI（emoji + 统计数据）
 struct EmotionCardView: View {
     let content: SkillCardEmotionContent
-    
+
     var body: some View {
         VStack(spacing: 16) {
-            Text(content.moodEmoji)
-                .font(.system(size: 64))
+            // 优先用个人头像 URL（self portrait 风格生成），无则降级 unicode emoji
+            if let urlStr = content.moodEmojiUrl, let url = URL(string: urlStr) {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 80, height: 80)
+                            .clipShape(Circle())
+                    case .failure:
+                        Text(content.moodEmoji).font(.system(size: 64))
+                    case .empty:
+                        Text(content.moodEmoji).font(.system(size: 64))
+                    @unknown default:
+                        Text(content.moodEmoji).font(.system(size: 64))
+                    }
+                }
+            } else {
+                Text(content.moodEmoji)
+                    .font(.system(size: 64))
+            }
             Text(content.moodState)
                 .font(.system(size: 18, weight: .bold, design: .rounded))
                 .foregroundColor(AppColors.headerText)
@@ -1459,7 +1479,7 @@ struct SceneRestoreImageView: View {
             .aspectRatio(4.0/5.0, contentMode: .fill)
             .clipped()
 
-            // 底部渐变遮罩
+            // 底部渐变遮罩（只覆盖文字区域，不影响整体亮度）
             LinearGradient(
                 gradient: Gradient(colors: [
                     Color.black.opacity(0.5),
@@ -1468,8 +1488,8 @@ struct SceneRestoreImageView: View {
                 startPoint: .bottom,
                 endPoint: .top
             )
-            .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
-            .aspectRatio(4.0/5.0, contentMode: .fill)
+            .frame(height: 160)
+            .frame(maxWidth: .infinity)
             .allowsHitTesting(false)
             
             // 底部文字内容
@@ -1486,7 +1506,7 @@ struct SceneRestoreImageView: View {
                     .font(.system(size: 18, weight: .bold, design: .rounded)) // Nunito 700, 18px
                     .foregroundColor(.white)
                     .shadow(color: Color.black.opacity(0.12), radius: 3, x: 0, y: 0) // 根据Figma: boxShadow
-                    .lineLimit(5)
+                    .lineLimit(2)
                     .truncationMode(.tail)
             }
             .padding(.leading, 23.99)

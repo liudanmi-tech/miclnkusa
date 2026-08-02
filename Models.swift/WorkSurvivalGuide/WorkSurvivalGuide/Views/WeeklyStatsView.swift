@@ -362,9 +362,9 @@ private struct MoodCartoonChart: View {
 
                 // Emoji above selected nodes
                 ForEach(Array(emojiSet), id: \.self) { i in
-                    MoodEmojiView(score: points[i].score, emojiType: emojiType, size: 14)
-                        .frame(width: 24, height: 20, alignment: .center)
-                        .position(x: xs[i], y: ys[i] - 18)
+                    MoodEmojiView(score: points[i].score, emojiType: emojiType, size: 28)
+                        .frame(width: 48, height: 40, alignment: .center)
+                        .position(x: xs[i], y: ys[i] - 32)
                 }
 
                 // Day labels at bottom
@@ -855,9 +855,9 @@ private struct MoodDetailChart: View {
                                let score = points[idx].score,
                                let xPos = proxy.position(forX: idx),
                                let yPos = proxy.position(forY: score) {
-                                MoodEmojiView(score: score, emojiType: emojiType, size: 16)
+                                MoodEmojiView(score: score, emojiType: emojiType, size: 32)
                                     .allowsHitTesting(false)
-                                    .position(x: origin.x + xPos, y: origin.y + yPos - 18)
+                                    .position(x: origin.x + xPos, y: origin.y + yPos - 32)
                             }
                         }
                         // 点击检测层（覆盖全区域）

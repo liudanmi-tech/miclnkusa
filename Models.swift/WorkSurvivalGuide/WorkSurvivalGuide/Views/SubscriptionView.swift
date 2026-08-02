@@ -144,13 +144,15 @@ struct SubscriptionView: View {
     }
 
     // 年/月/周 显示平均每周价格
+    // product.priceFormatStyle 自动跟随用户 storefront 货币（US→USD，CA→CAD）
     private func weeklyEquivalent(for product: Product) -> String? {
         switch product.id {
         case SubscriptionManager.yearlyProductID:
             let perWeek = product.price / 52
             return "≈ " + perWeek.formatted(product.priceFormatStyle) + " / week"
         case SubscriptionManager.monthlyProductID:
-            let perWeek = product.price / 4
+            // 1 month = 52/12 ≈ 4.33 weeks，比 /4 更精确
+            let perWeek = (product.price * 12) / 52
             return "≈ " + perWeek.formatted(product.priceFormatStyle) + " / week"
         case SubscriptionManager.weeklyProductID:
             return product.displayPrice + " / week"
@@ -281,18 +283,22 @@ private struct ProductCard: View {
                     Text(product.displayPrice + (periodLabel.isEmpty ? "" : " \(periodLabel)"))
                         .font(.system(size: 22, weight: .bold))
                         .foregroundColor(Color(hex: "#F59E0B"))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.6)
 
                     if let weekly = weeklyEquivalent {
                         Text(weekly)
                             .font(.system(size: 12))
                             .foregroundColor(.white.opacity(0.5))
+                            .lineLimit(1)
                     }
 
                     if !services.isEmpty {
                         Text(services)
                             .font(.system(size: 12))
                             .foregroundColor(.white.opacity(0.45))
-                            .fixedSize(horizontal: false, vertical: true)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.7)
                             .padding(.top, 2)
                     }
                 }
