@@ -14,6 +14,7 @@ struct SubscriptionView: View {
     @ObservedObject private var manager: SubscriptionManager = .shared
     @State private var loadTimeout = false
     @State private var isRetrying = false
+    @State private var didTrackView = false
 
     var body: some View {
         ZStack {
@@ -88,6 +89,8 @@ struct SubscriptionView: View {
             }
         }
         .onAppear {
+            guard !didTrackView else { return }
+            didTrackView = true
             TikTokTracker.track("ViewContent", ["content_id": "paywall", "content_type": "subscription"])
         }
         .onChange(of: manager.isPro) { newValue in
