@@ -156,6 +156,11 @@ struct TaskDetailView: View {
             }
             .navigationBarHidden(true)
             .onAppear {
+                TikTokTracker.track("ViewContent", [
+                    "content_id": "task_detail",
+                    "content_type": task.sessionType ?? "recording",
+                    "session_id": task.id
+                ])
                 loadAll()
                 if !aiDisclaimerShown {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {

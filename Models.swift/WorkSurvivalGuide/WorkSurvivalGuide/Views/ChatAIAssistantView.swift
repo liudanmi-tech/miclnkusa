@@ -207,6 +207,13 @@ struct ChatAIAssistantView: View {
         .onAppear {
             TikTokTracker.track("ViewContent", ["content_id": "ai_chat", "content_type": "feature"])
         }
+        .onDisappear {
+            TikTokTracker.track("ClickButton", [
+                "content_id": "close_ai_chat",
+                "content_type": "feature",
+                "image_count": sceneImageItems.count
+            ])
+        }
         .task {
             if isExistingSession {
                 await chatVM.loadHistory()

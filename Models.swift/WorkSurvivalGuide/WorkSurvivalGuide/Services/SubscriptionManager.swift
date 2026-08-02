@@ -178,15 +178,18 @@ class SubscriptionManager: ObservableObject {
                 print("[SubscriptionManager] ✅ 购买成功 productId=\(transaction.productID) originalID=\(transaction.originalID) type=\(transaction.productType)")
                 await sendToBackend(originalTransactionId: String(transaction.originalID), productId: transaction.productID, jwsRepresentation: verification.jwsRepresentation)
                 await transaction.finish()
+                let isFirstPurchase = transaction.id == transaction.originalID
                 TikTokTracker.track("Subscribe", [
                     "content_id": product.id,
                     "currency": "USD",
-                    "value": NSDecimalNumber(decimal: product.price).doubleValue
+                    "value": NSDecimalNumber(decimal: product.price).doubleValue,
+                    "is_first_purchase": isFirstPurchase
                 ])
                 TikTokTracker.track("Purchase", [
                     "content_id": product.id,
                     "currency": "USD",
-                    "value": NSDecimalNumber(decimal: product.price).doubleValue
+                    "value": NSDecimalNumber(decimal: product.price).doubleValue,
+                    "is_first_purchase": isFirstPurchase
                 ])
             case .userCancelled:
                 print("[SubscriptionManager] 用户取消购买 productId=\(product.id)")

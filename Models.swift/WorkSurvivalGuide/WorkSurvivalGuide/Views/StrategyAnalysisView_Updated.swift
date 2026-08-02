@@ -1424,6 +1424,15 @@ struct SceneRestoreImageCarouselView: View {
                     UIPageControl.appearance().currentPageIndicatorTintColor = UIColor(red: 94/255, green: 124/255, blue: 139/255, alpha: 1)
                     UIPageControl.appearance().pageIndicatorTintColor = UIColor(red: 232/255, green: 220/255, blue: 198/255, alpha: 1)
                 }
+                .onChange(of: currentIndex) { newIndex in
+                    guard validImages.count > 1 else { return }
+                    TikTokTracker.track("ScrollContent", [
+                        "content_id": "swipe_image",
+                        "content_type": "detail",
+                        "image_index": newIndex,
+                        "total_images": validImages.count
+                    ])
+                }
             }
         }
         .aspectRatio(imageAspectRatio, contentMode: .fit)
