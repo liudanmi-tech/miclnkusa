@@ -135,9 +135,8 @@ struct SkillsView: View {
                                     displaySubSkills: item.subSkills,
                                     onSelectSkill: { skill in
                                     TikTokTracker.track("ClickButton", [
-                                        "content_id": "skill_card",
+                                        "content_id": skill.id,
                                         "content_type": "skills",
-                                        "skill_id": skill.id,
                                         "skill_name": skill.name
                                     ])
                                     selectedSkill = skill
