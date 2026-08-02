@@ -1033,6 +1033,13 @@ def generate_image_from_prompt(
     style_prefix = IMAGE_STYLE_MAP.get(key, IMAGE_STYLE_MAP["ghibli"])
     logger.info(f"[图片生成] style_key={style_key} -> key={key} model={IMAGE_GEN_MODEL}")
 
+    # 将风格描述包装为强制指令块，提升 Gemini 对风格要求的遵循权重
+    style_block = (
+        f"【画面风格 — 最高优先级】以下是本图的核心视觉风格，光影、色调、线条、质感、构图都必须严格遵循，不得偏离：\n"
+        f"{style_prefix}\n"
+        f"此风格要求是强制性的，优先级高于下方所有其他指令。\n\n"
+    )
+
     # 当使用非宫崎骏风格时，移除 image_prompt 中技能硬编码的宫崎骏风格描述，避免风格冲突
     prompt_body = image_prompt
     if key != "ghibli":
@@ -1088,7 +1095,7 @@ def generate_image_from_prompt(
             "重要：即使是插画/动画风格，每个角色的外貌也必须与对应参考照片高度一致，"
             "让认识他们的人能一眼认出。不得随意更改、混淆任何角色的形象。\n\n"
         )
-        full_prompt = style_prefix + position_rule + ref_desc + prompt_body
+        full_prompt = style_block + position_rule + ref_desc + prompt_body
         full_prompt += (
             f"\n\n【再次强调】画面中必须同时出现 {n_refs} 个独立角色（一个都不能少），"
             f"每个角色的外貌必须与对应参考照片保持高度一致（包括是人还是动物），这是最高优先级要求。"
@@ -1129,12 +1136,12 @@ def generate_image_from_prompt(
                 else:
                     ref_desc += "- 第二张参考图：右侧人物（对方）的真实照片，同样必须完整还原其外貌特征、体型、整体形象。\n"
         ref_desc += "重要：即使是插画/动画风格，每个角色的外貌也必须与参考照片高度一致，让认识他们的人能一眼认出。不得随意更改或拟人化角色外貌。\n\n"
-        full_prompt = style_prefix + position_rule + ref_desc + prompt_body
+        full_prompt = style_block + position_rule + ref_desc + prompt_body
         full_prompt += "\n\n【再次强调】所有人物外貌必须与提供的参考照片保持高度一致，这是最高优先级要求。"
     else:
         # 无参考图，不假设画面有第二人
         position_rule = "【重要】按场景描述忠实绘制，不得凭空添加场景描述中未提及的人物。\n\n"
-        full_prompt = style_prefix + position_rule + prompt_body
+        full_prompt = style_block + position_rule + prompt_body
 
     # 构建 contents_list：风格参考图 + 档案参考图 + 文本 prompt
     contents_list = []
@@ -1159,6 +1166,8 @@ def generate_image_from_prompt(
     full_prompt += "\n\n【输出尺寸】请生成 4:5 竖版比例的图片（512×640px），适合竖版展示。"
     # 禁止 Gemini 在画面中生成任何文字（不点名品牌，避免模型反向学习）
     full_prompt += "\n\n【严禁】画面中不得出现任何文字、字母、数字或符号。忽略参考图中的所有文字内容，不得将其复制到生成图片中。"
+    # 末尾再次强调风格，首尾呼应，提升 Gemini 对风格的遵循稳定性
+    full_prompt += f"\n\n【风格再次强调】整体画面必须完整体现开头所描述的视觉风格，不得在任何画面区域出现与该风格不符的色调、材质或画风。"
     contents_list.append(full_prompt)
 
     for attempt in range(max_retries):

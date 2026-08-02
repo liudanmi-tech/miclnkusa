@@ -83,21 +83,22 @@ EMOTION_SLOT_FALLBACK = {
     "sad":          "sad",
 }
 
+# 9 canonical sessions.mood_state → 5 emotion slots（单一权威映射表）
+_MOOD_TO_SLOT = {
+    "Excited":     "very_happy",
+    "Happy":       "happy",
+    "Content":     "happy",
+    "Neutral":     "neutral",
+    "Anxious":     "slightly_sad",
+    "Frustrated":  "slightly_sad",
+    "Angry":       "slightly_sad",
+    "Sad":         "sad",
+    "Overwhelmed": "sad",
+}
+
 def _mood_state_to_emotion(mood_state: str) -> str:
-    """将 LLM 返回的 mood_state 映射到 5 个情绪槽之一。
-    对齐 emoji style 名称：excited / happy / calm / slight / sad
-    """
-    m = (mood_state or "").lower()
-    if any(k in m for k in ["excit", "energ", "elat", "ecstat", "亢奋", "兴奋", "激动"]):
-        return "very_happy"
-    if any(k in m for k in ["happy", "joy", "glad", "高兴", "开心", "快乐", "愉快"]):
-        return "happy"
-    if any(k in m for k in ["slight", "anxious", "worry", "nervou", "stress", "焦虑", "担心", "紧张"]):
-        return "slightly_sad"
-    if any(k in m for k in ["sad", "depress", "griev", "distress", "upset",
-                              "悲", "难过", "痛苦", "沮丧"]):
-        return "sad"
-    return "neutral"  # calm
+    """将 sessions.mood_state（9 个枚举值）映射到 5 个情绪槽之一。"""
+    return _MOOD_TO_SLOT.get(mood_state, "neutral")
 
 
 async def _generate_emotion_avatars_task(user_id: str, photo_bytes: bytes, photo_mime: str):
@@ -957,6 +958,7 @@ async def trigger_emotion_avatar_generation(
     若无 Self 档案或未上传照片，返回 404。
     """
     import httpx as _httpx
+    from database.connection import AsyncSessionLocal
 
     async with AsyncSessionLocal() as db:
         result = await db.execute(
