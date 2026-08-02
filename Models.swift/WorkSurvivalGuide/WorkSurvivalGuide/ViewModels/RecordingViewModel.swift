@@ -95,6 +95,7 @@ class RecordingViewModel: ObservableObject {
         audioRecorder.startRecording()
         isRecording = true
         recordingTime = 0
+        TikTokTracker.track("ClickButton", ["content_id": "start_recording", "content_type": "feature"])
         print("🎤 [RecordingViewModel] ✅ 录制状态已设置为 true")
         
         // 立即创建本地录音卡片，状态为"正在转录语音..."
@@ -320,10 +321,7 @@ class RecordingViewModel: ObservableObject {
                     )
 
                     print("✅ [RecordingViewModel] 上传成功！")
-                    TikTokBusiness.trackEvent("ViewContent", withProperties: [
-                        "content_id": "recording_complete",
-                        "content_type": "feature"
-                    ])
+                    TikTokTracker.track("ViewContent", ["content_id": "recording_complete", "content_type": "feature"])
                     print("📋 [RecordingViewModel] 响应数据:")
                     print("   - sessionId: \(response.sessionId)")
                     #if DEBUG || INTERNALTEST

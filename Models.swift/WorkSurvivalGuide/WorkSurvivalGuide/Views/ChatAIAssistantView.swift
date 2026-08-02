@@ -205,10 +205,7 @@ struct ChatAIAssistantView: View {
             Text("You've used all your image generations for this period. They'll reset with your next billing cycle.")
         }
         .onAppear {
-            TikTokBusiness.trackEvent("ViewContent", withProperties: [
-                "content_id": "ai_chat",
-                "content_type": "feature"
-            ])
+            TikTokTracker.track("ViewContent", ["content_id": "ai_chat", "content_type": "feature"])
         }
         .task {
             if isExistingSession {

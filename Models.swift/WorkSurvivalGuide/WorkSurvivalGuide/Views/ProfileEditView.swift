@@ -621,6 +621,7 @@ struct ProfileEditView: View {
                     print("   name: \(newProfile.name)")
                     print("   photoUrl: \(newProfile.photoUrl ?? "nil")")
                     try await ProfileViewModel.shared.createProfile(newProfile)
+                    TikTokTracker.track("ClickButton", ["content_id": "create_profile", "content_type": "feature"])
                     print("✅ [ProfileEditView] 档案创建成功")
                 }
                 

@@ -88,10 +88,7 @@ struct SubscriptionView: View {
             }
         }
         .onAppear {
-            TikTokBusiness.trackEvent("ViewContent", withProperties: [
-                "content_id": "paywall",
-                "content_type": "subscription"
-            ])
+            TikTokTracker.track("ViewContent", ["content_id": "paywall", "content_type": "subscription"])
         }
         .onChange(of: manager.isPro) { newValue in
             if newValue { dismiss() }
@@ -255,7 +252,7 @@ private struct ProductCard: View {
 
     var body: some View {
         Button(action: {
-            TikTokBusiness.trackEvent("InitiateCheckout", withProperties: [
+            TikTokTracker.track("InitiateCheckout", [
                 "content_id": product.id,
                 "currency": "USD",
                 "value": NSDecimalNumber(decimal: product.price).doubleValue

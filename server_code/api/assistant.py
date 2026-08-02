@@ -16,9 +16,6 @@ from typing import List, Optional
 import httpx
 import google.generativeai as genai
 
-# 新 SDK — 仅用于 _transcribe_audio，设置 thinking_budget=0 以禁用 Thinking 机制
-from google import genai as _genai_new
-from google.genai import types as _genai_new_types
 from fastapi import APIRouter, Depends, HTTPException, Form, File, UploadFile
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -186,6 +183,7 @@ def _extract_note_questions(note_content: str) -> str:
 router = APIRouter()
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+DEEPGRAM_API_KEY = os.getenv("DEEPGRAM_API_KEY", "")
 ASSISTANT_MODEL = "gemini-2.5-flash"
 
 # Gemini safety settings — applied to all model calls
@@ -492,30 +490,34 @@ async def _stream_gemini_with_audio(prompt: str, audio_bytes: bytes, audio_mime_
             break
 
 
-async def _transcribe_audio(audio_bytes: bytes, audio_mime_type: str) -> str:
-    """Quick non-streaming Gemini call to get the user's speech as text.
-    Uses google-genai new SDK with thinking_budget=0 to disable Thinking mechanism,
-    avoiding the 8-12s thinking latency that caused 15s timeout failures.
-    Returns the raw transcription; empty string on failure."""
-    def _run():
-        client = _genai_new.Client(api_key=GEMINI_API_KEY)
-        audio_part = _genai_new_types.Part.from_bytes(
-            data=audio_bytes, mime_type=audio_mime_type
+async def _transcribe_audio(audio_bytes: bytes, audio_mime_type: str, user_language: str = "en") -> str:
+    """Deepgram Nova-3 Pre-recorded REST API transcription.
+    language 由调用方传入：zh → zh-CN，其他 → en-US。
+    Returns transcribed text; empty string on failure."""
+    lang_code = (user_language or "en").lower().split("-")[0]
+    dg_lang = "zh-CN" if lang_code == "zh" else "en-US"
+    url = (
+        "https://api.deepgram.com/v1/listen"
+        "?model=nova-3"
+        f"&language={dg_lang}"
+        "&smart_format=true"
+        "&punctuate=true"
+    )
+    headers = {
+        "Authorization": f"Token {DEEPGRAM_API_KEY}",
+        "Content-Type": audio_mime_type,
+    }
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(url, headers=headers, content=audio_bytes, timeout=12.0)
+        resp.raise_for_status()
+        data = resp.json()
+        transcript = (
+            data.get("results", {})
+                .get("channels", [{}])[0]
+                .get("alternatives", [{}])[0]
+                .get("transcript", "")
         )
-        resp = client.models.generate_content(
-            model="gemini-2.5-flash-lite",
-            contents=[
-                audio_part,
-                "Transcribe exactly what the user said in this audio clip. "
-                "Output only the transcription in the original language, nothing else.",
-            ],
-            config=_genai_new_types.GenerateContentConfig(
-                thinking_config=_genai_new_types.ThinkingConfig(thinking_budget=0)
-            ),
-        )
-        return (resp.text or "").strip()
-
-    return await asyncio.to_thread(_run)
+        return transcript.strip()
 
 
 async def _generate_suggested_questions(
@@ -1369,7 +1371,7 @@ async def assistant_chat_audio(
         transcribed_text = ""
         try:
             transcribed_text = await asyncio.wait_for(
-                _transcribe_audio(audio_bytes, audio_mime), timeout=15.0
+                _transcribe_audio(audio_bytes, audio_mime, user_language), timeout=15.0
             )
             if transcribed_text:
                 yield _sse({"type": "transcript", "text": transcribed_text})

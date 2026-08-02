@@ -47,7 +47,7 @@ class AuthViewModel: ObservableObject {
                 let userInfo = try await AuthService.shared.getCurrentUser()
                 isLoading = false
                 AuthManager.shared.loginSuccess(userInfo: userInfo)
-                TikTokBusiness.trackEvent("Login", withProperties: ["method": "email"])
+                TikTokTracker.track("Login", ["method": "email"])
                 TikTokBusiness.identify(withExternalID: userInfo.user_id, externalUserName: nil, phoneNumber: nil, email: userInfo.email)
                 // Kochava IdentityLink：只传内部用户 ID，不传 PII
                 IdentityLink.register(name: "User ID", identifier: userInfo.user_id)
@@ -85,9 +85,9 @@ class AuthViewModel: ObservableObject {
                 isLoading = false
                 AuthManager.shared.loginSuccess(userInfo: userInfo)
                 if loginData.is_new_user == true {
-                    TikTokBusiness.trackEvent("Registration", withProperties: ["method": "email"])
+                    TikTokTracker.track("Registration", ["method": "email"])
                 }
-                TikTokBusiness.trackEvent("Login", withProperties: ["method": "email"])
+                TikTokTracker.track("Login", ["method": "email"])
                 TikTokBusiness.identify(withExternalID: userInfo.user_id, externalUserName: nil, phoneNumber: nil, email: userInfo.email)
                 IdentityLink.register(name: "User ID", identifier: userInfo.user_id)
             } catch {
@@ -131,9 +131,9 @@ class AuthViewModel: ObservableObject {
                     isLoading = false
                     AuthManager.shared.loginSuccess(userInfo: userInfo)
                     if loginData.is_new_user == true {
-                        TikTokBusiness.trackEvent("Registration", withProperties: ["method": "apple"])
+                        TikTokTracker.track("Registration", ["method": "apple"])
                     }
-                    TikTokBusiness.trackEvent("Login", withProperties: ["method": "apple"])
+                    TikTokTracker.track("Login", ["method": "apple"])
                     TikTokBusiness.identify(withExternalID: userInfo.user_id, externalUserName: nil, phoneNumber: nil, email: userInfo.email)
                     IdentityLink.register(name: "User ID", identifier: userInfo.user_id)
                 } catch {
@@ -190,9 +190,9 @@ class AuthViewModel: ObservableObject {
                     self.isLoading = false
                     AuthManager.shared.loginSuccess(userInfo: userInfo)
                     if loginData.is_new_user == true {
-                        TikTokBusiness.trackEvent("Registration", withProperties: ["method": "google"])
+                        TikTokTracker.track("Registration", ["method": "google"])
                     }
-                    TikTokBusiness.trackEvent("Login", withProperties: ["method": "google"])
+                    TikTokTracker.track("Login", ["method": "google"])
                     TikTokBusiness.identify(withExternalID: userInfo.user_id, externalUserName: nil, phoneNumber: nil, email: userInfo.email)
                     IdentityLink.register(name: "User ID", identifier: userInfo.user_id)
                 } catch {

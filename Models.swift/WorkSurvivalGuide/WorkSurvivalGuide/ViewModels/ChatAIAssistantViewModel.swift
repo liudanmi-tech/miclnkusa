@@ -516,6 +516,7 @@ final class ChatAIAssistantViewModel: ObservableObject {
             // 服务端返回裸 dict（非 APIResponse 包装），JSON 解码可能抛 DecodingError。
             // 只有 HTTP 403 image_limit_reached 才移除骨架屏；其他错误继续走轮询
             // （HTTP 202 表示服务端已接受，骨架屏应保留直到轮询拿到真实 URL）。
+            TikTokTracker.track("ClickButton", ["content_id": "generate_image", "content_type": "feature"])
             do {
                 _ = try await NetworkManager.shared.generateImageFromChat(
                     sessionId: sid,

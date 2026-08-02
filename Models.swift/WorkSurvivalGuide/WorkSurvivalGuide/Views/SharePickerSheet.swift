@@ -85,10 +85,13 @@ struct SharePickerSheet: View {
         }
         .presentationDetents([.medium])
         .presentationDragIndicator(.hidden)
+        .onAppear {
+            TikTokTracker.track("ViewContent", ["content_id": "share_panel", "content_type": "comic"])
+        }
     }
 
     private func instagramTap() {
-        TikTokBusiness.trackEvent("ClickButton", withProperties: [
+        TikTokTracker.track("ClickButton", [
             "content_id": "share_instagram",
             "content_type": "comic",
             "quantity": selected.count
