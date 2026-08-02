@@ -58,6 +58,9 @@ class SubscriptionManager: ObservableObject {
         transactionListenerTask = listenForTransactions()
 
         Task {
+            // 先同步 currentEntitlements：补处理 App 关闭期间发生的自动续订，
+            // 确保服务器 DB 里的 expires_at 在 refreshFromBackend 之前已是最新值
+            await syncCurrentEntitlements()
             await refreshFromBackend()
             await loadProducts() // iOS 26 预热：登录后提前加载产品，避免 Paywall 首次打开时超时报错
         }
@@ -195,6 +198,24 @@ class SubscriptionManager: ObservableObject {
         } catch {
             purchaseError = error.localizedDescription
             print("[SubscriptionManager] 购买失败: \(error)")
+        }
+    }
+
+    // MARK: - 启动时同步当前有效订阅
+
+    /// 遍历 StoreKit currentEntitlements，将有效订阅凭证同步到服务器。
+    /// 解决 App 关闭期间自动续订发生时 expires_at 未更新的问题：
+    /// Transaction.updates 只监听新事务，不回放已有续订；
+    /// currentEntitlements 始终包含最新已续订的凭证。
+    private func syncCurrentEntitlements() async {
+        for await result in Transaction.currentEntitlements {
+            guard let transaction = try? checkVerified(result),
+                  Self.allProductIDs.contains(transaction.productID) else { continue }
+            await sendToBackend(
+                originalTransactionId: String(transaction.originalID),
+                productId: transaction.productID,
+                jwsRepresentation: result.jwsRepresentation
+            )
         }
     }
 

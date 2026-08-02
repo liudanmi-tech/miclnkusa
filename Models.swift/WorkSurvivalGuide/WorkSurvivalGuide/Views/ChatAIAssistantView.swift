@@ -133,7 +133,7 @@ struct ChatAIAssistantView: View {
                     .zIndex(98)
                     .onAppear {
                         Task {
-                            try? await Task.sleep(nanoseconds: 3_000_000_000)
+                            try? await Task.sleep(nanoseconds: 5_000_000_000)
                             await MainActor.run { withAnimation { showUnmatchedPersonToast = false } }
                         }
                     }
