@@ -210,13 +210,6 @@ struct ChatAIAssistantView: View {
             didTrackView = true
             TikTokTracker.track("ViewContent", ["content_id": "ai_chat", "content_type": "feature"])
         }
-        .onDisappear {
-            TikTokTracker.track("ClickButton", [
-                "content_id": "close_ai_chat",
-                "content_type": "feature",
-                "image_count": sceneImageItems.count
-            ])
-        }
         .task {
             if isExistingSession {
                 await chatVM.loadHistory()
@@ -564,6 +557,11 @@ struct ChatAIAssistantView: View {
     // MARK: - Actions
 
     private func handleCloseTap() {
+        TikTokTracker.track("ClickButton", [
+            "content_id": "close_ai_chat",
+            "content_type": "feature",
+            "image_count": sceneImageItems.count
+        ])
         // 从列表重入：无论有无新消息，直接关（session 已归档，不重复 finalize 或删除）
         if isExistingSession {
             dismiss()
