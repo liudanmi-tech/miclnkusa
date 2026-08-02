@@ -25,40 +25,40 @@ GEMINI_MODEL = os.getenv("GEMINI_FLASH_MODEL", "gemini-2.0-flash")
 # ─── 抽取 Prompt ─────────────────────────────────────────────────────────────
 
 _EXTRACT_PROMPT = """\
-你是一个信息抽取助手。从以下对话/摘要中抽取结构化信息，输出纯 JSON（不要 markdown 代码块）。
+You are an information extraction assistant. Extract structured information from the following conversation or summary and output pure JSON (no markdown code blocks).
 
-今日日期：{today}
+Today's date: {today}
 
-输入内容：
+Input content:
 {content}
 
-请抽取：
-1. persons（对话中出现的人物）
-   - name: 人名（中文真实姓名或称呼）
-   - relationship: 关系类型（boss/colleague/friend/romantic/family/other）
-   - relationship_desc: 一句话描述（如"直属上司""同部门同事"）
-   - intimacy: 亲密度 1-10
-   - friction: 摩擦指数 1-10
-   - power: superior/equal/subordinate（相对于用户）
+Please extract:
+1. persons (people mentioned in the conversation)
+   - name: person's name or title
+   - relationship: relationship type (boss/colleague/friend/romantic/family/other)
+   - relationship_desc: one-sentence description in English (e.g. "direct supervisor", "teammate in the same department")
+   - intimacy: intimacy score 1-10
+   - friction: friction score 1-10
+   - power: superior/equal/subordinate (relative to the user)
 
-2. events（关键事件，每个人物最多2条最重要的）
-   - person: 人名
-   - date: 事件日期（若不明确写 today）
-   - summary: 事件一句话摘要（20字以内）
+2. events (key events, at most 2 most important ones per person)
+   - person: person's name
+   - date: event date (write "today" if unclear)
+   - summary: one-sentence event summary in English (within 20 words)
    - sentiment: positive/neutral/negative
    - outcome: resolved/ongoing/escalated
 
-3. goals（用户的目标/任务）
-   - description: 目标描述（20字以内）
-   - person: 相关人物（可为空）
+3. goals (user's goals or tasks)
+   - description: goal description in English (within 20 words)
+   - person: related person (can be empty)
    - status: in_progress/completed/abandoned
 
-规则：
-- 若对话中无明确人物，persons 返回空数组
-- 用户自己不计入 persons
-- 只抽取对话中有明确依据的信息，不要推断
+Rules:
+- If no specific person is mentioned, return an empty array for persons
+- Do not include the user themselves in persons
+- Only extract information explicitly supported by the conversation, do not infer
 
-输出格式（只输出 JSON）：
+Output format (JSON only):
 {{"persons": [...], "events": [...], "goals": [...]}}
 """
 
@@ -160,13 +160,13 @@ def _format_tagged(data: dict, today_str: str) -> list[str]:
         intimacy = p.get("intimacy", "?")
         friction = p.get("friction", "?")
         power = p.get("power", "")
-        power_str = {"superior": "上级", "equal": "平级", "subordinate": "下级"}.get(power, "")
+        power_str = {"superior": "Superior", "equal": "Equal", "subordinate": "Subordinate"}.get(power, "")
 
         text = (
             f"[PERSON:{name}][TYPE:relationship] "
-            f"关系：{rel_desc}"
-            + (f"，{power_str}" if power_str else "")
-            + f"，亲密度{intimacy}/10，摩擦{friction}/10"
+            f"Relationship: {rel_desc}"
+            + (f", {power_str}" if power_str else "")
+            + f", intimacy {intimacy}/10, friction {friction}/10"
         )
         items.append(text)
 
@@ -183,13 +183,13 @@ def _format_tagged(data: dict, today_str: str) -> list[str]:
         outcome = e.get("outcome", "")
 
         tag_person = f"[PERSON:{person}]" if person else ""
-        tag_sentiment = {"positive": "正面", "negative": "负面", "neutral": "中性"}.get(sentiment, "")
-        tag_outcome = {"resolved": "已解决", "ongoing": "进行中", "escalated": "升级"}.get(outcome, "")
+        tag_sentiment = {"positive": "Positive", "negative": "Negative", "neutral": "Neutral"}.get(sentiment, "")
+        tag_outcome = {"resolved": "Resolved", "ongoing": "Ongoing", "escalated": "Escalated"}.get(outcome, "")
 
         text = (
             f"{tag_person}[TYPE:event][DATE:{event_date}] {summary}"
-            + (f"，情感：{tag_sentiment}" if tag_sentiment else "")
-            + (f"，状态：{tag_outcome}" if tag_outcome else "")
+            + (f", sentiment: {tag_sentiment}" if tag_sentiment else "")
+            + (f", status: {tag_outcome}" if tag_outcome else "")
         )
         items.append(text)
 
@@ -200,10 +200,10 @@ def _format_tagged(data: dict, today_str: str) -> list[str]:
             continue
         person = (g.get("person") or "").strip()
         status = g.get("status", "in_progress")
-        status_str = {"in_progress": "进行中", "completed": "已完成", "abandoned": "已放弃"}.get(status, status)
+        status_str = {"in_progress": "In Progress", "completed": "Completed", "abandoned": "Abandoned"}.get(status, status)
 
         tag_person = f"[PERSON:{person}]" if person else ""
-        text = f"[GOAL]{tag_person}[STATUS:{status}][DATE:{today_str}] {desc}，{status_str}"
+        text = f"[GOAL]{tag_person}[STATUS:{status}][DATE:{today_str}] {desc}, {status_str}"
         items.append(text)
 
     return items

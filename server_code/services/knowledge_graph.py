@@ -274,15 +274,15 @@ async def get_profile_memories_kg(
         # 2. 关系概况
         relationship = []
         if person.rel_desc or person.rel_type:
-            parts = [f"关系：{person.rel_desc or person.rel_type}"]
+            parts = [f"Relationship: {person.rel_desc or person.rel_type}"]
             if person.intimacy:
-                parts.append(f"亲密度 {person.intimacy}/10")
+                parts.append(f"intimacy {person.intimacy}/10")
             if person.friction:
-                parts.append(f"摩擦 {person.friction}/10")
+                parts.append(f"friction {person.friction}/10")
             if person.power:
-                power_map = {"superior": "上级", "equal": "平级", "subordinate": "下级"}
+                power_map = {"superior": "Superior", "equal": "Equal", "subordinate": "Subordinate"}
                 parts.append(power_map.get(person.power, person.power))
-            relationship.append({"content": "，".join(parts), "type": "relationship",
+            relationship.append({"content": ", ".join(parts), "type": "relationship",
                                   "date": None, "status": None})
 
         # 3. 事件列表（按日期降序）
