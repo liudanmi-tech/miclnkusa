@@ -2856,5 +2856,25 @@ extension NetworkManager {
         }
         return json["email_login_enabled"] ?? false
     }
+
+    /// 检查是否需要强制更新。返回 true 表示当前版本低于服务端 minimum_version，需拦截进入。
+    /// 网络失败或接口异常时返回 false，静默放行，不影响用户正常使用。
+    func checkAppVersion() async -> Bool {
+        guard let url = URL(string: "\(baseURLForWrite)/app/version") else { return false }
+        guard let (data, _) = try? await URLSession.shared.data(from: url),
+              let json = try? JSONDecoder().decode([String: String].self, from: data),
+              let minimumVersion = json["ios_minimum_version"] else {
+            return false
+        }
+        let current = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0"
+        return current.compareAsVersion(to: minimumVersion) == .orderedAscending
+    }
+}
+
+private extension String {
+    /// 语义化版本比较，正确处理 1.10.0 > 1.9.0 的情况
+    func compareAsVersion(to other: String) -> ComparisonResult {
+        return compare(other, options: .numeric)
+    }
 }
 

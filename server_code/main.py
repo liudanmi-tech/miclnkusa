@@ -4205,6 +4205,18 @@ async def get_app_config():
     return {"email_login_enabled": email_login_enabled}
 
 
+@app.get("/api/v1/app/version")
+async def get_app_version():
+    """返回 iOS 强制更新版本配置（无需 JWT）。
+    ios_minimum_version: 低于此版本的客户端将被强制更新，设为 1.0.0 表示不触发。
+    ios_latest_version:  当前 App Store 最新版本（供展示用）。
+    """
+    return {
+        "ios_minimum_version": os.getenv("IOS_MINIMUM_VERSION", "1.0.0"),
+        "ios_latest_version": os.getenv("IOS_LATEST_VERSION", "1.3.0"),
+    }
+
+
 @app.get("/api/v1/image-styles")
 async def get_image_styles():
     """返回所有图片风格列表（无需 JWT），数据来自 styles.json，支持热更新。"""

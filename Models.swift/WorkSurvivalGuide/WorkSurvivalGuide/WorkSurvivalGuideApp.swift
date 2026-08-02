@@ -136,12 +136,21 @@ struct SplashCoordinator: View {
     @AppStorage("hasAcceptedTerms") private var hasAcceptedTerms = false
     @Environment(\.scenePhase) private var scenePhase
     @State private var attRequested = false
+    @State private var forceUpdateNeeded = false
 
     var body: some View {
         ZStack {
             ContentView()
             if showSplash {
-                SplashScreenView(onFinish: { showSplash = false })
+                SplashScreenView(onFinish: {
+                    showSplash = false
+                    _Concurrency.Task {
+                        let needsUpdate = await NetworkManager.shared.checkAppVersion()
+                        await MainActor.run { forceUpdateNeeded = needsUpdate }
+                    }
+                })
+            } else if forceUpdateNeeded {
+                ForceUpdateView()
             } else if !hasAcceptedTerms {
                 TermsAgreementView(onAccept: { hasAcceptedTerms = true })
             }
