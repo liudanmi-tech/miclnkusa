@@ -28,6 +28,7 @@ struct ChatAIAssistantView: View {
     @State private var isClosingSession = false
     @State private var errorToast: String? = nil
     @State private var showSharePicker = false
+    @State private var didTrackView = false
     @State private var showUnmatchedPersonToast = false
     @State private var showProfileCreate = false
 
@@ -205,6 +206,8 @@ struct ChatAIAssistantView: View {
             Text("You've used all your image generations for this period. They'll reset with your next billing cycle.")
         }
         .onAppear {
+            guard !didTrackView else { return }
+            didTrackView = true
             TikTokTracker.track("ViewContent", ["content_id": "ai_chat", "content_type": "feature"])
         }
         .onDisappear {

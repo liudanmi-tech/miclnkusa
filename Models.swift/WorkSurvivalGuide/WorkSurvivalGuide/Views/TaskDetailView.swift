@@ -24,6 +24,7 @@ struct TaskDetailView: View {
     @AppStorage("ai_disclaimer_shown") private var aiDisclaimerShown = false
     @State private var showAIDisclaimer = false
     @State private var showChatView = false
+    @State private var didTrackView = false
 
     var body: some View {
         GeometryReader { geometry in
@@ -156,11 +157,14 @@ struct TaskDetailView: View {
             }
             .navigationBarHidden(true)
             .onAppear {
-                TikTokTracker.track("ViewContent", [
-                    "content_id": "task_detail",
-                    "content_type": task.sessionType ?? "recording",
-                    "session_id": task.id
-                ])
+                if !didTrackView {
+                    didTrackView = true
+                    TikTokTracker.track("ViewContent", [
+                        "content_id": "task_detail",
+                        "content_type": task.sessionType ?? "recording",
+                        "session_id": task.id
+                    ])
+                }
                 loadAll()
                 if !aiDisclaimerShown {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {

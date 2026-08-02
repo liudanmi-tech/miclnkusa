@@ -133,7 +133,15 @@ struct SkillsView: View {
                                 OnboardingCategorySection(
                                     category: item.category,
                                     displaySubSkills: item.subSkills,
-                                    onSelectSkill: { selectedSkill = $0 }
+                                    onSelectSkill: { skill in
+                                    TikTokTracker.track("ClickButton", [
+                                        "content_id": "skill_card",
+                                        "content_type": "skills",
+                                        "skill_id": skill.id,
+                                        "skill_name": skill.name
+                                    ])
+                                    selectedSkill = skill
+                                }
                                 )
                             }
 

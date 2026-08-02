@@ -61,6 +61,10 @@ struct BottomNavView: View {
                         tab: tab,
                         isSelected: selectedTab == tab,
                         action: {
+                            TikTokTracker.track("ClickButton", [
+                                "content_id": "tab_\(tab.rawValue.lowercased())",
+                                "content_type": "navigation"
+                            ])
                             selectedTab = tab
                         }
                     )

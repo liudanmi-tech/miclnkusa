@@ -34,7 +34,13 @@ struct WeeklyStatsCarouselView: View {
         VStack(spacing: 8) {
             MoodCurveCard(stats: vm.stats, isLoading: vm.isLoading, emojiType: selfEmojiType)
                 .frame(height: 290)
-                .onTapGesture { detailCard = .mood }
+                .onTapGesture {
+                    TikTokTracker.track("ClickButton", [
+                        "content_id": "mood_trend_detail",
+                        "content_type": "stats"
+                    ])
+                    detailCard = .mood
+                }
         }
         .onAppear { vm.load() }
         .sheet(item: $detailCard) { card in
@@ -611,7 +617,14 @@ struct WeeklyStatsDetailSheet: View {
                         if selectedCard != .radar {
                             Picker("", selection: Binding(
                                 get: { vm.selectedRange },
-                                set: { vm.switchRange($0) }
+                                set: { r in
+                                    TikTokTracker.track("ClickButton", [
+                                        "content_id": "mood_trend_range",
+                                        "content_type": "stats",
+                                        "range": r.rawValue
+                                    ])
+                                    vm.switchRange(r)
+                                }
                             )) {
                                 ForEach(WeeklyStatsViewModel.TimeRange.allCases, id: \.self) { r in
                                     Text(r.rawValue).tag(r)
