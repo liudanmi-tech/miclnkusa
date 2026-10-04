@@ -1,33 +1,48 @@
+import base64
 import io
 import json
 import os
 import re
 
+import httpx
 from dotenv import load_dotenv
 from PIL import Image, ImageDraw
 
 load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 
-TEXT_MODEL = os.getenv("DREAM_TEXT_MODEL", "gemini-2.5-flash")
-IMAGE_MODEL = os.getenv("DREAM_IMAGE_MODEL", "gemini-3.1-flash-image-preview")
-MOCK = os.getenv("DREAM_MOCK") == "1" or not os.getenv("GEMINI_API_KEY")
+if os.getenv("DREAM_MOCK") == "1":
+    PROVIDER = "mock"
+elif os.getenv("OPENROUTER_API_KEY"):
+    PROVIDER = "openrouter"
+elif os.getenv("GEMINI_API_KEY"):
+    PROVIDER = "gemini"
+else:
+    PROVIDER = "mock"
+MOCK = PROVIDER == "mock"
+
+_DEFAULTS = {
+    "openrouter": ("google/gemini-2.5-flash", "google/gemini-2.5-flash-image"),
+    "gemini": ("gemini-2.5-flash", "gemini-3.1-flash-image-preview"),
+    "mock": ("mock", "mock"),
+}
+TEXT_MODEL = os.getenv("DREAM_TEXT_MODEL", _DEFAULTS[PROVIDER][0])
+IMAGE_MODEL = os.getenv("DREAM_IMAGE_MODEL", _DEFAULTS[PROVIDER][1])
 
 STYLE = "温暖的手绘漫画风格，柔和水彩上色，略带胶片颗粒感，像一本回忆绘本"
 
+OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+
 _client = None
-if not MOCK:
+if PROVIDER == "gemini":
     from google import genai
     from google.genai import types
 
     _client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
 
 
-async def _json_call(parts: list, temperature: float = 0.4) -> dict:
-    resp = await _client.aio.models.generate_content(
-        model=TEXT_MODEL, contents=parts,
-        config=types.GenerateContentConfig(response_mime_type="application/json", temperature=temperature),
-    )
-    text = resp.text or ""
+# parts 是 str（文字）和 bytes（JPEG 图片）混排的列表，两个后端各自转换格式
+
+def _parse_json(text: str) -> dict:
     try:
         return json.loads(text)
     except json.JSONDecodeError:
@@ -37,9 +52,29 @@ async def _json_call(parts: list, temperature: float = 0.4) -> dict:
         return json.loads(m.group(0))
 
 
-async def _image_call(parts: list) -> bytes:
+async def _json_call(parts: list, temperature: float = 0.4) -> dict:
+    if PROVIDER == "openrouter":
+        msg = await _openrouter(TEXT_MODEL, parts, temperature=temperature,
+                                response_format={"type": "json_object"})
+        return _parse_json(msg.get("content") or "")
     resp = await _client.aio.models.generate_content(
-        model=IMAGE_MODEL, contents=parts,
+        model=TEXT_MODEL, contents=_gemini_parts(parts),
+        config=types.GenerateContentConfig(response_mime_type="application/json", temperature=temperature),
+    )
+    return _parse_json(resp.text or "")
+
+
+async def _image_call(parts: list) -> bytes:
+    if PROVIDER == "openrouter":
+        msg = await _openrouter(IMAGE_MODEL, parts, modalities=["image", "text"],
+                                image_config={"aspect_ratio": "4:3"})
+        for img in msg.get("images") or []:
+            url = (img.get("image_url") or {}).get("url", "")
+            if url.startswith("data:"):
+                return base64.b64decode(url.split(",", 1)[1])
+        raise RuntimeError("生图模型没有返回图片（可能被安全策略拦截）")
+    resp = await _client.aio.models.generate_content(
+        model=IMAGE_MODEL, contents=_gemini_parts(parts),
         config=types.GenerateContentConfig(
             response_modalities=["TEXT", "IMAGE"],
             image_config=types.ImageConfig(aspect_ratio="4:3"),
@@ -52,8 +87,28 @@ async def _image_call(parts: list) -> bytes:
     raise RuntimeError("生图模型没有返回图片（可能被安全策略拦截）")
 
 
-def _img(data: bytes):
-    return types.Part.from_bytes(data=data, mime_type="image/jpeg")
+def _gemini_parts(parts):
+    return [types.Part.from_bytes(data=p, mime_type="image/jpeg") if isinstance(p, bytes) else p for p in parts]
+
+
+async def _openrouter(model: str, parts: list, **extra) -> dict:
+    content = []
+    for p in parts:
+        if isinstance(p, bytes):
+            url = "data:image/jpeg;base64," + base64.b64encode(p).decode()
+            content.append({"type": "image_url", "image_url": {"url": url}})
+        else:
+            content.append({"type": "text", "text": p})
+    body = {"model": model, "messages": [{"role": "user", "content": content}], **extra}
+    headers = {"Authorization": f"Bearer {os.environ['OPENROUTER_API_KEY']}", "X-Title": "dream_demo"}
+    async with httpx.AsyncClient(timeout=180) as client:
+        r = await client.post(OPENROUTER_URL, json=body, headers=headers)
+    if r.status_code != 200:
+        raise RuntimeError(f"OpenRouter {r.status_code}：{r.text[:300]}")
+    data = r.json()
+    if data.get("error"):
+        raise RuntimeError(f"OpenRouter 错误：{data['error']}")
+    return data["choices"][0]["message"]
 
 
 # ---------- 1. 照片解析 ----------
@@ -93,7 +148,7 @@ async def analyze_photos(photos: list[tuple[str, str | None, bytes]]) -> dict:
     parts: list = [VISION_PROMPT]
     for pid, t, data in photos:
         parts.append(f"照片 {pid}（拍摄时间：{t or '未知'}）：")
-        parts.append(_img(data))
+        parts.append(data)
     return await _json_call(parts, temperature=0.2)
 
 
@@ -176,7 +231,7 @@ async def generate_background(photo: bytes, scene_name: str, env: dict, era: str
         f"天气：{env.get('weather') or '照片中的天气'}，光线：{env.get('light') or '照片中的光线'}。"
         f"年代感：{era}。画面中不要出现任何人物和文字。横构图 4:3。"
     )
-    return await _image_call([prompt, _img(photo)])
+    return await _image_call([prompt, photo])
 
 
 async def generate_panel(background: bytes, moment: str, characters: list[dict], protected: bool) -> bytes:
@@ -193,7 +248,7 @@ async def generate_panel(background: bytes, moment: str, characters: list[dict],
         f"{people}\n"
         f"保持背景不变，人物自然地站在地面上，比例合理。{STYLE}。不要出现文字、对话框和水印。"
     )
-    return await _image_call([prompt, _img(background)])
+    return await _image_call([prompt, background])
 
 
 # ---------- 无 key 时的模拟数据 ----------
@@ -297,7 +352,7 @@ def _mock_image(label, color):
     for y in range(768):
         shade = int(60 * y / 768)
         d.line([(0, y), (1024, y)], fill=tuple(max(0, c - shade) for c in color))
-    d.text((40, 40), "MOCK IMAGE (no GEMINI_API_KEY)", fill=(255, 255, 255))
+    d.text((40, 40), "MOCK IMAGE (no API key)", fill=(255, 255, 255))
     d.text((40, 70), label.encode("ascii", "replace").decode(), fill=(255, 255, 255))
     buf = io.BytesIO()
     img.save(buf, "PNG")
