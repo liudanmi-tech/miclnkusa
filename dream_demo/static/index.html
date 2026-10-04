@@ -1,0 +1,447 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>造梦 Demo</title>
+<style>
+  :root {
+    --bg: #f6f3ee; --card: #fffdf9; --ink: #2b2620; --muted: #8a8177; --line: #e6dfd4;
+    --accent: #c8643b; --accent-soft: #f6e3d8; --ok: #4f8a5b; --warn: #b8862e;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+    font: 15px/1.6 -apple-system, "PingFang SC", "Noto Sans SC", "Microsoft YaHei", sans-serif; }
+  header { padding: 14px 20px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 12px; }
+  header h1 { font-size: 18px; margin: 0; }
+  .badge { font-size: 12px; padding: 2px 8px; border-radius: 10px; background: var(--accent-soft); color: var(--accent); }
+  main { max-width: 1180px; margin: 0 auto; padding: 20px 16px 60px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 18px; }
+  .hidden { display: none !important; }
+  button { font: inherit; border: 1px solid var(--line); background: #fff; color: var(--ink);
+    padding: 7px 14px; border-radius: 8px; cursor: pointer; }
+  button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  button:disabled { opacity: .45; cursor: default; }
+  input[type=text] { font: inherit; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; width: 100%; }
+  .muted { color: var(--muted); font-size: 13px; }
+  ul.notice { padding-left: 18px; margin: 8px 0; }
+  .notice-bar { background: #fff6e6; border: 1px solid #f0dcb4; border-radius: 8px; padding: 8px 12px; font-size: 13px; margin-bottom: 12px; }
+
+  /* 访谈页 */
+  .grid { display: grid; grid-template-columns: 1.25fr 1fr; gap: 16px; align-items: start; }
+  @media (max-width: 860px) { .grid { grid-template-columns: 1fr; } }
+  .stage { position: relative; border-radius: 10px; overflow: hidden; background: #000; }
+  .stage img { display: block; width: 100%; }
+  .box { position: absolute; border: 2px solid; border-radius: 4px; cursor: pointer; }
+  .box span { position: absolute; top: -2px; left: -2px; font-size: 12px; color: #fff; padding: 0 5px; border-radius: 3px 0 4px 0; white-space: nowrap; }
+  .box.dim { opacity: .35; border-style: dashed; }
+  .stage.picking .box { animation: pulse 1.2s infinite; }
+  @keyframes pulse { 50% { box-shadow: 0 0 0 4px rgba(255,255,255,.5); } }
+  .thumbs { display: flex; gap: 6px; overflow-x: auto; margin-top: 8px; padding-bottom: 4px; }
+  .thumbs img { height: 54px; border-radius: 6px; cursor: pointer; opacity: .6; border: 2px solid transparent; }
+  .thumbs img.on { opacity: 1; border-color: var(--accent); }
+  .section-title { font-size: 13px; color: var(--muted); margin: 16px 0 6px; letter-spacing: .05em; }
+  .timeline { border-left: 2px solid var(--line); margin-left: 6px; padding-left: 14px; }
+  .beat { position: relative; margin-bottom: 8px; font-size: 14px; }
+  .beat::before { content: ""; position: absolute; left: -20px; top: 7px; width: 10px; height: 10px; border-radius: 50%; background: var(--accent); }
+  .beat.gap::before { background: #fff; border: 2px dashed var(--muted); width: 6px; height: 6px; }
+  .beat.gap { color: var(--muted); font-style: italic; }
+  .beat.user::before { background: var(--ok); }
+  .tag { display: inline-block; font-size: 11px; padding: 0 6px; border-radius: 6px; background: #eee8df; color: var(--muted); margin-left: 4px; }
+  .people { display: flex; flex-wrap: wrap; gap: 6px; }
+  .person { font-size: 13px; padding: 3px 9px; border-radius: 14px; border: 1px solid var(--line); background: #fff; cursor: pointer; }
+  .person i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; }
+
+  .chat { display: flex; flex-direction: column; gap: 10px; max-height: 52vh; overflow-y: auto; padding-right: 4px; }
+  .msg { max-width: 88%; padding: 9px 13px; border-radius: 12px; }
+  .msg.ai { background: var(--accent-soft); align-self: flex-start; border-bottom-left-radius: 3px; }
+  .msg.me { background: #fff; border: 1px solid var(--line); align-self: flex-end; border-bottom-right-radius: 3px; }
+  .msg .noted { display: block; font-size: 12px; color: var(--ok); margin-top: 4px; }
+  .composer { margin-top: 12px; display: flex; flex-direction: column; gap: 8px; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .row input { flex: 1; min-width: 160px; }
+  .meters { display: grid; grid-template-columns: auto 1fr auto; gap: 4px 10px; align-items: center; font-size: 13px; margin-top: 14px; }
+  .meter { height: 6px; background: #eee8df; border-radius: 3px; overflow: hidden; }
+  .meter b { display: block; height: 100%; background: var(--warn); }
+  .meter b.ok { background: var(--ok); }
+
+  /* 造梦 & 首映 */
+  .steps li { margin: 6px 0; }
+  .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: spin 1s linear infinite; vertical-align: -2px; margin-right: 6px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .premiere { position: relative; border-radius: 12px; overflow: hidden; background: #111; }
+  .premiere img { display: block; width: 100%; }
+  .caption { position: absolute; left: 0; right: 0; bottom: 0; padding: 40px 22px 18px; color: #fff;
+    background: linear-gradient(transparent, rgba(0,0,0,.75)); transition: opacity .4s; }
+  .caption .scene { font-size: 12px; opacity: .75; }
+  .caption .line { font-size: 22px; font-weight: 600; margin-top: 4px; }
+  .caption.peak .line { font-size: 30px; color: #ffd9a8; }
+  .progress { position: absolute; top: 10px; left: 12px; right: 12px; display: flex; gap: 3px; }
+  .progress i { flex: 1; height: 3px; background: rgba(255,255,255,.3); border-radius: 2px; }
+  .progress i.on { background: #fff; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .bubble { margin-top: 10px; padding: 12px 14px; background: var(--accent-soft); border-radius: 10px; min-height: 20px; }
+  pre { background: #f1ece4; padding: 12px; border-radius: 8px; overflow: auto; font-size: 12px; max-height: 360px; }
+  .pop { position: fixed; z-index: 10; background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 12px; width: 260px; box-shadow: 0 8px 30px rgba(0,0,0,.15); }
+</style>
+</head>
+<body>
+<header>
+  <h1>造梦 Demo</h1>
+  <span id="mode" class="badge"></span>
+</header>
+<main>
+  <!-- 1 上传 -->
+  <section id="v-upload" class="card">
+    <h2 style="margin-top:0">选一组照片，和造梦师一起翻相册</h2>
+    <p>一次出行的 1–20 张照片（景区、团建、旅行、婚礼…）。上传前请知悉：</p>
+    <ul class="notice">
+      <li>会读取拍摄时间和地点（地点只用来切分事件，原始坐标不保存）</li>
+      <li>会识别画面内容（地点、活动、人物外观）</li>
+      <li><b>不会识别人脸是谁</b>——"是谁"永远由你告诉系统</li>
+      <li>照片只用于你自己的梦境，可以随时删除</li>
+    </ul>
+    <div class="row">
+      <input id="files" type="file" accept="image/*" multiple>
+      <button id="btn-upload" class="primary">开始</button>
+    </div>
+    <p id="upload-err" class="muted"></p>
+  </section>
+
+  <!-- 2 解析中 -->
+  <section id="v-analyzing" class="card hidden">
+    <p><span class="spinner"></span>造梦师正在翻看照片：安全扫描、排时间线、框出每个人、识别地点和活动…</p>
+  </section>
+
+  <!-- 3 访谈 -->
+  <section id="v-interview" class="hidden">
+    <div id="notices"></div>
+    <div class="grid">
+      <div class="card">
+        <div id="stage" class="stage"><img id="stage-img" alt=""></div>
+        <div id="thumbs" class="thumbs"></div>
+        <div class="section-title">人物</div>
+        <div id="people" class="people"></div>
+        <div class="section-title">故事草稿</div>
+        <div id="timeline" class="timeline"></div>
+      </div>
+      <div class="card">
+        <div id="chat" class="chat"></div>
+        <div id="composer" class="composer"></div>
+        <div class="meters" id="meters"></div>
+        <div class="row" style="margin-top:14px">
+          <button id="btn-build" class="primary">开始造梦</button>
+          <button id="btn-stop">就这样吧</button>
+          <span id="ready-hint" class="muted"></span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 4 造梦中 -->
+  <section id="v-building" class="card hidden">
+    <h3 style="margin-top:0">造梦中</h3>
+    <ul id="steps" class="steps"></ul>
+  </section>
+
+  <!-- 5 首映 & 静止 -->
+  <section id="v-ready" class="hidden">
+    <div class="grid">
+      <div>
+        <div class="premiere" id="premiere">
+          <img id="panel-img" alt="">
+          <div class="progress" id="progress"></div>
+          <div class="caption" id="caption"></div>
+        </div>
+        <div class="row" style="margin-top:10px">
+          <button id="btn-replay">再放一遍首映</button>
+          <button id="btn-bg">看背景</button>
+          <span class="muted">静止状态：时间停在封面那一刻</span>
+        </div>
+      </div>
+      <div class="card">
+        <div class="section-title" style="margin-top:0">听心声（点一个人物）</div>
+        <div id="mono-chips" class="chips"></div>
+        <div class="section-title">看物件</div>
+        <div id="obj-chips" class="chips"></div>
+        <div id="still-bubble" class="bubble muted">点上面的人物或物件</div>
+        <div class="section-title">初始记忆</div>
+        <div id="memories" style="font-size:14px"></div>
+        <details style="margin-top:14px"><summary>记忆复原剧本（循环状态的骨架）</summary><pre id="script"></pre></details>
+        <details><summary>梦境规格</summary><pre id="spec"></pre></details>
+      </div>
+    </div>
+  </section>
+
+  <section id="v-error" class="card hidden"><p id="err-text"></p><button id="btn-retry">重试造梦</button></section>
+</main>
+
+<script>
+const COLORS = ["#e4572e", "#2e86ab", "#7b9e3c", "#a259c4", "#e2a72e", "#3cb4a5", "#d14d8a", "#6c757d"];
+const MOODS = {belonging: "归属感", freedom: "自由", nostalgia: "怀念", excitement: "兴奋", warmth: "温馨", relief: "释然"};
+const ACTS = {group_photo: "合影", queue: "排队", cable_car: "坐索道", hiking: "爬山", photo_scenery: "拍风景", picnic: "野餐",
+  dining: "吃饭", playing: "打闹", sightseeing: "游览", resting: "休息", shopping: "买东西", other: "（未知）"};
+const $ = id => document.getElementById(id);
+let D = null, focusPhoto = null, pollTimer = null, busy = false, playTimer = null;
+
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
+
+async function api(path, opts = {}) {
+  const r = await fetch(path, opts);
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.detail || r.statusText);
+  return j;
+}
+const post = (path, body) => api(path, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body || {})});
+
+function show(view) {
+  for (const v of ["upload", "analyzing", "interview", "building", "ready", "error"]) $("v-" + v).classList.toggle("hidden", v !== view);
+}
+
+api("/api/config").then(c => {
+  $("mode").textContent = c.mock ? "模拟模式（未配置 GEMINI_API_KEY）" : `${c.text_model} · ${c.image_model}`;
+});
+
+$("btn-upload").onclick = async () => {
+  const fs = $("files").files;
+  if (!fs.length) return;
+  const fd = new FormData();
+  for (const f of fs) fd.append("files", f);
+  $("btn-upload").disabled = true;
+  try {
+    const {id} = await api("/api/dreams", {method: "POST", body: fd});
+    history.replaceState(null, "", "#" + id);
+    await load(id);
+  } catch (e) { $("upload-err").textContent = e.message; }
+  $("btn-upload").disabled = false;
+};
+
+async function load(id) {
+  D = await api("/api/dreams/" + id);
+  render();
+}
+
+function schedulePoll() {
+  clearTimeout(pollTimer);
+  if (D && (D.status === "analyzing" || D.status === "building")) pollTimer = setTimeout(() => load(D.id), 1500);
+}
+
+let lastStatus = null;
+function render() {
+  schedulePoll();
+  const st = D.status;
+  if (st === "analyzing") return show("analyzing");
+  if (st === "rejected" || (st === "error" && !D.cover)) { show("error"); $("err-text").textContent = D.error; $("btn-retry").classList.add("hidden"); return; }
+  if (st === "error") { show("error"); $("err-text").textContent = D.error; $("btn-retry").classList.remove("hidden"); return; }
+  if (st === "interview") { show("interview"); renderInterview(); }
+  if (st === "building") { show("building"); $("steps").innerHTML = D.build_steps.map(s => `<li>${esc(s.text)}</li>`).join("") + `<li><span class="spinner"></span>…</li>`; }
+  if (st === "ready" && lastStatus !== "ready") { show("ready"); renderReady(); }
+  lastStatus = st;
+}
+
+// ---------- 访谈 ----------
+const gColor = gid => COLORS[(parseInt(gid.slice(1)) - 1) % COLORS.length];
+const gName = g => g.is_self ? "我" : (g.state === "named" ? g.name : (g.state === "passerby" ? "路人" : (g.state === "excluded" ? "已排除" : "?")));
+const group = gid => D.groups.find(g => g.id === gid);
+const sceneName = sid => (D.scenes.find(s => s.id === sid) || {}).name || "";
+
+function renderInterview() {
+  $("notices").innerHTML = D.notices.length ? `<div class="notice-bar">${D.notices.map(esc).join("<br>")}</div>` : "";
+  const q = D.pending;
+  if (q && q.photo) focusPhoto = q.photo;
+  if (!focusPhoto || !D.photos.find(p => p.id === focusPhoto)) focusPhoto = D.cover;
+  renderStage();
+  $("thumbs").innerHTML = D.photos.map(p => `<img src="${p.url}" data-id="${p.id}" class="${p.id === focusPhoto ? "on" : ""}" title="${p.id} ${p.t ? p.t.slice(11, 16) : ""}">`).join("");
+  $("thumbs").querySelectorAll("img").forEach(img => img.onclick = () => { focusPhoto = img.dataset.id; renderInterview(); });
+
+  $("people").innerHTML = D.groups.map(g => `<span class="person" data-g="${g.id}"><i style="background:${gColor(g.id)}"></i>${esc(gName(g))}${g.is_main ? "★" : ""} <span class="muted">${esc(g.short)} ×${g.count}</span></span>`).join("") || `<span class="muted">没有框到人</span>`;
+  $("people").querySelectorAll(".person").forEach(el => el.onclick = e => openPop(el.dataset.g, e));
+
+  $("timeline").innerHTML = D.beats.filter(b => !(b.kind === "gap" && b.filled)).map(b => {
+    if (b.kind === "gap") return `<div class="beat gap">${b.gap[0]}–${b.gap[1]}　${esc(sceneName(b.from_scene))} → ${esc(sceneName(b.to_scene))} 之间没有照片</div>`;
+    const who = b.who.map(id => group(id)).filter(g => g && g.state !== "excluded" && g.state !== "passerby").map(gName).join("、");
+    const src = (b.source === "user" || b.user_detail) ? "user" : "photo";
+    return `<div class="beat ${src}"><b>${b.t || "--:--"}</b> ${esc(sceneName(b.scene_id))} · ${ACTS[b.activity] || b.activity}${who ? " · " + esc(who) : ""}
+      <span class="tag">${src === "user" ? "你说的" : "照片 " + b.evidence.join(",")}</span>${b.detail ? `<div class="muted">${esc(b.detail)}</div>` : ""}</div>`;
+  }).join("") + D.scenes.filter(s => s.kind === "candidate").map(s => `<div class="beat gap">候选场景：${esc(s.name)}（记忆地图上的雾）</div>`).join("");
+
+  renderChat();
+  renderComposer();
+  renderMeters();
+}
+
+function renderStage() {
+  const p = D.photos.find(p => p.id === focusPhoto);
+  $("stage-img").src = p.url;
+  $("stage").classList.toggle("picking", D.pending && D.pending.kind === "pick_self");
+  $("stage").querySelectorAll(".box").forEach(b => b.remove());
+  for (const b of p.boxes || []) {
+    const g = group(b.group_id), c = gColor(b.group_id);
+    const el = document.createElement("div");
+    el.className = "box" + (g.state === "passerby" || g.state === "excluded" ? " dim" : "");
+    Object.assign(el.style, {top: b.bbox[0] * 100 + "%", left: b.bbox[1] * 100 + "%", height: (b.bbox[2] - b.bbox[0]) * 100 + "%", width: (b.bbox[3] - b.bbox[1]) * 100 + "%", borderColor: c});
+    el.innerHTML = `<span style="background:${c}">${b.group_id} ${esc(gName(g))}</span>`;
+    el.title = b.appearance;
+    el.onclick = e => {
+      if (D.pending && D.pending.kind === "pick_self") return act(`/api/dreams/${D.id}/self`, {group_id: g.id});
+      openPop(g.id, e);
+    };
+    $("stage").appendChild(el);
+  }
+}
+
+function noted(u) {
+  if (!u) return "";
+  const out = [];
+  for (const p of u.persona_updates || []) {
+    const g = group(p.id); const n = p.name || (g && gName(g)) || p.id;
+    for (const [k, l] of [["relation", "关系"], ["personality", "性格"], ["catchphrase", "口头禅"], ["shared_memory", "你们的事"]]) if (p[k]) out.push(`${n}·${l}「${p[k]}」`);
+    if (p.name && !p.relation) out.push(`${p.name}`);
+  }
+  for (const b of u.beat_updates || []) out.push(b.fill_gap ? `补上空白：${b.t || ""} ${b.scene || ""}` : `补充细节`);
+  const e = u.emotion || {};
+  if (e.trigger) out.push(`触发物「${e.trigger}」`);
+  if (e.key_line) out.push(`关键台词「${e.key_line}」`);
+  if (e.primary) out.push(`心情：${MOODS[e.primary] || e.primary}`);
+  const env = u.environment || {};
+  if (env.sensory || env.weather) out.push(`环境「${env.sensory || env.weather}」`);
+  for (const x of u.new_exits || []) if (x.label) out.push(`候选场景「${x.label}」`);
+  return out.length ? `<span class="noted">记下：${esc(out.join("；"))}</span>` : "";
+}
+
+function renderChat() {
+  let h = "";
+  for (const t of D.turns) {
+    if (t.question) h += `<div class="msg ai">${esc(t.question)}</div>`;
+    h += `<div class="msg me">${esc(t.answer)}${noted(t.updates)}</div>`;
+  }
+  if (D.pending) h += `<div class="msg ai">${esc(D.pending.text)}</div>`;
+  else h += `<div class="msg ai">我知道得差不多了，点「开始造梦」吧。也可以继续补充，或者点照片里的人修改标注。</div>`;
+  if (busy) h += `<div class="msg ai"><span class="spinner"></span></div>`;
+  $("chat").innerHTML = h;
+  $("chat").scrollTop = 1e9;
+}
+
+function renderComposer() {
+  const q = D.pending, c = $("composer");
+  if (!q) {
+    c.innerHTML = `<div class="row"><input id="ans" type="text" placeholder="还想补充点什么…"><button id="send">发送</button></div>`;
+    bindText();
+    return;
+  }
+  if (q.input === "pick_box") {
+    c.innerHTML = `<div class="row"><span class="muted">点照片上的框选择你自己</span><button id="noself">照片里没有我</button></div>`;
+    $("noself").onclick = () => act(`/api/dreams/${D.id}/self`, {group_id: null});
+  } else if (q.input === "label") {
+    c.innerHTML = `<div class="row"><input id="ans" type="text" placeholder="名字或外号，和你的关系，比如：老王，我室友，他老是说“来来来，再拍一张”"><button id="send" class="primary">发送</button></div>
+      <div class="row"><button id="pass">路人</button><button id="excl">不想把他放进梦里</button></div>`;
+    $("send").onclick = () => { const v = $("ans").value.trim(); if (v) act(`/api/dreams/${D.id}/groups/${q.target}`, {action: "name", text: v}); };
+    $("ans").onkeydown = e => { if (e.key === "Enter" && !e.isComposing) $("send").click(); };
+    $("pass").onclick = () => act(`/api/dreams/${D.id}/groups/${q.target}`, {action: "passerby"});
+    $("excl").onclick = () => act(`/api/dreams/${D.id}/groups/${q.target}`, {action: "exclude"});
+  } else if (q.input === "choice") {
+    c.innerHTML = `<div class="row">${q.options.map(o => `<button data-v="${o.value}">${esc(o.label)}</button>`).join("")}</div>`;
+    c.querySelectorAll("button").forEach(b => b.onclick = () => act(`/api/dreams/${D.id}/answer`, {choice: b.dataset.v}));
+  } else {
+    c.innerHTML = `<div class="row"><input id="ans" type="text" placeholder="随便说说…"><button id="send" class="primary">发送</button></div>`;
+    bindText();
+  }
+}
+function bindText() {
+  $("send").onclick = () => { const v = $("ans").value.trim(); if (v) act(`/api/dreams/${D.id}/answer`, {text: v}); };
+  $("ans").onkeydown = e => { if (e.key === "Enter" && !e.isComposing) $("send").click(); };
+  $("ans").focus();
+}
+
+function renderMeters() {
+  const r = D.readiness; if (!r) return;
+  const rows = [["relation", "关系"], ["emotion", "情感"], ["behavior", "行为"], ["environment", "环境"]];
+  $("meters").innerHTML = rows.map(([k, l]) => `<span>${l}</span><div class="meter"><b class="${r[k].min_ok ? "ok" : ""}" style="width:${Math.round(r[k].score * 100)}%"></b></div><span class="muted">${r[k].min_ok ? "达标" : "缺"}</span>`).join("")
+    + `<span><b>总分</b></span><div class="meter"><b class="${r.total >= .75 ? "ok" : ""}" style="width:${Math.round(r.total * 100)}%"></b></div><span>${r.total}</span>`;
+  $("btn-build").disabled = !r.can_build || busy;
+  $("btn-stop").disabled = busy;
+  $("ready-hint").textContent = r.can_build ? `已问 ${D.question_count}/8 个问题` : "四项都达到最低要求才能造梦，或者点「就这样吧」让系统补全";
+}
+
+async function act(path, body) {
+  if (busy) return;
+  busy = true; closePop(); renderChat(); renderMeters();
+  try { D = await post(path, body); }
+  catch (e) { alert(e.message); }
+  busy = false;
+  render();
+}
+
+$("btn-build").onclick = () => act(`/api/dreams/${D.id}/build`);
+$("btn-stop").onclick = () => act(`/api/dreams/${D.id}/answer`, {stop: true});
+$("btn-retry").onclick = () => act(`/api/dreams/${D.id}/build`);
+
+// 点任意人物框/人物：随时修改标注
+function openPop(gid, e) {
+  closePop();
+  const g = group(gid);
+  const pop = document.createElement("div");
+  pop.className = "pop"; pop.id = "pop";
+  pop.innerHTML = `<div style="margin-bottom:6px"><b>${gid}</b> ${esc(g.appearance)}<div class="muted">出现 ${g.count} 次，归组把握 ${Math.round(g.confidence * 100)}%</div></div>
+    <input id="pop-name" type="text" placeholder="名字，关系" value="${g.state === "named" && !g.is_self ? esc(g.name + (g.relation ? "，" + g.relation : "")) : ""}">
+    <div class="row" style="margin-top:8px"><button id="pop-ok" class="primary">确定</button><button id="pop-me">这是我</button></div>
+    <div class="row" style="margin-top:6px"><button id="pop-pass">路人</button><button id="pop-excl">排除</button><button id="pop-x">取消</button></div>`;
+  document.body.appendChild(pop);
+  const x = Math.min(e.clientX, innerWidth - 280), y = Math.min(e.clientY + 10, innerHeight - 220);
+  Object.assign(pop.style, {left: Math.max(8, x) + "px", top: Math.max(8, y) + "px"});
+  $("pop-ok").onclick = () => { const v = $("pop-name").value.trim(); if (v) act(`/api/dreams/${D.id}/groups/${gid}`, {action: "name", text: v}); };
+  $("pop-me").onclick = () => act(`/api/dreams/${D.id}/self`, {group_id: gid});
+  $("pop-pass").onclick = () => act(`/api/dreams/${D.id}/groups/${gid}`, {action: "passerby"});
+  $("pop-excl").onclick = () => act(`/api/dreams/${D.id}/groups/${gid}`, {action: "exclude"});
+  $("pop-x").onclick = closePop;
+}
+function closePop() { const p = $("pop"); if (p) p.remove(); }
+
+// ---------- 首映 & 静止 ----------
+function renderReady() {
+  const R = D.result, S = R.story;
+  $("panel-img").src = R.panel_url;
+  $("script").textContent = JSON.stringify(R.script, null, 2);
+  $("spec").textContent = JSON.stringify(R.spec, null, 2);
+  $("mono-chips").innerHTML = (S.monologues || []).map((m, i) => `<button data-i="${i}">${esc(m.name)}</button>`).join("");
+  $("mono-chips").querySelectorAll("button").forEach(b => b.onclick = () => { const m = S.monologues[b.dataset.i]; still(`<b>${esc(m.name)}</b>：${esc(m.text)}`); });
+  $("obj-chips").innerHTML = (S.objects || []).map((o, i) => `<button data-i="${i}">${esc(o.name)}</button>`).join("");
+  $("obj-chips").querySelectorAll("button").forEach(b => b.onclick = () => { const o = S.objects[b.dataset.i]; still(`<b>${esc(o.name)}</b>：${esc(o.detail)}`); });
+  $("memories").innerHTML = (S.memories || []).map(m => `<div><b>${esc(m.name)}</b>：${(m.items || []).map(esc).join("；")}</div>`).join("");
+  playPremiere();
+}
+function still(html) { $("still-bubble").classList.remove("muted"); $("still-bubble").innerHTML = html; }
+
+function playPremiere() {
+  clearTimeout(playTimer);
+  const panels = D.result.story.panels || [], peak = D.result.story.peak;
+  $("progress").innerHTML = panels.map(() => "<i></i>").join("");
+  let i = 0;
+  const step = () => {
+    if (i >= panels.length) {
+      $("caption").innerHTML = `<div class="scene">静止</div><div class="line" style="font-size:16px">时间停在了这一刻。点右边的人物，听听他们在想什么。</div>`;
+      $("caption").classList.remove("peak");
+      return;
+    }
+    const p = panels[i];
+    $("progress").querySelectorAll("i").forEach((el, k) => el.classList.toggle("on", k <= i));
+    $("caption").classList.toggle("peak", i === peak);
+    $("caption").innerHTML = `<div class="scene">${esc(p.scene)}${p.who && p.who.length ? " · " + esc(p.who.join("、")) : ""}</div>
+      <div>${esc(p.caption)}</div>${p.line ? `<div class="line">“${esc(p.line)}”</div>` : ""}`;
+    const dur = i === peak ? 5200 : 3200;
+    i++;
+    playTimer = setTimeout(step, dur);
+  };
+  step();
+}
+$("btn-replay").onclick = () => { $("panel-img").src = D.result.panel_url; playPremiere(); };
+$("btn-bg").onclick = () => {
+  const showingBg = $("panel-img").src.endsWith("background.jpg");
+  $("panel-img").src = showingBg ? D.result.panel_url : D.result.background_url;
+  $("btn-bg").textContent = showingBg ? "看背景" : "看画格";
+};
+
+if (location.hash.length > 1) load(location.hash.slice(1)).catch(() => show("upload"));
+</script>
+</body>
+</html>
