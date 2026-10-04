@@ -8,24 +8,24 @@
 
 ## 需要什么
 
-只需要一个 **Gemini API Key**（Google AI Studio 申请）。视觉识别、对话抽取、写分镜、生图都走它：
+只需要一个 key，二选一：**OpenRouter API Key**（`OPENROUTER_API_KEY`）或 **Gemini API Key**（`GEMINI_API_KEY`，Google AI Studio 申请）。两个都填时优先用 OpenRouter。视觉识别、对话抽取、写分镜、生图都走它：
 
-| 用途 | 默认模型 | 每个梦境大约调用 |
+| 用途 | 默认模型（Gemini 直连 / OpenRouter） | 每个梦境大约调用 |
 | --- | --- | --- |
-| 照片解析（框人、地点、活动、情绪、年代、安全标记） | `gemini-2.5-flash` | 1 次（所有照片一起） |
-| 每轮回答 → 结构化更新 | `gemini-2.5-flash` | 每轮 1 次，约 6–10 次 |
-| 首映分镜 / 心声 / 物件 / 初始记忆 | `gemini-2.5-flash` | 1 次 |
-| 背景（以封面照片为参考，去人、风格化） | `gemini-3.1-flash-image-preview` | 1 次 |
-| 画格（在背景上按外观描述画人物） | `gemini-3.1-flash-image-preview` | 1 次 |
+| 照片解析（框人、地点、活动、情绪、年代、安全标记） | `gemini-2.5-flash` / `google/gemini-2.5-flash` | 1 次（所有照片一起） |
+| 每轮回答 → 结构化更新 | `gemini-2.5-flash` / `google/gemini-2.5-flash` | 每轮 1 次，约 6–10 次 |
+| 首映分镜 / 心声 / 物件 / 初始记忆 | `gemini-2.5-flash` / `google/gemini-2.5-flash` | 1 次 |
+| 背景（以封面照片为参考，去人、风格化） | `gemini-3.1-flash-image-preview` / `google/gemini-2.5-flash-image` | 1 次 |
+| 画格（在背景上按外观描述画人物） | `gemini-3.1-flash-image-preview` / `google/gemini-2.5-flash-image` | 1 次 |
 
-生图模型一般需要开通付费的 key。没有 key 时自动进入**模拟模式**，整条流程用假数据也能点通。
+模型可以用 `DREAM_TEXT_MODEL` / `DREAM_IMAGE_MODEL` 换。生图模型一般需要付费额度。没有 key 时自动进入**模拟模式**，整条流程用假数据也能点通。
 
 ## 运行
 
 ```bash
 cd dream_demo
 pip install -r requirements.txt
-cp .env.example .env        # 填 GEMINI_API_KEY；国内网络再填 HTTPS_PROXY
+cp .env.example .env        # 填 OPENROUTER_API_KEY 或 GEMINI_API_KEY；国内网络再填 HTTPS_PROXY
 uvicorn app:app --port 8765
 # 浏览器打开 http://localhost:8765
 ```

@@ -199,7 +199,7 @@ function show(view) {
 }
 
 api("/api/config").then(c => {
-  $("mode").textContent = c.mock ? "模拟模式（未配置 GEMINI_API_KEY）" : `${c.text_model} · ${c.image_model}`;
+  $("mode").textContent = c.mock ? "模拟模式（未配置 API Key）" : `${c.provider} · ${c.text_model} · ${c.image_model}`;
 });
 
 $("btn-upload").onclick = async () => {

@@ -75,7 +75,7 @@ def index():
 
 @app.get("/api/config")
 def config():
-    return {"mock": llm.MOCK, "text_model": llm.TEXT_MODEL, "image_model": llm.IMAGE_MODEL,
+    return {"mock": llm.MOCK, "provider": llm.PROVIDER, "text_model": llm.TEXT_MODEL, "image_model": llm.IMAGE_MODEL,
             "max_photos": pl.MAX_PHOTOS}
 
 
