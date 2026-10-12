@@ -100,13 +100,14 @@ function render() {
     const links = [
       i.page_url && `<a href="${esc(i.page_url)}" target="_blank" rel="noopener">${i.kind === "preset" ? "Higgsfield 预设页" : "Higgsfield 原帖"}</a>`,
       `<a href="${esc(i.video_url)}" target="_blank" rel="noopener">原视频文件</a>`,
+      (i.archived_r2 || i.archived_local) && `<a href="${esc(i.archived_r2 || i.archived_local)}" download>下载存档</a>`,
       i.author_url && `<a href="${esc(i.author_url)}" target="_blank" rel="noopener">作者主页</a>`,
       i.source_video && `<a href="${esc(i.source_video)}" target="_blank" rel="noopener">参考源视频</a>`,
       ...(i.social_links || []).map(u => `<a href="${esc(u)}" target="_blank" rel="noopener">作者 ${esc(host(u))}</a>`),
       `<a href="${esc(i.found_on)}" target="_blank" rel="noopener">来源页 ${esc(new URL(i.found_on).pathname)}</a>`,
     ].filter(Boolean).join("");
     return `<article class="card">
-      <video src="${esc(i.video_url)}" ${i.thumbnail ? `poster="${esc(i.thumbnail)}"` : ""} muted loop playsinline preload="none"
+      <video src="${esc(i.archived_r2 || i.archived_local || i.video_url)}" ${i.thumbnail ? `poster="${esc(i.thumbnail)}"` : ""} muted loop playsinline preload="none"
              onmouseenter="this.play()" onmouseleave="this.pause()" controls></video>
       <div class="body">
         <div class="top"><div class="title">${esc(a.shot_name || i.title || "未命名")}</div><span class="score ${cls}">${s}</span></div>
@@ -131,7 +132,7 @@ function render() {
         </dl>
         <div class="tags">${(a.tags || []).map(t => `<span>${esc(t)}</span>`).join("")}</div>
         <div class="links">${links}</div>
-        <div class="stats"><span>分析：${esc(a.analyzed_by)}</span></div>
+        <div class="stats"><span>初筛 ${i.prescreen?.score ?? "-"}（${esc(i.prescreen?.by || "")}）</span><span>精析：${esc(a.analyzed_by)}</span></div>
       </div>
     </article>`;
   }).join("");
@@ -140,7 +141,7 @@ function render() {
 async function load() {
   data = await (await fetch("/api/shots")).json();
   $("#meta").textContent = data.generated_at
-    ? `更新于 ${data.generated_at} · 抓到 ${data.total_scraped} 条，分析 ${data.items.length} 条` : "尚无数据";
+    ? `更新于 ${data.generated_at} · 抓到 ${data.total_scraped} 条，入围看片 ${data.items.length} 条${data.cost_usd != null ? " · 花费 $" + data.cost_usd : ""}` : "尚无数据";
   render();
 }
 
