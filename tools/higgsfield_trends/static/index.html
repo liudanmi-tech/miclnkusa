@@ -59,6 +59,11 @@
   <button id="run">开始抓取 + 分析</button>
   <label>分析前 <input id="topn" type="number" value="40" min="5" max="200" style="width:64px"> 条</label>
   <label>最低受众分 <input id="min" type="range" min="0" max="100" value="60"> <b id="minv">60</b></label>
+  <label>类型 <select id="kind">
+    <option value="all">全部</option>
+    <option value="community">社区热门镜头</option>
+    <option value="preset">官方运镜预设</option>
+  </select></label>
   <label>排序 <select id="sort">
     <option value="score">受众匹配度</option>
     <option value="pop">平台热度</option>
@@ -80,7 +85,9 @@ const host = u => { try { return new URL(u).hostname.replace("www.", ""); } catc
 function render() {
   const min = +$("#min").value, mode = $("#sort").value;
   const maxPop = Math.max(1, ...data.items.map(i => i.popularity || 0));
+  const kind = $("#kind").value;
   const items = data.items
+    .filter(i => kind === "all" || i.kind === kind)
     .filter(i => (i.analysis?.audience_score ?? 0) >= min)
     .map(i => ({ ...i, _combo: (i.analysis?.audience_score ?? 0) / 100 * ((i.popularity || 0) / maxPop) }))
     .sort((a, b) => mode === "pop" ? b.popularity - a.popularity
@@ -91,10 +98,11 @@ function render() {
     const a = i.analysis || {}, s = a.audience_score ?? 0;
     const cls = s >= 75 ? "s-hi" : s >= 50 ? "s-mid" : "s-lo";
     const links = [
-      i.page_url && `<a href="${esc(i.page_url)}" target="_blank" rel="noopener">Higgsfield 原帖</a>`,
+      i.page_url && `<a href="${esc(i.page_url)}" target="_blank" rel="noopener">${i.kind === "preset" ? "Higgsfield 预设页" : "Higgsfield 原帖"}</a>`,
       `<a href="${esc(i.video_url)}" target="_blank" rel="noopener">原视频文件</a>`,
+      i.author_url && `<a href="${esc(i.author_url)}" target="_blank" rel="noopener">作者主页</a>`,
       i.source_video && `<a href="${esc(i.source_video)}" target="_blank" rel="noopener">参考源视频</a>`,
-      ...(i.social_links || []).map(u => `<a href="${esc(u)}" target="_blank" rel="noopener">${esc(host(u))}</a>`),
+      ...(i.social_links || []).map(u => `<a href="${esc(u)}" target="_blank" rel="noopener">作者 ${esc(host(u))}</a>`),
       `<a href="${esc(i.found_on)}" target="_blank" rel="noopener">来源页 ${esc(new URL(i.found_on).pathname)}</a>`,
     ].filter(Boolean).join("");
     return `<article class="card">
@@ -105,7 +113,8 @@ function render() {
         <div class="stats">
           ${i.title ? `<span>${esc(i.title.slice(0, 60))}</span>` : ""}
           ${i.author ? `<span>@${esc(i.author)}</span>` : ""}
-          <span>❤ ${fmt(i.likes)}</span><span>▶ ${fmt(i.views)}</span><span>↻ ${fmt(i.uses)}</span>
+          <span>${i.kind === "preset" ? "官方运镜预设 · 热门第 " + (i.feed_rank + 1) : "社区作品"}</span>
+          ${i.kind === "community" ? `<span>▶ ${fmt(i.views)}</span><span>❤ ${fmt(i.likes)}</span>` : ""}
           <span>热度 ${i.popularity}</span>
         </div>
         <div class="reason">${esc(a.audience_reason)}</div>
@@ -117,7 +126,8 @@ function render() {
           ${a.hook ? `<dt>钩子</dt><dd>${esc(a.hook)}</dd>` : ""}
           <dt>AI 做法</dt><dd class="copy">${esc(a.how_to_make_ai)}</dd>
           <dt>实拍复刻</dt><dd class="copy">${esc(a.how_to_make_real)}</dd>
-          ${i.preset ? `<dt>预设</dt><dd>${esc(i.preset)}</dd>` : ""}
+          ${i.preset ? `<dt>${i.kind === "preset" ? "预设" : "模型"}</dt><dd>${esc(i.preset)}${i.params ? " · " + esc(Object.entries(i.params).filter(([, v]) => v !== "" && v != null).map(([k, v]) => k + "=" + v).join(", ")) : ""}</dd>` : ""}
+          ${i.prompt && i.kind === "community" ? `<dt>原 prompt</dt><dd class="copy"><details><summary>展开</summary>${esc(i.prompt)}</details></dd>` : ""}
         </dl>
         <div class="tags">${(a.tags || []).map(t => `<span>${esc(t)}</span>`).join("")}</div>
         <div class="links">${links}</div>
@@ -151,6 +161,7 @@ $("#run").onclick = async () => {
 };
 $("#min").oninput = () => { $("#minv").textContent = $("#min").value; render(); };
 $("#sort").onchange = render;
+$("#kind").onchange = render;
 load(); poll();
 </script>
 </body>

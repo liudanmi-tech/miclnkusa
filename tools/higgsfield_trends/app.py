@@ -31,15 +31,17 @@ def log(msg: str):
 
 class RunRequest(BaseModel):
     urls: list[str] | None = None
-    scrolls: int = 8
-    top_n: int = 40
+    top_n: int = 40         # 社区热门镜头分析前 N 条
+    top_presets: int = 20   # 官方运镜预设分析前 N 个
 
 
 async def _job(req: RunRequest):
     try:
-        items = await scrape(req.urls or DEFAULT_URLS, scrolls=req.scrolls, log=log)
-        log(f"共抓到 {len(items)} 条去重视频，取热度前 {req.top_n} 条做分析")
-        analyzed = await analyze(items, top_n=req.top_n, log=log)
+        items = await scrape(req.urls or DEFAULT_URLS, log=log)
+        community = [i for i in items if i["kind"] == "community"][:req.top_n]
+        presets = [i for i in items if i["kind"] == "preset"][:req.top_presets]
+        log(f"共抓到 {len(items)} 条，分析社区热门 {len(community)} 条 + 官方运镜预设 {len(presets)} 个")
+        analyzed = await analyze(community + presets, top_n=len(community) + len(presets), log=log)
         DATA_FILE.write_text(json.dumps({
             "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
             "sources": req.urls or DEFAULT_URLS,

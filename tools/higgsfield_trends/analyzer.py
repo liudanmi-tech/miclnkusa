@@ -86,6 +86,13 @@ def heuristic(it: dict) -> dict:
 
 
 # ---------- Gemini ----------
+def _meta(it: dict) -> dict:
+    kind = "Higgsfield 官方运镜预设（用户可一键套用）" if it.get("kind") == "preset" else "社区用户作品"
+    return {"类型": kind, "名称": it.get("title"), "创作者 prompt / 描述": it.get("prompt"),
+            "模型/预设": it.get("preset"), "参数": it.get("params"),
+            "播放": it.get("views"), "点赞": it.get("likes")}
+
+
 async def _download(client: httpx.AsyncClient, url: str) -> bytes | None:
     if ".m3u8" in url:
         return None
@@ -105,9 +112,9 @@ async def _download(client: httpx.AsyncClient, url: str) -> bytes | None:
 
 async def _gemini_one(genai_client, http: httpx.AsyncClient, it: dict) -> dict:
     from google.genai import types
-    meta = {k: it.get(k) for k in ("title", "prompt", "preset", "likes", "views", "uses", "found_on")}
+    meta = _meta(it)
     parts = []
-    data = await _download(http, it["video_url"])
+    data = await _download(http, it.get("analysis_video_url") or it["video_url"])
     if data:
         mime = "video/webm" if ".webm" in it["video_url"] else "video/mp4"
         parts.append(types.Part.from_bytes(data=data, mime_type=mime))
@@ -148,8 +155,8 @@ def _parse_json(text: str) -> dict:
 
 
 async def _openrouter_one(http: httpx.AsyncClient, it: dict) -> dict:
-    meta = {k: it.get(k) for k in ("title", "prompt", "preset", "likes", "views", "uses", "found_on")}
-    data = await _download(http, it["video_url"])
+    meta = _meta(it)
+    data = await _download(http, it.get("analysis_video_url") or it["video_url"])
     text = PROMPT + json.dumps(meta, ensure_ascii=False)
 
     async def ask(with_video: bool) -> httpx.Response:
