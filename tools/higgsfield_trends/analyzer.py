@@ -1,16 +1,21 @@
 """
 镜头筛选 + 拍法描述
 
-有 GEMINI_API_KEY：下载视频片段交给 Gemini 看片，按"35 岁以下北美女性"打分并拆解拍法。
-没有 key：用关键词规则打分 + 运镜词典生成描述（粗略，只作兜底）。
+分析引擎（按优先级）：
+1. GEMINI_API_KEY：直连 Gemini 看片
+2. OpenRouter：OPENROUTER_API_KEY 环境变量，或云端环境「网络密钥」自动注入的 Authorization 头
+3. 都不可用：关键词规则打分 + 运镜词典生成描述（粗略，只作兜底）
 """
 import asyncio
+import base64
 import json
 import os
 
 import httpx
 
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "google/gemini-2.5-flash")  # 需支持视频输入
+OPENROUTER_URL = "https://openrouter.ai/api/v1"
 MAX_VIDEO_BYTES = 18 * 1024 * 1024  # inline 上传上限约 20MB
 
 AUDIENCE = "35 岁以下的北美女性（Gen Z + 年轻 Millennial，TikTok / Instagram Reels / Pinterest 重度用户）"
@@ -119,25 +124,83 @@ async def _gemini_one(genai_client, http: httpx.AsyncClient, it: dict) -> dict:
     return out
 
 
+# ---------- OpenRouter ----------
+def _or_headers() -> dict:
+    # 没有环境变量时不带 Authorization，由网络代理按「网络密钥」注入
+    key = os.getenv("OPENROUTER_API_KEY")
+    return {"Authorization": f"Bearer {key}"} if key else {}
+
+
+async def _openrouter_ok(http: httpx.AsyncClient) -> bool:
+    try:
+        r = await http.get(f"{OPENROUTER_URL}/key", headers=_or_headers(), timeout=20)
+        return r.status_code == 200
+    except Exception:
+        return False
+
+
+def _parse_json(text: str) -> dict:
+    text = text.strip()
+    if text.startswith("```"):
+        text = text.strip("`").removeprefix("json").strip()
+    out = json.loads(text[text.find("{"): text.rfind("}") + 1])
+    return out[0] if isinstance(out, list) else out
+
+
+async def _openrouter_one(http: httpx.AsyncClient, it: dict) -> dict:
+    meta = {k: it.get(k) for k in ("title", "prompt", "preset", "likes", "views", "uses", "found_on")}
+    data = await _download(http, it["video_url"])
+    text = PROMPT + json.dumps(meta, ensure_ascii=False)
+
+    async def ask(with_video: bool) -> httpx.Response:
+        content = [{"type": "text", "text": text if with_video else
+                    text + "\n（视频无法提供，请仅根据元数据推断，并在 audience_reason 注明）"}]
+        if with_video:
+            mime = "video/webm" if ".webm" in it["video_url"] else "video/mp4"
+            content.append({"type": "video_url", "video_url": {
+                "url": f"data:{mime};base64,{base64.b64encode(data).decode()}"}})
+        return await http.post(f"{OPENROUTER_URL}/chat/completions", headers=_or_headers(), timeout=180, json={
+            "model": OPENROUTER_MODEL, "temperature": 0.4,
+            "response_format": {"type": "json_object"},
+            "messages": [{"role": "user", "content": content}]})
+
+    used_video = bool(data)
+    r = await ask(used_video)
+    if used_video and r.status_code in (400, 413, 415, 422):  # 模型/路由不接受视频，退回只看元数据
+        used_video = False
+        r = await ask(False)
+    r.raise_for_status()
+    out = _parse_json(r.json()["choices"][0]["message"]["content"])
+    out["audience_score"] = int(out.get("audience_score") or 0)
+    out["analyzed_by"] = f"openrouter:{OPENROUTER_MODEL}{'+video' if used_video else '+metadata'}"
+    return out
+
+
 async def analyze(items: list[dict], top_n: int = 40, concurrency: int = 4, log=print) -> list[dict]:
     targets = items[:top_n]
-    key = os.getenv("GEMINI_API_KEY")
-    if not key:
-        log("[analyze] 未配置 GEMINI_API_KEY，使用规则兜底")
-        for it in targets:
-            it["analysis"] = heuristic(it)
-        return targets
-
-    from google import genai
-    genai_client = genai.Client(api_key=key)
-    sem = asyncio.Semaphore(concurrency)
     async with httpx.AsyncClient(follow_redirects=True) as http:
+        if os.getenv("GEMINI_API_KEY"):
+            from google import genai
+            genai_client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+            one = lambda it: _gemini_one(genai_client, http, it)
+            log(f"[analyze] 引擎：Gemini {GEMINI_MODEL}")
+        elif await _openrouter_ok(http):
+            one = lambda it: _openrouter_one(http, it)
+            log(f"[analyze] 引擎：OpenRouter {OPENROUTER_MODEL}")
+        else:
+            log("[analyze] 没有可用的 Gemini / OpenRouter key，使用规则兜底")
+            for it in targets:
+                it["analysis"] = heuristic(it)
+            return targets
+
+        sem = asyncio.Semaphore(concurrency)
+
         async def run(i, it):
             async with sem:
                 try:
-                    it["analysis"] = await _gemini_one(genai_client, http, it)
+                    it["analysis"] = await one(it)
                 except Exception as e:
-                    log(f"[analyze] #{i} Gemini 失败，改用规则: {e}")
+                    log(f"[analyze] #{i} 模型分析失败，改用规则: {e}")
                     it["analysis"] = heuristic(it)
                 log(f"[analyze] {i + 1}/{len(targets)} 完成")
         await asyncio.gather(*(run(i, it) for i, it in enumerate(targets)))

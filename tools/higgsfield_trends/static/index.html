@@ -136,7 +136,7 @@ async function load() {
 
 async function poll() {
   const s = await (await fetch("/api/status")).json();
-  $("#engine").textContent = s.has_gemini ? "分析引擎：Gemini 看片" : "分析引擎：规则兜底（未配置 GEMINI_API_KEY）";
+  $("#engine").textContent = "分析引擎：" + s.engine;
   $("#run").disabled = s.running;
   $("#run").textContent = s.running ? "运行中…" : "开始抓取 + 分析";
   if (s.logs.length) { $("#log").hidden = false; $("#log pre").textContent = s.logs.join("\n"); $("#log pre").scrollTop = 1e9; }

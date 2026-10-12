@@ -65,7 +65,9 @@ async def run(req: RunRequest):
 
 @app.get("/api/status")
 def status():
-    return {**state, "has_gemini": bool(os.getenv("GEMINI_API_KEY")), "default_urls": DEFAULT_URLS}
+    engine = ("Gemini" if os.getenv("GEMINI_API_KEY")
+              else "OpenRouter" if os.getenv("OPENROUTER_API_KEY") else "OpenRouter（网络密钥）或规则兜底")
+    return {**state, "engine": engine, "default_urls": DEFAULT_URLS}
 
 
 @app.get("/api/shots")

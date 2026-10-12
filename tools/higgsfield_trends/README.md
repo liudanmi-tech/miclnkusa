@@ -9,7 +9,7 @@
 cd tools/higgsfield_trends
 pip install -r requirements.txt
 playwright install chromium          # 或设置 CHROMIUM_PATH 指向本机 Chrome/Chromium
-export GEMINI_API_KEY=...            # 可选；不设则用关键词规则兜底（粗略）
+export OPENROUTER_API_KEY=...        # 或 GEMINI_API_KEY；云端环境可改用「网络密钥」注入；都没有则规则兜底
 uvicorn app:app --port 8100
 ```
 
@@ -27,7 +27,7 @@ uvicorn app:app --port 8100
    - `/ai-influencer`（Trending motions，取自正在爆的视频）
    - `/seedance-2-community`、`/marketing-studio-community`
 2. **热度**：`2·log(点赞) + log(播放) + 1.5·log(使用次数)`，再加上在热门 feed 中的位置分。
-3. **筛选 + 拍法**（`analyzer.py`）：取热度前 N 条，下载视频交给 Gemini 看片，输出受众匹配分（0-100）、理由、镜头名、
+3. **筛选 + 拍法**（`analyzer.py`）：取热度前 N 条，下载视频交给模型看片（Gemini 直连，或 OpenRouter 上的 google/gemini-2.5-flash，可用 OPENROUTER_MODEL 换），输出受众匹配分（0-100）、理由、镜头名、
    运镜、景别、光色、钩子、Higgsfield 做法（含可复制的英文 prompt）和手机实拍复刻方法。
 4. **原视频在哪**：每张卡片会给出
    - Higgsfield 原帖（详情页）
