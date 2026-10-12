@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Higgsfield 镜头雷达</title>
+<style>
+  :root {
+    --bg: #faf8f6; --card: #fff; --text: #1f1d1b; --muted: #6b6560; --line: #e8e3de;
+    --accent: #d6457a; --accent-soft: #fbe6ee; --good: #1f8a5b; --warn: #b7791f; --bad: #b4413c;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #151413; --card: #1f1d1c; --text: #f1ede9; --muted: #a49d96; --line: #34302d;
+            --accent: #f27aa6; --accent-soft: #3a2230; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 14px/1.55 -apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI", sans-serif; }
+  header { padding: 20px 16px 8px; max-width: 1280px; margin: auto; }
+  h1 { margin: 0 0 4px; font-size: 22px; }
+  .sub { color: var(--muted); }
+  .bar { max-width: 1280px; margin: auto; padding: 12px 16px; display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+  .bar label { display: flex; align-items: center; gap: 6px; color: var(--muted); }
+  button { background: var(--accent); color: #fff; border: 0; border-radius: 8px; padding: 8px 16px; font-weight: 600; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: default; }
+  select, input[type=number] { background: var(--card); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; }
+  #log { max-width: 1280px; margin: 0 auto 8px; padding: 0 16px; }
+  #log pre { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 10px; max-height: 160px;
+             overflow: auto; font-size: 12px; margin: 0; white-space: pre-wrap; }
+  main { max-width: 1280px; margin: auto; padding: 8px 16px 40px; display: grid; gap: 16px;
+         grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; display: flex; flex-direction: column; }
+  .card video { width: 100%; aspect-ratio: 4/5; max-height: 440px; object-fit: cover; background: #000; display: block; }
+  .body { padding: 12px 14px 14px; display: flex; flex-direction: column; gap: 8px; }
+  .top { display: flex; justify-content: space-between; gap: 8px; align-items: flex-start; }
+  .title { font-weight: 700; font-size: 15px; }
+  .score { flex: none; font-weight: 800; border-radius: 999px; padding: 2px 10px; font-size: 13px; }
+  .s-hi { background: #e3f4ec; color: var(--good); } .s-mid { background: #fbf0dc; color: var(--warn); } .s-lo { background: #f8e3e2; color: var(--bad); }
+  @media (prefers-color-scheme: dark) { .s-hi { background: #183528; } .s-mid { background: #3a2e18; } .s-lo { background: #3a1e1c; } }
+  .stats { color: var(--muted); font-size: 12px; display: flex; gap: 10px; flex-wrap: wrap; }
+  .reason { background: var(--accent-soft); border-radius: 8px; padding: 6px 10px; font-size: 13px; }
+  dl { margin: 0; display: grid; grid-template-columns: 72px 1fr; gap: 4px 8px; font-size: 13px; }
+  dt { color: var(--muted); } dd { margin: 0; word-break: break-word; }
+  .copy { white-space: pre-wrap; }
+  .links { display: flex; flex-wrap: wrap; gap: 8px; font-size: 13px; }
+  .links a { color: var(--accent); text-decoration: none; border: 1px solid var(--line); border-radius: 6px; padding: 2px 8px; }
+  .tags span { display: inline-block; font-size: 11px; color: var(--muted); border: 1px solid var(--line); border-radius: 4px; padding: 0 6px; margin: 0 4px 4px 0; }
+  .empty { color: var(--muted); padding: 40px 0; grid-column: 1 / -1; text-align: center; }
+  @media (max-width: 420px) { main { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Higgsfield 热门镜头雷达</h1>
+  <div class="sub">目标受众：35 岁以下北美女性 · <span id="meta">尚无数据</span></div>
+</header>
+
+<div class="bar">
+  <button id="run">开始抓取 + 分析</button>
+  <label>分析前 <input id="topn" type="number" value="40" min="5" max="200" style="width:64px"> 条</label>
+  <label>最低受众分 <input id="min" type="range" min="0" max="100" value="60"> <b id="minv">60</b></label>
+  <label>排序 <select id="sort">
+    <option value="score">受众匹配度</option>
+    <option value="pop">平台热度</option>
+    <option value="combo">综合（匹配 × 热度）</option>
+  </select></label>
+  <span id="engine" class="sub"></span>
+</div>
+<div id="log" hidden><pre></pre></div>
+<main id="grid"><div class="empty">点击「开始抓取 + 分析」</div></main>
+
+<script>
+const $ = s => document.querySelector(s);
+let data = { items: [] };
+
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const fmt = n => n >= 1e6 ? (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? (n / 1e3).toFixed(1) + "k" : String(n || 0);
+const host = u => { try { return new URL(u).hostname.replace("www.", ""); } catch { return "link"; } };
+
+function render() {
+  const min = +$("#min").value, mode = $("#sort").value;
+  const maxPop = Math.max(1, ...data.items.map(i => i.popularity || 0));
+  const items = data.items
+    .filter(i => (i.analysis?.audience_score ?? 0) >= min)
+    .map(i => ({ ...i, _combo: (i.analysis?.audience_score ?? 0) / 100 * ((i.popularity || 0) / maxPop) }))
+    .sort((a, b) => mode === "pop" ? b.popularity - a.popularity
+                  : mode === "combo" ? b._combo - a._combo
+                  : (b.analysis?.audience_score ?? 0) - (a.analysis?.audience_score ?? 0));
+  if (!items.length) { $("#grid").innerHTML = `<div class="empty">${data.items.length ? "没有达到该分数的镜头，调低最低受众分试试" : "暂无数据"}</div>`; return; }
+  $("#grid").innerHTML = items.map(i => {
+    const a = i.analysis || {}, s = a.audience_score ?? 0;
+    const cls = s >= 75 ? "s-hi" : s >= 50 ? "s-mid" : "s-lo";
+    const links = [
+      i.page_url && `<a href="${esc(i.page_url)}" target="_blank" rel="noopener">Higgsfield 原帖</a>`,
+      `<a href="${esc(i.video_url)}" target="_blank" rel="noopener">原视频文件</a>`,
+      i.source_video && `<a href="${esc(i.source_video)}" target="_blank" rel="noopener">参考源视频</a>`,
+      ...(i.social_links || []).map(u => `<a href="${esc(u)}" target="_blank" rel="noopener">${esc(host(u))}</a>`),
+      `<a href="${esc(i.found_on)}" target="_blank" rel="noopener">来源页 ${esc(new URL(i.found_on).pathname)}</a>`,
+    ].filter(Boolean).join("");
+    return `<article class="card">
+      <video src="${esc(i.video_url)}" ${i.thumbnail ? `poster="${esc(i.thumbnail)}"` : ""} muted loop playsinline preload="none"
+             onmouseenter="this.play()" onmouseleave="this.pause()" controls></video>
+      <div class="body">
+        <div class="top"><div class="title">${esc(a.shot_name || i.title || "未命名")}</div><span class="score ${cls}">${s}</span></div>
+        <div class="stats">
+          ${i.title ? `<span>${esc(i.title.slice(0, 60))}</span>` : ""}
+          ${i.author ? `<span>@${esc(i.author)}</span>` : ""}
+          <span>❤ ${fmt(i.likes)}</span><span>▶ ${fmt(i.views)}</span><span>↻ ${fmt(i.uses)}</span>
+          <span>热度 ${i.popularity}</span>
+        </div>
+        <div class="reason">${esc(a.audience_reason)}</div>
+        <dl>
+          <dt>运镜</dt><dd>${esc(a.camera_movement)}</dd>
+          ${a.framing_lens ? `<dt>景别/焦段</dt><dd>${esc(a.framing_lens)}</dd>` : ""}
+          ${a.lighting_color ? `<dt>光色</dt><dd>${esc(a.lighting_color)}</dd>` : ""}
+          ${a.subject_action ? `<dt>主体</dt><dd>${esc(a.subject_action)}</dd>` : ""}
+          ${a.hook ? `<dt>钩子</dt><dd>${esc(a.hook)}</dd>` : ""}
+          <dt>AI 做法</dt><dd class="copy">${esc(a.how_to_make_ai)}</dd>
+          <dt>实拍复刻</dt><dd class="copy">${esc(a.how_to_make_real)}</dd>
+          ${i.preset ? `<dt>预设</dt><dd>${esc(i.preset)}</dd>` : ""}
+        </dl>
+        <div class="tags">${(a.tags || []).map(t => `<span>${esc(t)}</span>`).join("")}</div>
+        <div class="links">${links}</div>
+        <div class="stats"><span>分析：${esc(a.analyzed_by)}</span></div>
+      </div>
+    </article>`;
+  }).join("");
+}
+
+async function load() {
+  data = await (await fetch("/api/shots")).json();
+  $("#meta").textContent = data.generated_at
+    ? `更新于 ${data.generated_at} · 抓到 ${data.total_scraped} 条，分析 ${data.items.length} 条` : "尚无数据";
+  render();
+}
+
+async function poll() {
+  const s = await (await fetch("/api/status")).json();
+  $("#engine").textContent = s.has_gemini ? "分析引擎：Gemini 看片" : "分析引擎：规则兜底（未配置 GEMINI_API_KEY）";
+  $("#run").disabled = s.running;
+  $("#run").textContent = s.running ? "运行中…" : "开始抓取 + 分析";
+  if (s.logs.length) { $("#log").hidden = false; $("#log pre").textContent = s.logs.join("\n"); $("#log pre").scrollTop = 1e9; }
+  if (s.running) setTimeout(poll, 2000); else if (s.finished_at) load();
+}
+
+$("#run").onclick = async () => {
+  const r = await fetch("/api/run", { method: "POST", headers: { "Content-Type": "application/json" },
+                                       body: JSON.stringify({ top_n: +$("#topn").value }) });
+  if (!r.ok) alert((await r.json()).detail);
+  poll();
+};
+$("#min").oninput = () => { $("#minv").textContent = $("#min").value; render(); };
+$("#sort").onchange = render;
+load(); poll();
+</script>
+</body>
+</html>
